@@ -118,11 +118,9 @@ class TestMoveAction:
 class TestAttackDamage:
     def test_neutral_damage_applied(self):
         # Squirtle (Water, 80 base) attacks Pikachu (Electric) — neutral 1.0×
-        # Strip item so only the type multiplier is tested.
         state = empty_state()
-        attacker = place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
-        attacker.held_item = Item.NONE
-        target = place(state, PieceType.PIKACHU, Team.BLUE, 3, 4)
+        place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
+        place(state, PieceType.PIKACHU, Team.BLUE, 3, 4)
         [(ns, _)] = apply_move(state, make_move(PieceType.SQUIRTLE, 3, 3, ActionType.ATTACK, 3, 4))
         attacked = ns.board[3][4]
         assert attacked is not None
@@ -130,20 +128,16 @@ class TestAttackDamage:
 
     def test_super_effective_damage(self):
         # Squirtle (Water, 80 base) vs Charmander (Fire) — 2.0× = 160
-        # Strip item so only the type multiplier is tested.
         state = empty_state()
-        attacker = place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
-        attacker.held_item = Item.NONE
-        target = place(state, PieceType.CHARMANDER, Team.BLUE, 3, 4)
+        place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
+        place(state, PieceType.CHARMANDER, Team.BLUE, 3, 4)
         [(ns, _)] = apply_move(state, make_move(PieceType.SQUIRTLE, 3, 3, ActionType.ATTACK, 3, 4))
         assert ns.board[3][4].current_hp == 200 - 160
 
     def test_not_very_effective_damage(self):
         # Squirtle (Water, 80 base) vs Bulbasaur (Grass) — 0.5× = 40
-        # Strip item so only the type multiplier is tested.
         state = empty_state()
-        attacker = place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
-        attacker.held_item = Item.NONE
+        place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
         place(state, PieceType.BULBASAUR, Team.BLUE, 3, 4)
         [(ns, _)] = apply_move(state, make_move(PieceType.SQUIRTLE, 3, 3, ActionType.ATTACK, 3, 4))
         assert ns.board[3][4].current_hp == 200 - 40
@@ -177,11 +171,9 @@ class TestAttackDamage:
 
     def test_mew_slot_0_damage(self):
         # Mew (Psychic, slot 0 = 40 base) vs Pikachu (Electric) — neutral 1.0×
-        # Strip item so only the slot damage is tested.
         state = empty_state()
-        attacker = place(state, PieceType.MEW, Team.RED, 3, 3)
-        attacker.held_item = Item.NONE
-        target = place(state, PieceType.PIKACHU, Team.BLUE, 3, 4)
+        place(state, PieceType.MEW, Team.RED, 3, 3)
+        place(state, PieceType.PIKACHU, Team.BLUE, 3, 4)
         [(ns, _)] = apply_move(state, make_move(PieceType.MEW, 3, 3, ActionType.ATTACK, 3, 4, move_slot=0))
         assert ns.board[3][4].current_hp == 200 - 40  # slot 0 = 40, neutral
 
@@ -194,25 +186,15 @@ class TestAttackDamage:
         # Squirtle KO'd — Mew captures the square
         assert ns.board[3][4].piece_type == PieceType.MEW
 
-    def test_item_boost_increases_damage(self):
-        # Squirtle (Water) with WATERSTONE vs Charmander (Fire): 80 × 2.0 × 1.5 = 240 → KO
+    def test_held_item_does_not_affect_damage(self):
+        # Items are only for evolution — held item must not change damage output.
+        # Squirtle (Water, 80 base) + WATERSTONE vs Charmander (Fire): still 2.0× = 160.
         state = empty_state()
         attacker = place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
-        attacker.held_item = Item.WATERSTONE  # already default, but explicit
-        target = place(state, PieceType.CHARMANDER, Team.BLUE, 3, 4)
+        attacker.held_item = Item.WATERSTONE
+        place(state, PieceType.CHARMANDER, Team.BLUE, 3, 4)
         [(ns, _)] = apply_move(state, make_move(PieceType.SQUIRTLE, 3, 3, ActionType.ATTACK, 3, 4))
-        # 240 > 200 HP → KO; Squirtle occupies the square with its own HP intact
-        assert ns.board[3][4].piece_type == PieceType.SQUIRTLE
-        assert ns.board[3][4].current_hp == PIECE_STATS[PieceType.SQUIRTLE].max_hp
-
-    def test_item_boost_no_effect_wrong_type(self):
-        # Squirtle (Water) with FIRESTONE — item doesn't match Water type, no boost
-        state = empty_state()
-        attacker = place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
-        attacker.held_item = Item.FIRESTONE
-        place(state, PieceType.PIKACHU, Team.BLUE, 3, 4)
-        [(ns, _)] = apply_move(state, make_move(PieceType.SQUIRTLE, 3, 3, ActionType.ATTACK, 3, 4))
-        assert ns.board[3][4].current_hp == 200 - 80  # no boost
+        assert ns.board[3][4].current_hp == 200 - 160
 
     def test_attacker_position_updated_after_capture(self):
         state = empty_state()

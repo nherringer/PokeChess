@@ -14,7 +14,7 @@ import dataclasses
 from typing import Optional
 
 from .state import (
-    GameState, Piece, PieceType, PokemonType, Team, Item,
+    GameState, Piece, PieceType, Team, Item,
     PIECE_STATS, KING_TYPES, MATCHUP, ForesightEffect,
 )
 from .moves import Move, ActionType
@@ -49,16 +49,6 @@ _FORESIGHT_DAMAGE: dict[PieceType, int] = {
     PieceType.MEW:    120,
     PieceType.ESPEON:  80,
 }
-
-# Held item → the PokemonType it boosts (1.5× multiplier on matching attacker type).
-_ITEM_BOOST_TYPE: dict[Item, PokemonType] = {
-    Item.WATERSTONE:   PokemonType.WATER,
-    Item.FIRESTONE:    PokemonType.FIRE,
-    Item.LEAFSTONE:    PokemonType.GRASS,
-    Item.THUNDERSTONE: PokemonType.ELECTRIC,
-    Item.BENTSPOON:    PokemonType.PSYCHIC,
-}
-_ITEM_MULT = 1.5
 
 # Pokeball capture probability (Masterball = 1.0, regular pokeball = 0.5).
 _POKEBALL_CAPTURE_PROB = 0.5
@@ -303,8 +293,5 @@ def _calc_damage(attacker: Piece, target: Piece, move_slot: Optional[int] = None
 
     type_mult = MATCHUP[attacker.pokemon_type][target.pokemon_type]
 
-    item_type = _ITEM_BOOST_TYPE.get(attacker.held_item)
-    item_mult = _ITEM_MULT if item_type == attacker.pokemon_type else 1.0
-
-    raw = base * type_mult * item_mult
+    raw = base * type_mult
     return max(10, int(round(raw / 10)) * 10)
