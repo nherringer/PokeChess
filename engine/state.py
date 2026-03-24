@@ -10,42 +10,38 @@ from __future__ import annotations
 import dataclasses
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Optional
+from typing import NamedTuple, Optional
 
 
 class Team(Enum):
-    RED = auto()   # Pikachu side, moves first
-    BLUE = auto()  # Eevee side, moves second
+    RED = auto()   # moves first
+    BLUE = auto()
 
 
 class PieceType(Enum):
-    # Standard pieces
-    SQUIRTLE  = auto()  # Rook — Water, 200HP, Hydro Pump 100
-    CHARMANDER = auto() # Knight — Fire, 200HP, Fire Blast 100
-    BULBASAUR = auto()  # Bishop — Grass, 200HP, Solar Beam 100
-    MEW       = auto()  # Queen — Psychic, 250HP, 4 moves
-    # Pawns
-    POKEBALL  = auto()  # Pawn — no type, stochastic capture
-    MASTERBALL = auto() # Promoted pawn — 100% capture rate
-    # Red King line
-    PIKACHU   = auto()  # Red King — Electric, 200HP, Thunderbolt 100
-    RAICHU    = auto()  # Evolved Red King — Electric, 250HP, Thunderbolt 100
-    # Blue King line
-    EEVEE     = auto()  # Blue King — Normal, 120HP, Quick Attack 50
-    VAPOREON  = auto()  # Eevee evo — Water, 220HP, Hydro Pump 100
-    FLAREON   = auto()  # Eevee evo — Fire, 220HP, Fire Blast 100
-    LEAFEON   = auto()  # Eevee evo — Grass, 220HP, Solar Beam 100
-    JOLTEON   = auto()  # Eevee evo — Electric, 220HP, Thunderbolt 100
-    ESPEON    = auto()  # Eevee evo — Psychic, 220HP, Foresight 120
+    SQUIRTLE   = auto()  # Rook
+    CHARMANDER = auto()  # Knight
+    BULBASAUR  = auto()  # Bishop
+    MEW        = auto()  # Queen
+    POKEBALL   = auto()
+    MASTERBALL = auto()
+    PIKACHU    = auto()
+    RAICHU     = auto()
+    EEVEE      = auto()
+    VAPOREON   = auto()
+    FLAREON    = auto()
+    LEAFEON    = auto()
+    JOLTEON    = auto()
+    ESPEON     = auto()
 
 
 class Item(Enum):
-    NONE        = auto()
-    WATERSTONE  = auto()  # Held by Squirtle; enables Vaporeon evolution
-    FIRESTONE   = auto()  # Held by Charmander; enables Flareon evolution
-    LEAFSTONE   = auto()  # Held by Bulbasaur; enables Leafeon evolution
-    THUNDERSTONE = auto() # Held by Pikachu; enables Raichu/Jolteon evolution
-    BENTSPOON   = auto()  # Held by Mew; enables Espeon evolution
+    NONE         = auto()
+    WATERSTONE   = auto()
+    FIRESTONE    = auto()
+    LEAFSTONE    = auto()
+    THUNDERSTONE = auto()
+    BENTSPOON    = auto()
 
 
 class PokemonType(Enum):
@@ -71,57 +67,38 @@ MATCHUP: dict[PokemonType, dict[PokemonType, float]] = {
     PokemonType.NONE:     {PokemonType.WATER: 1.0, PokemonType.FIRE: 1.0,  PokemonType.GRASS: 1.0, PokemonType.PSYCHIC: 1.0, PokemonType.ELECTRIC: 1.0, PokemonType.NORMAL: 1.0, PokemonType.NONE: 1.0},
 }
 
-# Per-piece base stats
-PIECE_TYPE: dict[PieceType, PokemonType] = {
-    PieceType.SQUIRTLE:   PokemonType.WATER,
-    PieceType.CHARMANDER: PokemonType.FIRE,
-    PieceType.BULBASAUR:  PokemonType.GRASS,
-    PieceType.MEW:        PokemonType.PSYCHIC,
-    PieceType.POKEBALL:   PokemonType.NONE,
-    PieceType.MASTERBALL: PokemonType.NONE,
-    PieceType.PIKACHU:    PokemonType.ELECTRIC,
-    PieceType.RAICHU:     PokemonType.ELECTRIC,
-    PieceType.EEVEE:      PokemonType.NORMAL,
-    PieceType.VAPOREON:   PokemonType.WATER,
-    PieceType.FLAREON:    PokemonType.FIRE,
-    PieceType.LEAFEON:    PokemonType.GRASS,
-    PieceType.JOLTEON:    PokemonType.ELECTRIC,
-    PieceType.ESPEON:     PokemonType.PSYCHIC,
+
+class PieceStats(NamedTuple):
+    pokemon_type: PokemonType
+    max_hp: int
+    default_item: Item
+
+
+# Single source of truth for all per-type constants.
+PIECE_STATS: dict[PieceType, PieceStats] = {
+    PieceType.SQUIRTLE:   PieceStats(PokemonType.WATER,    200, Item.WATERSTONE),
+    PieceType.CHARMANDER: PieceStats(PokemonType.FIRE,     200, Item.FIRESTONE),
+    PieceType.BULBASAUR:  PieceStats(PokemonType.GRASS,    200, Item.LEAFSTONE),
+    PieceType.MEW:        PieceStats(PokemonType.PSYCHIC,  250, Item.BENTSPOON),
+    PieceType.POKEBALL:   PieceStats(PokemonType.NONE,     0,   Item.NONE),
+    PieceType.MASTERBALL: PieceStats(PokemonType.NONE,     0,   Item.NONE),
+    PieceType.PIKACHU:    PieceStats(PokemonType.ELECTRIC, 200, Item.THUNDERSTONE),
+    PieceType.RAICHU:     PieceStats(PokemonType.ELECTRIC, 250, Item.NONE),
+    PieceType.EEVEE:      PieceStats(PokemonType.NORMAL,   120, Item.NONE),
+    PieceType.VAPOREON:   PieceStats(PokemonType.WATER,    220, Item.NONE),
+    PieceType.FLAREON:    PieceStats(PokemonType.FIRE,     220, Item.NONE),
+    PieceType.LEAFEON:    PieceStats(PokemonType.GRASS,    220, Item.NONE),
+    PieceType.JOLTEON:    PieceStats(PokemonType.ELECTRIC, 220, Item.NONE),
+    PieceType.ESPEON:     PieceStats(PokemonType.PSYCHIC,  220, Item.NONE),
 }
 
-MAX_HP: dict[PieceType, int] = {
-    PieceType.SQUIRTLE:   200,
-    PieceType.CHARMANDER: 200,
-    PieceType.BULBASAUR:  200,
-    PieceType.MEW:        250,
-    PieceType.POKEBALL:   0,    # No HP — capture-only
-    PieceType.MASTERBALL: 0,
-    PieceType.PIKACHU:    200,
-    PieceType.RAICHU:     250,
-    PieceType.EEVEE:      120,
-    PieceType.VAPOREON:   220,
-    PieceType.FLAREON:    220,
-    PieceType.LEAFEON:    220,
-    PieceType.JOLTEON:    220,
-    PieceType.ESPEON:     220,
-}
-
-DEFAULT_HELD_ITEM: dict[PieceType, Item] = {
-    PieceType.SQUIRTLE:   Item.WATERSTONE,
-    PieceType.CHARMANDER: Item.FIRESTONE,
-    PieceType.BULBASAUR:  Item.LEAFSTONE,
-    PieceType.MEW:        Item.BENTSPOON,
-    PieceType.POKEBALL:   Item.NONE,
-    PieceType.MASTERBALL: Item.NONE,
-    PieceType.PIKACHU:    Item.THUNDERSTONE,
-    PieceType.RAICHU:     Item.NONE,
-    PieceType.EEVEE:      Item.NONE,       # Eevee starts with no stone
-    PieceType.VAPOREON:   Item.NONE,
-    PieceType.FLAREON:    Item.NONE,
-    PieceType.LEAFEON:    Item.NONE,
-    PieceType.JOLTEON:    Item.NONE,
-    PieceType.ESPEON:     Item.NONE,
-}
+# Authoritative sets used by Piece.is_king and Piece.is_pawn.
+KING_TYPES: frozenset[PieceType] = frozenset({
+    PieceType.PIKACHU, PieceType.RAICHU,
+    PieceType.EEVEE, PieceType.VAPOREON, PieceType.FLAREON,
+    PieceType.LEAFEON, PieceType.JOLTEON, PieceType.ESPEON,
+})
+PAWN_TYPES: frozenset[PieceType] = frozenset({PieceType.POKEBALL, PieceType.MASTERBALL})
 
 
 @dataclass
@@ -135,44 +112,34 @@ class Piece:
 
     @classmethod
     def create(cls, piece_type: PieceType, team: Team, row: int, col: int) -> Piece:
+        stats = PIECE_STATS[piece_type]
         return cls(
             piece_type=piece_type,
             team=team,
             row=row,
             col=col,
-            current_hp=MAX_HP[piece_type],
-            held_item=DEFAULT_HELD_ITEM[piece_type],
+            current_hp=stats.max_hp,
+            held_item=stats.default_item,
         )
 
     @property
     def max_hp(self) -> int:
-        return MAX_HP[self.piece_type]
+        return PIECE_STATS[self.piece_type].max_hp
 
     @property
     def pokemon_type(self) -> PokemonType:
-        return PIECE_TYPE[self.piece_type]
+        return PIECE_STATS[self.piece_type].pokemon_type
 
     @property
     def is_king(self) -> bool:
-        return self.piece_type in (
-            PieceType.PIKACHU, PieceType.RAICHU,
-            PieceType.EEVEE, PieceType.VAPOREON, PieceType.FLAREON,
-            PieceType.LEAFEON, PieceType.JOLTEON, PieceType.ESPEON,
-        )
+        return self.piece_type in KING_TYPES
 
     @property
     def is_pawn(self) -> bool:
-        return self.piece_type in (PieceType.POKEBALL, PieceType.MASTERBALL)
+        return self.piece_type in PAWN_TYPES
 
     def copy(self) -> Piece:
-        return Piece(
-            piece_type=self.piece_type,
-            team=self.team,
-            row=self.row,
-            col=self.col,
-            current_hp=self.current_hp,
-            held_item=self.held_item,
-        )
+        return dataclasses.replace(self)
 
 
 @dataclass
@@ -181,7 +148,7 @@ class ForesightEffect:
     target_row: int
     target_col: int
     damage: int
-    resolves_on_turn: int   # Turn number on which this fires
+    resolves_on_turn: int
 
 
 @dataclass
@@ -194,16 +161,18 @@ class GameState:
     board: list[list[Optional[Piece]]]
     active_player: Team
     turn_number: int
-    # Per-team pending Foresight: both sides can have one queued simultaneously
-    # (e.g. Red's Mew and Blue's Espeon each use Foresight on consecutive turns).
+    # Per-team: both sides can have a Foresight queued simultaneously
+    # (Red's Mew and Blue's Espeon can each use it on back-to-back turns).
     pending_foresight: dict[Team, Optional[ForesightEffect]]
-
-    # Track whether Mew/Espeon used Foresight last turn (can't use consecutively)
-    foresight_used_last_turn: dict[Team, bool] = field(default_factory=lambda: {Team.RED: False, Team.BLUE: False})
+    # Foresight cannot be used on consecutive turns by the same team.
+    # Stored explicitly because pending_foresight is cleared at resolution,
+    # before the same team's next move decision.
+    foresight_used_last_turn: dict[Team, bool] = field(
+        default_factory=lambda: {Team.RED: False, Team.BLUE: False}
+    )
 
     @classmethod
     def new_game(cls) -> GameState:
-        """Set up the standard starting position."""
         board: list[list[Optional[Piece]]] = [[None] * 8 for _ in range(8)]
         _place_starting_pieces(board)
         return cls(
@@ -217,10 +186,12 @@ class GameState:
         return self.board[row][col]
 
     def all_pieces(self, team: Optional[Team] = None) -> list[Piece]:
-        pieces = [p for row in self.board for p in row if p is not None]
-        if team is not None:
-            pieces = [p for p in pieces if p.team == team]
-        return pieces
+        return [
+            p
+            for row in self.board
+            for p in row
+            if p is not None and (team is None or p.team == team)
+        ]
 
     def copy(self) -> GameState:
         new_board = [[p.copy() if p is not None else None for p in row] for row in self.board]

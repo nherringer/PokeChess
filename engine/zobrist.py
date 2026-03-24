@@ -23,16 +23,12 @@ def build_zobrist_table(seed: int = 42) -> dict:
     """
     Pre-generate random 64-bit integers for all (row, col, piece_type, team,
     hp_bucket, item) combinations. Called once at module load.
-    Implemented in Task #10.
     """
     raise NotImplementedError
 
 
 def hash_state(state: GameState, table: dict) -> int:
-    """
-    Compute the Zobrist hash for a GameState.
-    Implemented in Task #10.
-    """
+    """Compute the Zobrist hash for a GameState."""
     raise NotImplementedError
 
 

@@ -14,8 +14,5 @@ from typing import Optional
 
 
 class TranspositionTable:
-    """
-    Global stats table. Persists across games for inter-game learning.
-    Implemented in Task #10.
-    """
+    """Global stats table. Persists across games for inter-game learning."""
     pass

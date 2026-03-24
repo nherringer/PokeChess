@@ -20,8 +20,5 @@ DEFAULT_C = math.sqrt(2)
 
 
 def ucb1(wins: float, visits: int, parent_visits: int, c: float = DEFAULT_C) -> float:
-    """
-    Compute UCB1 score. Returns inf for unvisited nodes.
-    Implemented in Task #9.
-    """
+    """Compute UCB1 score. Returns inf for unvisited nodes."""
     raise NotImplementedError

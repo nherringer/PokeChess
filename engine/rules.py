@@ -21,7 +21,6 @@ def apply_move(state: GameState, move: Move) -> list[tuple[GameState, float]]:
     """
     Apply move to state. Returns list of (new_state, probability) pairs.
     Deterministic moves return a single pair with probability 1.0.
-    Implemented in Task #6.
     """
     raise NotImplementedError
 
@@ -30,7 +29,6 @@ def is_terminal(state: GameState) -> tuple[bool, Optional[Team]]:
     """
     Check if the game is over.
     Returns (True, winning_team) or (True, None) for draw, or (False, None).
-    Implemented in Task #7.
     """
     raise NotImplementedError
 

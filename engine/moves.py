@@ -46,5 +46,5 @@ class Move:
 
 
 def get_legal_moves(state: GameState) -> list[Move]:
-    """Return all legal moves for the active player. Implemented in Task #3-5."""
+    """Return all legal moves for the active player."""
     raise NotImplementedError
