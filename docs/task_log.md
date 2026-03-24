@@ -267,3 +267,61 @@ Reuses the consecutive-turn guard (`foresight_used_last_turn`) from Mew but limi
 | Espeon Foresight exceeds king range | `test_foresight_targets_only_adjacent` |
 | Espeon Foresight targets friendly | `test_foresight_excludes_friendly_squares` |
 | Espeon has EVOLVE or vice versa | `test_espeon_has_no_evolve` |
+
+---
+
+## Task #6 — Move Execution and Damage Resolution
+
+**67 tests, 67 passed, 0.08s**
+
+---
+
+### Workflow Walkthrough
+
+**Step 1 — Action dispatch**
+
+`apply_move()` is the single entry point. Pokeball captures are pulled out first (the only stochastic action), then all other actions route through `_apply_deterministic()` which dispatches to one handler per `ActionType`.
+
+**Step 2 — Foresight resolution ordering**
+
+Foresight resolves at the *start* of the caster's next turn, before the chosen move is executed. This is encoded as `resolves_on_turn = state.turn_number + 2` (two half-moves ahead) and checked in `_resolve_foresight()` at the top of `apply_move()`. The `foresight_used_last_turn` flag is always reset on entering a turn and only re-set if the player casts Foresight that turn — this enforces the no-consecutive-turns rule from `moves.py`.
+
+**Step 3 — Stochastic Pokeball**
+
+Two independent state copies are built from the *original* state (not from each other), each with foresight resolved and turn advanced. The capture branch calls `_capture()`; the fail branch advances without it. This guarantees the two outcomes are fully independent and that the fail branch is not accidentally mutated by the capture logic.
+
+**Step 4 — Damage formula**
+
+`_calc_damage(attacker, target, move_slot)`:
+1. Base damage: `_BASE_DAMAGE[attacker.piece_type]` or `_MEW_SLOT_DAMAGE[move_slot]`
+2. Type multiplier: `MATCHUP[attacker.pokemon_type][target.pokemon_type]`
+3. Item multiplier: 1.5× if `_ITEM_BOOST_TYPE[held_item] == attacker.pokemon_type`, else 1.0
+4. Round to nearest 10, minimum 10
+
+All base damage values are multiples of 20, ensuring ×0.5 produces exact multiples of 10 and HP granularity is never violated.
+
+**Step 5 — Promotion**
+
+Checked in `_check_promotion()` called by both `_do_move()` and `_capture()` — both paths that move a pawn piece. Only Pokeball (not Masterball) triggers promotion.
+
+**Step 6 — Test bugs caught and fixed**
+
+Five damage tests failed: all placed a Squirtle (default WATERSTONE) or Mew (default BENTSPOON) and expected base damage without item boost. The held item grants 1.5× to the attacker's own type, so all these tests were inadvertently testing both the type multiplier and the item multiplier simultaneously. Fix: strip `held_item = Item.NONE` in tests that isolate type multipliers; keep WATERSTONE in `test_item_boost_increases_damage`. Also fixed a nonsensical HP assertion in that test — after a KO, the attacker (Squirtle, 200 HP) occupies the square, so the correct assertion is that the piece type is SQUIRTLE and HP equals its own max.
+
+---
+
+### What the tests protect going forward
+
+| Risk | Test |
+|---|---|
+| Stochastic pokeball returns wrong count or wrong probabilities | `TestPokeballCapture` (8 tests) |
+| Pikachu / Raichu not immune to Pokeball | `test_pikachu_immune_*`, `test_raichu_also_immune` |
+| Masterball probabilistic instead of guaranteed | `TestMasterballCapture` (2 tests) |
+| Item boost applied to wrong type | `test_item_boost_no_effect_wrong_type` |
+| Foresight resolves on wrong turn or doesn't clear | `test_foresight_resolves_on_correct_turn`, `test_foresight_clears_after_resolution` |
+| Foresight misses when target square vacated | `test_foresight_misses_empty_square` |
+| Promotion triggers for Masterball or wrong row | `TestMoveAction` promotion tests |
+| Terminal condition when any king-type survives | `test_evolved_king_counts` |
+| Both kings gone simultaneously → draw not crash | `test_both_kings_gone_draw` |
+| HP tiebreaker counts all pieces, not just kings | `test_sums_across_all_pieces` |
+
