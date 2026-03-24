@@ -1,4 +1,4 @@
-"""Tests for engine/moves.py — Task #3: standard piece move generation."""
+"""Tests for engine/moves.py — Tasks #3 and #4: standard piece and pawn move generation."""
 
 import pytest
 from engine import GameState, Piece, PieceType, Team, Item
@@ -365,9 +365,8 @@ class TestGetLegalMoves:
         assert (7, 7) in origins
 
     def test_unimplemented_piece_types_skipped_gracefully(self):
-        # Pokeball (Task #4) and Pikachu (Task #5) not yet wired up
+        # Pikachu (Task #5) not yet wired up — should produce no moves without raising
         state = empty_state()
-        place(state, PieceType.POKEBALL, Team.RED, 1, 0)
         place(state, PieceType.PIKACHU, Team.RED, 0, 4)
         assert get_legal_moves(state) == []
 
@@ -382,3 +381,196 @@ class TestGetLegalMoves:
         place(state, PieceType.MEW, Team.RED, 4, 4)
         for m in get_legal_moves(state):
             assert not (m.target_row == 4 and m.target_col == 4)
+
+
+# ---------------------------------------------------------------------------
+# TestPokeballMoves
+# ---------------------------------------------------------------------------
+
+class TestPokeballMoves:
+    # RED forward = +row; BLUE forward = -row
+
+    def test_open_center_move_count_red(self):
+        # RED Pokeball at (3,3): forward 2, right 2, left 2, fwd-diag 2 = 8
+        state = empty_state()
+        place(state, PieceType.POKEBALL, Team.RED, 3, 3)
+        assert len(moves_of_type(get_legal_moves(state), ActionType.MOVE)) == 8
+
+    def test_open_center_move_count_blue(self):
+        # BLUE Pokeball at (4,4): same geometry, forward = -row
+        state = empty_state(active=Team.BLUE)
+        place(state, PieceType.POKEBALL, Team.BLUE, 4, 4)
+        assert len(moves_of_type(get_legal_moves(state), ActionType.MOVE)) == 8
+
+    def test_forward_direction_red(self):
+        # RED moves toward higher rows
+        state = empty_state()
+        place(state, PieceType.POKEBALL, Team.RED, 3, 3)
+        fwd_targets = targets(moves_of_type(get_legal_moves(state), ActionType.MOVE))
+        assert (4, 3) in fwd_targets  # forward 1
+        assert (5, 3) in fwd_targets  # forward 2
+        assert (2, 3) not in fwd_targets  # backward — not allowed
+
+    def test_forward_direction_blue(self):
+        # BLUE moves toward lower rows
+        state = empty_state(active=Team.BLUE)
+        place(state, PieceType.POKEBALL, Team.BLUE, 4, 4)
+        fwd_targets = targets(moves_of_type(get_legal_moves(state), ActionType.MOVE))
+        assert (3, 4) in fwd_targets  # forward 1 for BLUE
+        assert (2, 4) in fwd_targets  # forward 2 for BLUE
+        assert (5, 4) not in fwd_targets  # backward — not allowed
+
+    def test_horizontal_both_directions(self):
+        state = empty_state()
+        place(state, PieceType.POKEBALL, Team.RED, 3, 3)
+        move_targets = targets(moves_of_type(get_legal_moves(state), ActionType.MOVE))
+        assert (3, 4) in move_targets  # right 1
+        assert (3, 5) in move_targets  # right 2
+        assert (3, 2) in move_targets  # left 1
+        assert (3, 1) in move_targets  # left 2
+
+    def test_forward_diagonal_squares(self):
+        state = empty_state()
+        place(state, PieceType.POKEBALL, Team.RED, 3, 3)
+        move_targets = targets(moves_of_type(get_legal_moves(state), ActionType.MOVE))
+        assert (4, 4) in move_targets  # forward-right diagonal
+        assert (4, 2) in move_targets  # forward-left diagonal
+
+    def test_no_backward_diagonal_for_pokeball(self):
+        state = empty_state()
+        place(state, PieceType.POKEBALL, Team.RED, 3, 3)
+        all_tgts = targets(moves_of_type(get_legal_moves(state), ActionType.MOVE))
+        assert (2, 4) not in all_tgts  # backward-right diagonal
+        assert (2, 2) not in all_tgts  # backward-left diagonal
+
+    def test_forward_blocked_at_1_prevents_reaching_2(self):
+        state = empty_state()
+        place(state, PieceType.POKEBALL, Team.RED, 3, 3)
+        place(state, PieceType.SQUIRTLE, Team.RED, 4, 3)  # friendly blocks forward
+        pb_moves = moves_from(get_legal_moves(state), 3, 3)
+        move_targets = targets(moves_of_type(pb_moves, ActionType.MOVE))
+        assert (4, 3) not in move_targets  # friendly square — not movable
+        assert (5, 3) not in move_targets  # can't pass through
+
+    def test_enemy_forward_is_attack_not_move(self):
+        state = empty_state()
+        place(state, PieceType.POKEBALL, Team.RED, 3, 3)
+        place(state, PieceType.SQUIRTLE, Team.BLUE, 4, 3)
+        move_targets = targets(moves_of_type(get_legal_moves(state), ActionType.MOVE))
+        atk_targets = targets(moves_of_type(get_legal_moves(state), ActionType.ATTACK))
+        assert (4, 3) not in move_targets
+        assert (4, 3) in atk_targets
+        assert (5, 3) not in move_targets  # blocked behind enemy
+
+    def test_horizontal_blocked_at_1_prevents_reaching_2(self):
+        state = empty_state()
+        place(state, PieceType.POKEBALL, Team.RED, 3, 3)
+        place(state, PieceType.SQUIRTLE, Team.RED, 3, 4)  # friendly right-1
+        pb_moves = moves_from(get_legal_moves(state), 3, 3)
+        move_targets = targets(moves_of_type(pb_moves, ActionType.MOVE))
+        assert (3, 4) not in move_targets
+        assert (3, 5) not in move_targets  # blocked
+
+    def test_attacks_enemy_on_horizontal(self):
+        state = empty_state()
+        place(state, PieceType.POKEBALL, Team.RED, 3, 3)
+        place(state, PieceType.SQUIRTLE, Team.BLUE, 3, 4)
+        atk = moves_of_type(get_legal_moves(state), ActionType.ATTACK)
+        assert any(m.target_row == 3 and m.target_col == 4 for m in atk)
+
+    def test_edge_column_limits_horizontal(self):
+        # At col 0, can only go right
+        state = empty_state()
+        place(state, PieceType.POKEBALL, Team.RED, 3, 0)
+        move_targets = targets(moves_of_type(get_legal_moves(state), ActionType.MOVE))
+        assert all(c >= 0 for _, c in move_targets)
+        # left moves don't exist
+        assert (3, -1) not in move_targets
+
+    def test_no_moves_off_board(self):
+        state = empty_state()
+        place(state, PieceType.POKEBALL, Team.RED, 0, 0)
+        for m in get_legal_moves(state):
+            assert 0 <= m.target_row < 8 and 0 <= m.target_col < 8
+
+    def test_can_reach_opponents_back_rank(self):
+        # RED pokeball at row 6 can reach row 7
+        state = empty_state()
+        place(state, PieceType.POKEBALL, Team.RED, 6, 3)
+        move_targets = targets(moves_of_type(get_legal_moves(state), ActionType.MOVE))
+        assert (7, 3) in move_targets
+
+    def test_trade_available(self):
+        state = empty_state()
+        place(state, PieceType.POKEBALL, Team.RED, 3, 3)   # Item.NONE
+        place(state, PieceType.SQUIRTLE, Team.RED, 3, 4)   # WATERSTONE
+        trades = moves_of_type(get_legal_moves(state), ActionType.TRADE)
+        assert any(m.target_row == 3 and m.target_col == 4 for m in trades)
+
+
+# ---------------------------------------------------------------------------
+# TestMasterballMoves
+# ---------------------------------------------------------------------------
+
+class TestMasterballMoves:
+    def test_open_center_move_count_red(self):
+        # RED Masterball at (4,4): pokeball's 8 + backward 2 + backward-diag 2 = 12
+        state = empty_state()
+        place(state, PieceType.MASTERBALL, Team.RED, 4, 4)
+        assert len(moves_of_type(get_legal_moves(state), ActionType.MOVE)) == 12
+
+    def test_has_backward_straight(self):
+        state = empty_state()
+        place(state, PieceType.MASTERBALL, Team.RED, 4, 4)
+        move_targets = targets(moves_of_type(get_legal_moves(state), ActionType.MOVE))
+        assert (3, 4) in move_targets  # backward 1
+        assert (2, 4) in move_targets  # backward 2
+
+    def test_has_backward_diagonals(self):
+        state = empty_state()
+        place(state, PieceType.MASTERBALL, Team.RED, 4, 4)
+        move_targets = targets(moves_of_type(get_legal_moves(state), ActionType.MOVE))
+        assert (3, 5) in move_targets  # backward-right diagonal
+        assert (3, 3) in move_targets  # backward-left diagonal
+
+    def test_retains_forward_moves(self):
+        state = empty_state()
+        place(state, PieceType.MASTERBALL, Team.RED, 4, 4)
+        move_targets = targets(moves_of_type(get_legal_moves(state), ActionType.MOVE))
+        assert (5, 4) in move_targets  # forward 1
+        assert (6, 4) in move_targets  # forward 2
+        assert (5, 5) in move_targets  # forward-right diagonal
+        assert (5, 3) in move_targets  # forward-left diagonal
+
+    def test_backward_blocked_at_1_prevents_reaching_2(self):
+        state = empty_state()
+        place(state, PieceType.MASTERBALL, Team.RED, 4, 4)
+        place(state, PieceType.SQUIRTLE, Team.RED, 3, 4)  # friendly backward-1
+        mb_moves = moves_from(get_legal_moves(state), 4, 4)
+        move_targets = targets(moves_of_type(mb_moves, ActionType.MOVE))
+        assert (3, 4) not in move_targets
+        assert (2, 4) not in move_targets  # blocked
+
+    def test_attacks_enemy_backward(self):
+        state = empty_state()
+        place(state, PieceType.MASTERBALL, Team.RED, 4, 4)
+        place(state, PieceType.SQUIRTLE, Team.BLUE, 3, 4)  # enemy backward-1
+        atk = moves_of_type(get_legal_moves(state), ActionType.ATTACK)
+        assert any(m.target_row == 3 and m.target_col == 4 for m in atk)
+        move_targets = targets(moves_of_type(get_legal_moves(state), ActionType.MOVE))
+        assert (2, 4) not in move_targets  # blocked behind enemy
+
+    def test_blue_masterball_backward_toward_high_rows(self):
+        # BLUE forward = -row, so BLUE backward = +row
+        state = empty_state(active=Team.BLUE)
+        place(state, PieceType.MASTERBALL, Team.BLUE, 4, 4)
+        move_targets = targets(moves_of_type(get_legal_moves(state), ActionType.MOVE))
+        assert (3, 4) in move_targets   # BLUE forward
+        assert (5, 4) in move_targets   # BLUE backward
+        assert (6, 4) in move_targets   # BLUE backward 2
+
+    def test_no_moves_off_board(self):
+        state = empty_state()
+        place(state, PieceType.MASTERBALL, Team.RED, 0, 0)
+        for m in get_legal_moves(state):
+            assert 0 <= m.target_row < 8 and 0 <= m.target_col < 8

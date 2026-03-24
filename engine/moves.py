@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional, TYPE_CHECKING
 
-from .state import PieceType
+from .state import PieceType, Team
 
 if TYPE_CHECKING:
     from .state import GameState, Piece
@@ -164,12 +164,86 @@ def _mew_moves(piece: Piece, state: GameState) -> list[Move]:
     return moves
 
 
-# Dispatch table; Tasks #4 and #5 add POKEBALL, MASTERBALL, and king types.
+def _forward(team: Team) -> int:
+    """Row delta for 'forward': +1 for RED (toward row 7), -1 for BLUE (toward row 0)."""
+    return 1 if team == Team.RED else -1
+
+
+def _add_steps(
+    piece: Piece,
+    state: GameState,
+    moves: list,
+    dr: int,
+    dc: int,
+    max_steps: int,
+) -> None:
+    """
+    Append MOVE/ATTACK moves along one direction for up to max_steps squares.
+    Stops at the board edge, a friendly piece (blocked), or after attacking an enemy.
+    """
+    r, c = piece.row + dr, piece.col + dc
+    for _ in range(max_steps):
+        if not _in_bounds(r, c):
+            break
+        occupant = state.board[r][c]
+        if occupant is None:
+            moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
+        elif occupant.team != piece.team:
+            moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
+            break
+        else:
+            break  # friendly blocks
+        r += dr
+        c += dc
+
+
+def _pokeball_moves(piece: Piece, state: GameState) -> list[Move]:
+    """
+    Pokeball movement:
+      - Up to 2 squares forward (own direction)
+      - Up to 2 squares horizontal (left or right)
+      - 1 square forward-diagonal (left and right)
+    All reachable squares can be moved to (if empty) or attacked (if enemy).
+    """
+    moves: list[Move] = []
+    fwd = _forward(piece.team)
+    _add_steps(piece, state, moves, fwd,  0, 2)   # forward
+    _add_steps(piece, state, moves,   0,  1, 2)   # right
+    _add_steps(piece, state, moves,   0, -1, 2)   # left
+    _add_steps(piece, state, moves, fwd,  1, 1)   # forward-right diagonal
+    _add_steps(piece, state, moves, fwd, -1, 1)   # forward-left diagonal
+    moves += _trade_moves(piece, state)
+    return moves
+
+
+def _masterball_moves(piece: Piece, state: GameState) -> list[Move]:
+    """
+    Masterball = Pokeball + backward movement:
+      - Up to 2 squares backward
+      - 1 square backward-diagonal (left and right)
+    """
+    moves: list[Move] = []
+    fwd = _forward(piece.team)
+    _add_steps(piece, state, moves,  fwd,  0, 2)  # forward
+    _add_steps(piece, state, moves,    0,  1, 2)  # right
+    _add_steps(piece, state, moves,    0, -1, 2)  # left
+    _add_steps(piece, state, moves,  fwd,  1, 1)  # forward-right diagonal
+    _add_steps(piece, state, moves,  fwd, -1, 1)  # forward-left diagonal
+    _add_steps(piece, state, moves, -fwd,  0, 2)  # backward
+    _add_steps(piece, state, moves, -fwd,  1, 1)  # backward-right diagonal
+    _add_steps(piece, state, moves, -fwd, -1, 1)  # backward-left diagonal
+    moves += _trade_moves(piece, state)
+    return moves
+
+
+# Dispatch table; Task #5 adds king types.
 _PIECE_MOVE_FN = {
     PieceType.SQUIRTLE:   _squirtle_moves,
     PieceType.CHARMANDER: _charmander_moves,
     PieceType.BULBASAUR:  _bulbasaur_moves,
     PieceType.MEW:        _mew_moves,
+    PieceType.POKEBALL:   _pokeball_moves,
+    PieceType.MASTERBALL: _masterball_moves,
 }
 
 
