@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional, TYPE_CHECKING
 
-from .state import PieceType, Team
+from .state import PieceType, Team, Item
 
 if TYPE_CHECKING:
     from .state import GameState, Piece
@@ -236,7 +236,111 @@ def _masterball_moves(piece: Piece, state: GameState) -> list[Move]:
     return moves
 
 
-# Dispatch table; Task #5 adds king types.
+# --- king and evolution generators ---
+
+# All 8 adjacent squares (king movement range)
+_KING_DIRS = [(dr, dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1) if (dr, dc) != (0, 0)]
+
+# Eevee's held item → move_slot index used in the EVOLVE move
+# move_slot encodes the evolution choice so rules.py knows which PieceType to create.
+#   0=Vaporeon, 1=Flareon, 2=Leafeon, 3=Jolteon, 4=Espeon
+_EEVEE_EVOLUTION_SLOT: dict[Item, int] = {
+    Item.WATERSTONE:   0,  # → Vaporeon
+    Item.FIRESTONE:    1,  # → Flareon
+    Item.LEAFSTONE:    2,  # → Leafeon
+    Item.THUNDERSTONE: 3,  # → Jolteon
+    Item.BENTSPOON:    4,  # → Espeon
+}
+
+
+def _king_standard_moves(piece: Piece, state: GameState) -> list[Move]:
+    """MOVE and ATTACK to all in-bounds adjacent squares."""
+    moves = []
+    for dr, dc in _KING_DIRS:
+        r, c = piece.row + dr, piece.col + dc
+        if not _in_bounds(r, c):
+            continue
+        occupant = state.board[r][c]
+        if occupant is None:
+            moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
+        elif occupant.team != piece.team:
+            moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
+    return moves
+
+
+def _pikachu_moves(piece: Piece, state: GameState) -> list[Move]:
+    moves = _king_standard_moves(piece, state)
+    # Evolve to Raichu: costs a full turn; happens in place
+    moves.append(Move(piece.row, piece.col, ActionType.EVOLVE, piece.row, piece.col))
+    moves += _trade_moves(piece, state)
+    return moves
+
+
+def _raichu_moves(piece: Piece, state: GameState) -> list[Move]:
+    return _king_standard_moves(piece, state) + _trade_moves(piece, state)
+
+
+def _eevee_quick_attacks(piece: Piece, state: GameState) -> list[Move]:
+    """
+    Quick Attack: move to an empty adjacent square, then attack any enemy
+    adjacent (king range) to that destination — all in one turn.
+    target = movement destination; secondary = attack target from new position.
+    """
+    moves = []
+    for dr, dc in _KING_DIRS:
+        dest_r, dest_c = piece.row + dr, piece.col + dc
+        if not _in_bounds(dest_r, dest_c) or state.board[dest_r][dest_c] is not None:
+            continue  # destination must be empty
+        for adr, adc in _KING_DIRS:
+            att_r, att_c = dest_r + adr, dest_c + adc
+            if not _in_bounds(att_r, att_c):
+                continue
+            occupant = state.board[att_r][att_c]
+            if occupant is not None and occupant.team != piece.team:
+                moves.append(Move(
+                    piece.row, piece.col, ActionType.QUICK_ATTACK,
+                    dest_r, dest_c,
+                    secondary_row=att_r, secondary_col=att_c,
+                ))
+    return moves
+
+
+def _eevee_moves(piece: Piece, state: GameState) -> list[Move]:
+    moves = _king_standard_moves(piece, state)
+    moves += _eevee_quick_attacks(piece, state)
+    # Evolve if holding an evolution stone; move_slot encodes which evolution
+    slot = _EEVEE_EVOLUTION_SLOT.get(piece.held_item)
+    if slot is not None:
+        moves.append(Move(
+            piece.row, piece.col, ActionType.EVOLVE,
+            piece.row, piece.col, move_slot=slot,
+        ))
+    moves += _trade_moves(piece, state)
+    return moves
+
+
+def _evolved_eevee_moves(piece: Piece, state: GameState) -> list[Move]:
+    """Vaporeon / Flareon / Leafeon / Jolteon: standard king movement."""
+    return _king_standard_moves(piece, state) + _trade_moves(piece, state)
+
+
+def _espeon_moves(piece: Piece, state: GameState) -> list[Move]:
+    """Espeon: king movement + Foresight targeting any adjacent reachable square."""
+    moves = _king_standard_moves(piece, state)
+    if not state.foresight_used_last_turn[piece.team]:
+        for dr, dc in _KING_DIRS:
+            r, c = piece.row + dr, piece.col + dc
+            if not _in_bounds(r, c):
+                continue
+            occupant = state.board[r][c]
+            # Can foresight any adjacent square not occupied by a friendly
+            if occupant is None or occupant.team != piece.team:
+                moves.append(Move(piece.row, piece.col, ActionType.FORESIGHT, r, c))
+    moves += _trade_moves(piece, state)
+    return moves
+
+
+# Dispatch table (all piece types now covered).
 _PIECE_MOVE_FN = {
     PieceType.SQUIRTLE:   _squirtle_moves,
     PieceType.CHARMANDER: _charmander_moves,
@@ -244,6 +348,14 @@ _PIECE_MOVE_FN = {
     PieceType.MEW:        _mew_moves,
     PieceType.POKEBALL:   _pokeball_moves,
     PieceType.MASTERBALL: _masterball_moves,
+    PieceType.PIKACHU:    _pikachu_moves,
+    PieceType.RAICHU:     _raichu_moves,
+    PieceType.EEVEE:      _eevee_moves,
+    PieceType.VAPOREON:   _evolved_eevee_moves,
+    PieceType.FLAREON:    _evolved_eevee_moves,
+    PieceType.LEAFEON:    _evolved_eevee_moves,
+    PieceType.JOLTEON:    _evolved_eevee_moves,
+    PieceType.ESPEON:     _espeon_moves,
 }
 
 

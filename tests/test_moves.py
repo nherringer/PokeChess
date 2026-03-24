@@ -364,11 +364,21 @@ class TestGetLegalMoves:
         assert (0, 0) in origins
         assert (7, 7) in origins
 
-    def test_unimplemented_piece_types_skipped_gracefully(self):
-        # Pikachu (Task #5) not yet wired up — should produce no moves without raising
+    def test_all_piece_types_handled(self):
+        # Every piece type should generate moves without raising NotImplementedError
         state = empty_state()
-        place(state, PieceType.PIKACHU, Team.RED, 0, 4)
-        assert get_legal_moves(state) == []
+        for col, pt in enumerate([
+            PieceType.SQUIRTLE, PieceType.CHARMANDER, PieceType.BULBASAUR, PieceType.MEW,
+            PieceType.PIKACHU, PieceType.RAICHU, PieceType.POKEBALL, PieceType.MASTERBALL,
+        ]):
+            place(state, pt, Team.RED, 0, col)
+        for col, pt in enumerate([
+            PieceType.EEVEE, PieceType.VAPOREON, PieceType.FLAREON,
+            PieceType.LEAFEON, PieceType.JOLTEON, PieceType.ESPEON,
+        ]):
+            place(state, pt, Team.RED, 1, col)
+        moves = get_legal_moves(state)
+        assert len(moves) > 0  # all types generate at least some moves
 
     def test_move_origin_matches_piece_position(self):
         state = empty_state()
@@ -574,3 +584,251 @@ class TestMasterballMoves:
         place(state, PieceType.MASTERBALL, Team.RED, 0, 0)
         for m in get_legal_moves(state):
             assert 0 <= m.target_row < 8 and 0 <= m.target_col < 8
+
+
+# ---------------------------------------------------------------------------
+# TestKingMoves  (shared movement behaviour for all 8 king types)
+# ---------------------------------------------------------------------------
+
+class TestKingMoves:
+    @pytest.mark.parametrize("pt", [
+        PieceType.PIKACHU, PieceType.RAICHU,
+        PieceType.EEVEE,
+        PieceType.VAPOREON, PieceType.FLAREON,
+        PieceType.LEAFEON, PieceType.JOLTEON, PieceType.ESPEON,
+    ])
+    def test_open_center_move_count(self, pt):
+        # All king types can reach all 8 adjacent squares from the center
+        state = empty_state()
+        place(state, pt, Team.RED, 4, 4)
+        assert len(moves_of_type(get_legal_moves(state), ActionType.MOVE)) == 8
+
+    @pytest.mark.parametrize("pt", [
+        PieceType.PIKACHU, PieceType.RAICHU,
+        PieceType.EEVEE,
+        PieceType.VAPOREON, PieceType.FLAREON,
+        PieceType.LEAFEON, PieceType.JOLTEON, PieceType.ESPEON,
+    ])
+    def test_corner_limits_moves(self, pt):
+        # From (0,0) only 3 adjacent squares are in bounds
+        state = empty_state()
+        place(state, pt, Team.RED, 0, 0)
+        move_count = len(moves_of_type(get_legal_moves(state), ActionType.MOVE))
+        assert move_count == 3
+
+    @pytest.mark.parametrize("pt", [
+        PieceType.PIKACHU, PieceType.RAICHU,
+        PieceType.EEVEE,
+        PieceType.VAPOREON, PieceType.FLAREON,
+        PieceType.LEAFEON, PieceType.JOLTEON, PieceType.ESPEON,
+    ])
+    def test_attacks_adjacent_enemy(self, pt):
+        state = empty_state()
+        place(state, pt, Team.RED, 4, 4)
+        place(state, PieceType.SQUIRTLE, Team.BLUE, 4, 5)
+        atk = moves_of_type(moves_from(get_legal_moves(state), 4, 4), ActionType.ATTACK)
+        assert any(m.target_row == 4 and m.target_col == 5 for m in atk)
+
+    @pytest.mark.parametrize("pt", [
+        PieceType.PIKACHU, PieceType.RAICHU,
+        PieceType.EEVEE,
+        PieceType.VAPOREON, PieceType.FLAREON,
+        PieceType.LEAFEON, PieceType.JOLTEON, PieceType.ESPEON,
+    ])
+    def test_does_not_attack_friendly(self, pt):
+        state = empty_state()
+        place(state, pt, Team.RED, 4, 4)
+        place(state, PieceType.SQUIRTLE, Team.RED, 4, 5)
+        king_moves = moves_from(get_legal_moves(state), 4, 4)
+        # Friendly square must not appear in MOVE or ATTACK targets
+        atk_and_move = moves_of_type(king_moves, ActionType.ATTACK) + moves_of_type(king_moves, ActionType.MOVE)
+        assert (4, 5) not in targets(atk_and_move)
+
+    @pytest.mark.parametrize("pt", [
+        PieceType.PIKACHU, PieceType.RAICHU,
+        PieceType.EEVEE,
+        PieceType.VAPOREON, PieceType.FLAREON,
+        PieceType.LEAFEON, PieceType.JOLTEON, PieceType.ESPEON,
+    ])
+    def test_no_moves_off_board(self, pt):
+        state = empty_state()
+        place(state, pt, Team.RED, 0, 7)
+        for m in moves_from(get_legal_moves(state), 0, 7):
+            assert 0 <= m.target_row < 8 and 0 <= m.target_col < 8
+
+
+# ---------------------------------------------------------------------------
+# TestPikachuMoves
+# ---------------------------------------------------------------------------
+
+class TestPikachuMoves:
+    def test_always_has_evolve(self):
+        state = empty_state()
+        place(state, PieceType.PIKACHU, Team.RED, 4, 4)
+        evos = moves_of_type(get_legal_moves(state), ActionType.EVOLVE)
+        assert len(evos) == 1
+        assert evos[0].target_row == 4 and evos[0].target_col == 4  # in-place
+
+    def test_evolve_move_slot_is_none(self):
+        state = empty_state()
+        place(state, PieceType.PIKACHU, Team.RED, 4, 4)
+        evo = moves_of_type(get_legal_moves(state), ActionType.EVOLVE)[0]
+        assert evo.move_slot is None
+
+    def test_raichu_has_no_evolve(self):
+        state = empty_state()
+        place(state, PieceType.RAICHU, Team.RED, 4, 4)
+        assert moves_of_type(get_legal_moves(state), ActionType.EVOLVE) == []
+
+
+# ---------------------------------------------------------------------------
+# TestEeveeMoves
+# ---------------------------------------------------------------------------
+
+class TestEeveeMoves:
+    def test_no_evolve_without_item(self):
+        # Eevee starts with Item.NONE — no evolution available
+        state = empty_state(active=Team.BLUE)
+        place(state, PieceType.EEVEE, Team.BLUE, 4, 4)
+        assert moves_of_type(get_legal_moves(state), ActionType.EVOLVE) == []
+
+    @pytest.mark.parametrize("item,expected_slot", [
+        (Item.WATERSTONE,   0),
+        (Item.FIRESTONE,    1),
+        (Item.LEAFSTONE,    2),
+        (Item.THUNDERSTONE, 3),
+        (Item.BENTSPOON,    4),
+    ])
+    def test_evolve_slot_matches_item(self, item, expected_slot):
+        state = empty_state(active=Team.BLUE)
+        eevee = place(state, PieceType.EEVEE, Team.BLUE, 4, 4)
+        eevee.held_item = item
+        evos = moves_of_type(get_legal_moves(state), ActionType.EVOLVE)
+        assert len(evos) == 1
+        assert evos[0].move_slot == expected_slot
+        assert evos[0].target_row == 4 and evos[0].target_col == 4  # in-place
+
+    def test_one_evolve_per_item(self):
+        # Holding a stone produces exactly one EVOLVE option
+        state = empty_state(active=Team.BLUE)
+        eevee = place(state, PieceType.EEVEE, Team.BLUE, 4, 4)
+        eevee.held_item = Item.WATERSTONE
+        assert len(moves_of_type(get_legal_moves(state), ActionType.EVOLVE)) == 1
+
+    def test_quick_attack_no_enemies(self):
+        # No enemies on the board → no Quick Attack moves
+        state = empty_state(active=Team.BLUE)
+        place(state, PieceType.EEVEE, Team.BLUE, 4, 4)
+        assert moves_of_type(get_legal_moves(state), ActionType.QUICK_ATTACK) == []
+
+    def test_quick_attack_generated_for_enemy_in_range(self):
+        # Enemy at (4,6) — 2 hops away; Eevee can move to (4,5) then attack (4,6)
+        state = empty_state(active=Team.BLUE)
+        place(state, PieceType.EEVEE, Team.BLUE, 4, 4)
+        place(state, PieceType.SQUIRTLE, Team.RED, 4, 6)
+        qa = moves_of_type(get_legal_moves(state), ActionType.QUICK_ATTACK)
+        assert any(
+            m.target_row == 4 and m.target_col == 5
+            and m.secondary_row == 4 and m.secondary_col == 6
+            for m in qa
+        )
+
+    def test_quick_attack_target_is_empty_destination(self):
+        state = empty_state(active=Team.BLUE)
+        place(state, PieceType.EEVEE, Team.BLUE, 4, 4)
+        place(state, PieceType.SQUIRTLE, Team.RED, 5, 5)
+        for m in moves_of_type(get_legal_moves(state), ActionType.QUICK_ATTACK):
+            dest = state.board[m.target_row][m.target_col]
+            assert dest is None, "Quick Attack destination must be empty"
+
+    def test_quick_attack_secondary_is_enemy(self):
+        state = empty_state(active=Team.BLUE)
+        place(state, PieceType.EEVEE, Team.BLUE, 4, 4)
+        place(state, PieceType.SQUIRTLE, Team.RED, 5, 5)
+        for m in moves_of_type(get_legal_moves(state), ActionType.QUICK_ATTACK):
+            target = state.board[m.secondary_row][m.secondary_col]
+            assert target is not None and target.team != Team.BLUE
+
+    def test_quick_attack_does_not_target_friendly(self):
+        state = empty_state(active=Team.BLUE)
+        place(state, PieceType.EEVEE, Team.BLUE, 4, 4)
+        place(state, PieceType.BULBASAUR, Team.BLUE, 5, 5)  # friendly
+        assert moves_of_type(get_legal_moves(state), ActionType.QUICK_ATTACK) == []
+
+    def test_quick_attack_destination_cannot_be_occupied(self):
+        # Friendly at (4,5) blocks that destination
+        state = empty_state(active=Team.BLUE)
+        place(state, PieceType.EEVEE, Team.BLUE, 4, 4)
+        place(state, PieceType.BULBASAUR, Team.BLUE, 4, 5)   # blocks (4,5)
+        place(state, PieceType.SQUIRTLE, Team.RED, 4, 6)     # enemy
+        qa = moves_of_type(get_legal_moves(state), ActionType.QUICK_ATTACK)
+        # (4,5) occupied → no Quick Attack via (4,5)→(4,6)
+        assert not any(m.target_row == 4 and m.target_col == 5 for m in qa)
+
+    def test_quick_attack_secondary_fields_populated(self):
+        state = empty_state(active=Team.BLUE)
+        place(state, PieceType.EEVEE, Team.BLUE, 4, 4)
+        place(state, PieceType.SQUIRTLE, Team.RED, 5, 5)
+        for m in moves_of_type(get_legal_moves(state), ActionType.QUICK_ATTACK):
+            assert m.secondary_row is not None and m.secondary_col is not None
+
+    def test_standard_moves_and_quick_attack_coexist(self):
+        # Eevee can both MOVE and QUICK_ATTACK — they're not mutually exclusive
+        state = empty_state(active=Team.BLUE)
+        place(state, PieceType.EEVEE, Team.BLUE, 4, 4)
+        place(state, PieceType.SQUIRTLE, Team.RED, 6, 6)
+        all_moves = get_legal_moves(state)
+        assert len(moves_of_type(all_moves, ActionType.MOVE)) > 0
+        assert len(moves_of_type(all_moves, ActionType.QUICK_ATTACK)) > 0
+
+
+# ---------------------------------------------------------------------------
+# TestEspeonMoves
+# ---------------------------------------------------------------------------
+
+class TestEspeonMoves:
+    def test_foresight_targets_adjacent_squares(self):
+        state = empty_state(active=Team.BLUE)
+        place(state, PieceType.ESPEON, Team.BLUE, 4, 4)
+        fs = moves_of_type(get_legal_moves(state), ActionType.FORESIGHT)
+        # All 8 adjacent squares are valid foresight targets on an empty board
+        assert len(fs) == 8
+
+    def test_foresight_targets_only_adjacent(self):
+        state = empty_state(active=Team.BLUE)
+        place(state, PieceType.ESPEON, Team.BLUE, 4, 4)
+        for m in moves_of_type(get_legal_moves(state), ActionType.FORESIGHT):
+            dr = abs(m.target_row - 4)
+            dc = abs(m.target_col - 4)
+            assert max(dr, dc) == 1, "Espeon foresight must target adjacent squares only"
+
+    def test_foresight_blocked_on_consecutive_turns(self):
+        state = empty_state(active=Team.BLUE)
+        state.foresight_used_last_turn[Team.BLUE] = True
+        place(state, PieceType.ESPEON, Team.BLUE, 4, 4)
+        assert moves_of_type(get_legal_moves(state), ActionType.FORESIGHT) == []
+
+    def test_foresight_available_when_not_consecutive(self):
+        state = empty_state(active=Team.BLUE)
+        state.foresight_used_last_turn[Team.BLUE] = False
+        place(state, PieceType.ESPEON, Team.BLUE, 4, 4)
+        assert len(moves_of_type(get_legal_moves(state), ActionType.FORESIGHT)) > 0
+
+    def test_foresight_excludes_friendly_squares(self):
+        state = empty_state(active=Team.BLUE)
+        place(state, PieceType.ESPEON, Team.BLUE, 4, 4)
+        place(state, PieceType.VAPOREON, Team.BLUE, 4, 5)  # friendly adjacent
+        fs_targets = targets(moves_of_type(get_legal_moves(state), ActionType.FORESIGHT))
+        assert (4, 5) not in fs_targets
+
+    def test_foresight_includes_enemy_squares(self):
+        state = empty_state(active=Team.BLUE)
+        place(state, PieceType.ESPEON, Team.BLUE, 4, 4)
+        place(state, PieceType.SQUIRTLE, Team.RED, 4, 5)  # enemy adjacent
+        fs_targets = targets(moves_of_type(get_legal_moves(state), ActionType.FORESIGHT))
+        assert (4, 5) in fs_targets
+
+    def test_espeon_has_no_evolve(self):
+        state = empty_state(active=Team.BLUE)
+        place(state, PieceType.ESPEON, Team.BLUE, 4, 4)
+        assert moves_of_type(get_legal_moves(state), ActionType.EVOLVE) == []
