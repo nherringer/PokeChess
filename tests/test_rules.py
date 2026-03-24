@@ -117,30 +117,31 @@ class TestMoveAction:
 
 class TestAttackDamage:
     def test_neutral_damage_applied(self):
-        # Squirtle (Water, 80 base) attacks Pikachu (Electric) — neutral 1.0×
+        # Squirtle (Water, 100 base) attacks Pikachu (Electric) — neutral 1.0× = 100
         state = empty_state()
         place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
         place(state, PieceType.PIKACHU, Team.BLUE, 3, 4)
         [(ns, _)] = apply_move(state, make_move(PieceType.SQUIRTLE, 3, 3, ActionType.ATTACK, 3, 4))
         attacked = ns.board[3][4]
         assert attacked is not None
-        assert attacked.current_hp == PIECE_STATS[PieceType.PIKACHU].max_hp - 80
+        assert attacked.current_hp == PIECE_STATS[PieceType.PIKACHU].max_hp - 100
 
     def test_super_effective_damage(self):
-        # Squirtle (Water, 80 base) vs Charmander (Fire) — 2.0× = 160
+        # Squirtle (Water, 100 base) vs Charmander (Fire) — 2.0× = 200
         state = empty_state()
         place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
         place(state, PieceType.CHARMANDER, Team.BLUE, 3, 4)
         [(ns, _)] = apply_move(state, make_move(PieceType.SQUIRTLE, 3, 3, ActionType.ATTACK, 3, 4))
-        assert ns.board[3][4].current_hp == 200 - 160
+        # 200 damage = KO; Squirtle captures the square
+        assert ns.board[3][4].piece_type == PieceType.SQUIRTLE
 
     def test_not_very_effective_damage(self):
-        # Squirtle (Water, 80 base) vs Bulbasaur (Grass) — 0.5× = 40
+        # Squirtle (Water, 100 base) vs Bulbasaur (Grass) — 0.5× = 50
         state = empty_state()
         place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
         place(state, PieceType.BULBASAUR, Team.BLUE, 3, 4)
         [(ns, _)] = apply_move(state, make_move(PieceType.SQUIRTLE, 3, 3, ActionType.ATTACK, 3, 4))
-        assert ns.board[3][4].current_hp == 200 - 40
+        assert ns.board[3][4].current_hp == 200 - 50
 
     def test_attacker_stays_when_target_survives(self):
         state = empty_state()
@@ -155,7 +156,7 @@ class TestAttackDamage:
         state = empty_state()
         attacker = place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
         target = place(state, PieceType.CHARMANDER, Team.BLUE, 3, 4)
-        target.current_hp = 80  # will take 160 damage (2× super effective) → KO
+        target.current_hp = 100  # will take 200 damage (2× super effective) → KO
         [(ns, _)] = apply_move(state, make_move(PieceType.SQUIRTLE, 3, 3, ActionType.ATTACK, 3, 4))
         assert ns.board[3][3] is None           # origin vacated
         assert ns.board[3][4] is not None       # target square now has attacker
@@ -170,12 +171,12 @@ class TestAttackDamage:
         assert ns.board[3][4].team == Team.RED  # attacker now there, not the Blue piece
 
     def test_mew_slot_0_damage(self):
-        # Mew (Psychic, slot 0 = 40 base) vs Pikachu (Electric) — neutral 1.0×
+        # Mew (Psychic, slot 0 = 40 base) vs Pikachu (Electric) — neutral 1.0× = 40
         state = empty_state()
         place(state, PieceType.MEW, Team.RED, 3, 3)
         place(state, PieceType.PIKACHU, Team.BLUE, 3, 4)
         [(ns, _)] = apply_move(state, make_move(PieceType.MEW, 3, 3, ActionType.ATTACK, 3, 4, move_slot=0))
-        assert ns.board[3][4].current_hp == 200 - 40  # slot 0 = 40, neutral
+        assert ns.board[3][4].current_hp == 200 - 40
 
     def test_mew_slot_3_oneshots_starter(self):
         # Slot 3 = 200 base, Psychic vs Water = 1.0× → 200 damage = KO
@@ -188,13 +189,14 @@ class TestAttackDamage:
 
     def test_held_item_does_not_affect_damage(self):
         # Items are only for evolution — held item must not change damage output.
-        # Squirtle (Water, 80 base) + WATERSTONE vs Charmander (Fire): still 2.0× = 160.
+        # Squirtle (Water, 100 base) + WATERSTONE vs Charmander (Fire): 2.0× = 200 → KO.
         state = empty_state()
         attacker = place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
         attacker.held_item = Item.WATERSTONE
         place(state, PieceType.CHARMANDER, Team.BLUE, 3, 4)
         [(ns, _)] = apply_move(state, make_move(PieceType.SQUIRTLE, 3, 3, ActionType.ATTACK, 3, 4))
-        assert ns.board[3][4].current_hp == 200 - 160
+        # KO: Squirtle captures the square (same result with or without WATERSTONE)
+        assert ns.board[3][4].piece_type == PieceType.SQUIRTLE
 
     def test_attacker_position_updated_after_capture(self):
         state = empty_state()
@@ -417,19 +419,21 @@ class TestEvolveAction:
         [(ns, _)] = apply_move(state, make_move(PieceType.PIKACHU, 4, 4, ActionType.EVOLVE, 4, 4))
         assert ns.board[4][4].held_item == Item.NONE
 
-    def test_pikachu_hp_capped_at_raichu_max(self):
+    def test_pikachu_full_hp_gains_delta_on_evolve(self):
+        # Pikachu (200 max) → Raichu (250 max): +50 HP gain
         state = empty_state()
         pikachu = place(state, PieceType.PIKACHU, Team.RED, 4, 4)
         pikachu.current_hp = 200  # full HP
         [(ns, _)] = apply_move(state, make_move(PieceType.PIKACHU, 4, 4, ActionType.EVOLVE, 4, 4))
-        assert ns.board[4][4].current_hp == 200  # 200 ≤ 250 (Raichu max)
+        assert ns.board[4][4].current_hp == 250  # 200 + 50 = 250 (at new max)
 
-    def test_pikachu_hp_preserved_after_damage(self):
+    def test_pikachu_damaged_gains_delta_on_evolve(self):
+        # Injured Pikachu at 120 HP gains +50 → 170 HP after evolving
         state = empty_state()
         pikachu = place(state, PieceType.PIKACHU, Team.RED, 4, 4)
         pikachu.current_hp = 120
         [(ns, _)] = apply_move(state, make_move(PieceType.PIKACHU, 4, 4, ActionType.EVOLVE, 4, 4))
-        assert ns.board[4][4].current_hp == 120
+        assert ns.board[4][4].current_hp == 170  # 120 + 50
 
     @pytest.mark.parametrize("item,expected_slot,expected_type", [
         (Item.WATERSTONE,   0, PieceType.VAPOREON),
@@ -588,6 +592,20 @@ class TestHpWinner:
         b.current_hp = 200
         # RED total = 300, BLUE total = 200
         assert hp_winner(state) == Team.RED
+
+    def test_pokeball_counts_as_50(self):
+        state = empty_state()
+        place(state, PieceType.POKEBALL, Team.RED,  1, 0)  # counts 50
+        b = place(state, PieceType.SQUIRTLE, Team.BLUE, 5, 5)
+        b.current_hp = 40  # BLUE = 40, RED = 50 → RED wins
+        assert hp_winner(state) == Team.RED
+
+    def test_masterball_counts_as_200(self):
+        state = empty_state()
+        place(state, PieceType.MASTERBALL, Team.BLUE, 6, 0)  # counts 200
+        r = place(state, PieceType.SQUIRTLE, Team.RED, 1, 0)
+        r.current_hp = 150  # RED = 150, BLUE = 200 → BLUE wins
+        assert hp_winner(state) == Team.BLUE
 
 
 # ---------------------------------------------------------------------------

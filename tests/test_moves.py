@@ -510,12 +510,13 @@ class TestPokeballMoves:
         move_targets = targets(moves_of_type(get_legal_moves(state), ActionType.MOVE))
         assert (7, 3) in move_targets
 
-    def test_trade_available(self):
+    def test_no_trade_for_pokeball(self):
+        # Pokeballs cannot hold items and therefore cannot trade.
         state = empty_state()
-        place(state, PieceType.POKEBALL, Team.RED, 3, 3)   # Item.NONE
+        place(state, PieceType.POKEBALL, Team.RED, 3, 3)
         place(state, PieceType.SQUIRTLE, Team.RED, 3, 4)   # WATERSTONE
-        trades = moves_of_type(get_legal_moves(state), ActionType.TRADE)
-        assert any(m.target_row == 3 and m.target_col == 4 for m in trades)
+        pb_moves = moves_from(get_legal_moves(state), 3, 3)
+        assert moves_of_type(pb_moves, ActionType.TRADE) == []
 
 
 # ---------------------------------------------------------------------------

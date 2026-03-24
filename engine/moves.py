@@ -212,7 +212,6 @@ def _pokeball_moves(piece: Piece, state: GameState) -> list[Move]:
     _add_steps(piece, state, moves,   0, -1, 2)   # left
     _add_steps(piece, state, moves, fwd,  1, 1)   # forward-right diagonal
     _add_steps(piece, state, moves, fwd, -1, 1)   # forward-left diagonal
-    moves += _trade_moves(piece, state)
     return moves
 
 
@@ -232,7 +231,6 @@ def _masterball_moves(piece: Piece, state: GameState) -> list[Move]:
     _add_steps(piece, state, moves, -fwd,  0, 2)  # backward
     _add_steps(piece, state, moves, -fwd,  1, 1)  # backward-right diagonal
     _add_steps(piece, state, moves, -fwd, -1, 1)  # backward-left diagonal
-    moves += _trade_moves(piece, state)
     return moves
 
 

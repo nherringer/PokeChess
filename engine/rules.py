@@ -27,9 +27,9 @@ from .moves import Move, ActionType
 # Base damage per attacker type. All multiples of 20 so that ×0.5 / ×2.0
 # matchup multipliers always produce exact multiples of 10 (matching the HP granularity).
 _BASE_DAMAGE: dict[PieceType, int] = {
-    PieceType.SQUIRTLE:   80,
-    PieceType.CHARMANDER: 60,
-    PieceType.BULBASAUR:  60,
+    PieceType.SQUIRTLE:   100,
+    PieceType.CHARMANDER: 100,
+    PieceType.BULBASAUR:  100,
     PieceType.PIKACHU:    80,
     PieceType.RAICHU:    100,
     PieceType.EEVEE:      40,
@@ -124,13 +124,26 @@ def is_terminal(state: GameState) -> tuple[bool, Optional[Team]]:
     return True, Team.BLUE if not red_alive else Team.RED
 
 
+_PAWN_HP_VALUE: dict[PieceType, int] = {
+    PieceType.POKEBALL:   50,
+    PieceType.MASTERBALL: 200,
+}
+
+
 def hp_winner(state: GameState) -> Optional[Team]:
     """
     Tiebreaker when the rollout depth limit is hit.
-    Compares total current HP across all pieces; returns the leading team or None for a tie.
+    Sums HP across all pieces; Pokeball = 50, Masterball = 200, others = current_hp.
+    Returns the leading team or None for a tie.
     """
-    red_hp  = sum(p.current_hp for p in state.all_pieces(Team.RED))
-    blue_hp = sum(p.current_hp for p in state.all_pieces(Team.BLUE))
+    def _team_hp(team: Team) -> int:
+        return sum(
+            _PAWN_HP_VALUE.get(p.piece_type, p.current_hp)
+            for p in state.all_pieces(team)
+        )
+
+    red_hp  = _team_hp(Team.RED)
+    blue_hp = _team_hp(Team.BLUE)
     if red_hp > blue_hp:
         return Team.RED
     if blue_hp > red_hp:
@@ -232,13 +245,15 @@ def _do_trade(state: GameState, piece: Piece, move: Move) -> None:
 
 def _do_evolve(state: GameState, piece: Piece, move: Move) -> None:
     if piece.piece_type == PieceType.PIKACHU:
+        hp_gain = PIECE_STATS[PieceType.RAICHU].max_hp - PIECE_STATS[PieceType.PIKACHU].max_hp
         piece.piece_type = PieceType.RAICHU
-        piece.current_hp = min(piece.current_hp, PIECE_STATS[PieceType.RAICHU].max_hp)
+        piece.current_hp = min(piece.current_hp + hp_gain, PIECE_STATS[PieceType.RAICHU].max_hp)
         piece.held_item = Item.NONE  # Thunderstone consumed by evolution
     elif piece.piece_type == PieceType.EEVEE:
         evo = _EEVEE_EVOLUTIONS[move.move_slot]
+        hp_gain = PIECE_STATS[evo].max_hp - PIECE_STATS[PieceType.EEVEE].max_hp
         piece.piece_type = evo
-        piece.current_hp = min(piece.current_hp, PIECE_STATS[evo].max_hp)
+        piece.current_hp = min(piece.current_hp + hp_gain, PIECE_STATS[evo].max_hp)
         piece.held_item = Item.NONE  # Evolution stone consumed
 
 
