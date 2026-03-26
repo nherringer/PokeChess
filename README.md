@@ -38,7 +38,7 @@ pip install ipympl
 | **Charmander** | Knight | Fire | 160 | L-shaped jumps; leaps over pieces |
 | **Bulbasaur** | Bishop | Grass | 160 | Slides diagonally |
 | **Pokéball** | Pawn | — | — | 50 % capture chance on attack |
-| **Masterball** | — | — | — | Guaranteed capture; Pokéball promotes here |
+| **Masterball** | Promoted Pawn | — | — | Guaranteed capture; Pokéball promotes here |
 
 ### Key Differences from Standard Chess
 
