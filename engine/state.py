@@ -170,6 +170,9 @@ class GameState:
     foresight_used_last_turn: dict[Team, bool] = field(
         default_factory=lambda: {Team.RED: False, Team.BLUE: False}
     )
+    has_traded: dict[Team, bool] = field(
+        default_factory=lambda: {Team.RED: False, Team.BLUE: False}
+    )
 
     @classmethod
     def new_game(cls) -> GameState:
@@ -204,6 +207,7 @@ class GameState:
                 for team, fx in self.pending_foresight.items()
             },
             foresight_used_last_turn=dict(self.foresight_used_last_turn),
+            has_traded=dict(self.has_traded),
         )
 
 

@@ -16,7 +16,9 @@ import random
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .state import GameState, PieceType, Team, Item
+    from .state import GameState
+
+from .state import PieceType, Team, Item
 
 
 def build_zobrist_table(seed: int = 42) -> dict:
@@ -24,13 +26,61 @@ def build_zobrist_table(seed: int = 42) -> dict:
     Pre-generate random 64-bit integers for all (row, col, piece_type, team,
     hp_bucket, item) combinations. Called once at module load.
     """
-    raise NotImplementedError
+    rng = random.Random(seed)
+
+    def r64() -> int:
+        return rng.getrandbits(64)
+
+    table: dict = {}
+
+    # Per-square piece occupancy: (row, col, piece_type, team, hp_bucket, item)
+    for row in range(8):
+        for col in range(8):
+            for pt in PieceType:
+                for team in Team:
+                    # hp_bucket 0–5 covers 0–250 HP in steps of 50
+                    for hp_bucket in range(6):
+                        for item in Item:
+                            table[('p', row, col, pt, team, hp_bucket, item)] = r64()
+
+    # Active player
+    for team in Team:
+        table[('t', team)] = r64()
+
+    # Pending foresight: (team, target_row, target_col, turns_until_resolution)
+    # turns_away = resolves_on_turn - current_turn_number, clamped to 1–4
+    for team in Team:
+        for row in range(8):
+            for col in range(8):
+                for turns_away in range(1, 5):
+                    table[('f', team, row, col, turns_away)] = r64()
+
+    return table
 
 
 def hash_state(state: GameState, table: dict) -> int:
     """Compute the Zobrist hash for a GameState."""
-    raise NotImplementedError
+    h = 0
+
+    for r in range(8):
+        for c in range(8):
+            p = state.board[r][c]
+            if p is None:
+                continue
+            hp_bucket = p.current_hp // 50
+            h ^= table.get(('p', r, c, p.piece_type, p.team, hp_bucket, p.held_item), 0)
+
+    h ^= table.get(('t', state.active_player), 0)
+
+    for team, fx in state.pending_foresight.items():
+        if fx is None:
+            continue
+        turns_away = fx.resolves_on_turn - state.turn_number
+        if 1 <= turns_away <= 4:
+            h ^= table.get(('f', team, fx.target_row, fx.target_col, turns_away), 0)
+
+    return h
 
 
 # Module-level table, initialized on first import
-ZOBRIST_TABLE: dict = {}
+ZOBRIST_TABLE: dict = build_zobrist_table()

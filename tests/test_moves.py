@@ -220,13 +220,13 @@ class TestMewMoves:
         place(state, PieceType.MEW, Team.RED, 3, 3)
         assert len(moves_of_type(get_legal_moves(state), ActionType.MOVE)) == 27
 
-    def test_attack_generates_four_slots_per_target(self):
+    def test_attack_generates_three_slots_per_target(self):
         state = empty_state()
         place(state, PieceType.MEW, Team.RED, 3, 3)
         place(state, PieceType.SQUIRTLE, Team.BLUE, 3, 6)
         atk = moves_of_type(get_legal_moves(state), ActionType.ATTACK)
-        assert len(atk) == 4
-        assert {m.move_slot for m in atk} == {0, 1, 2, 3}
+        assert len(atk) == 3
+        assert {m.move_slot for m in atk} == {0, 1, 2}
         assert all(m.target_row == 3 and m.target_col == 6 for m in atk)
 
     def test_attack_slots_for_multiple_enemies(self):
@@ -235,7 +235,7 @@ class TestMewMoves:
         place(state, PieceType.SQUIRTLE, Team.BLUE, 3, 6)
         place(state, PieceType.BULBASAUR, Team.BLUE, 5, 5)
         atk = moves_of_type(get_legal_moves(state), ActionType.ATTACK)
-        assert len(atk) == 8  # 4 slots × 2 enemies
+        assert len(atk) == 6  # 3 slots × 2 enemies
 
     def test_foresight_generated_when_available(self):
         state = empty_state()
@@ -276,7 +276,7 @@ class TestMewMoves:
         place(state, PieceType.MEW, Team.RED, 3, 3)
         place(state, PieceType.SQUIRTLE, Team.BLUE, 3, 6)
         for m in moves_of_type(get_legal_moves(state), ActionType.ATTACK):
-            assert m.move_slot in (0, 1, 2, 3)
+            assert m.move_slot in (0, 1, 2)
 
     def test_moves_have_no_move_slot(self):
         state = empty_state()
@@ -593,25 +593,25 @@ class TestMasterballMoves:
 
 class TestKingMoves:
     @pytest.mark.parametrize("pt", [
-        PieceType.PIKACHU, PieceType.RAICHU,
+        PieceType.RAICHU,  # Pikachu excluded: has additional extended-L jumps
         PieceType.EEVEE,
         PieceType.VAPOREON, PieceType.FLAREON,
         PieceType.LEAFEON, PieceType.JOLTEON, PieceType.ESPEON,
     ])
     def test_open_center_move_count(self, pt):
-        # All king types can reach all 8 adjacent squares from the center
+        # All king types (except Pikachu) can reach all 8 adjacent squares from the center
         state = empty_state()
         place(state, pt, Team.RED, 4, 4)
         assert len(moves_of_type(get_legal_moves(state), ActionType.MOVE)) == 8
 
     @pytest.mark.parametrize("pt", [
-        PieceType.PIKACHU, PieceType.RAICHU,
+        PieceType.RAICHU,  # Pikachu excluded: has additional extended-L jumps
         PieceType.EEVEE,
         PieceType.VAPOREON, PieceType.FLAREON,
         PieceType.LEAFEON, PieceType.JOLTEON, PieceType.ESPEON,
     ])
     def test_corner_limits_moves(self, pt):
-        # From (0,0) only 3 adjacent squares are in bounds
+        # From (0,0) only 3 adjacent squares are in bounds (Pikachu excluded — has extra jumps)
         state = empty_state()
         place(state, pt, Team.RED, 0, 0)
         move_count = len(moves_of_type(get_legal_moves(state), ActionType.MOVE))
@@ -833,3 +833,65 @@ class TestEspeonMoves:
         state = empty_state(active=Team.BLUE)
         place(state, PieceType.ESPEON, Team.BLUE, 4, 4)
         assert moves_of_type(get_legal_moves(state), ActionType.EVOLVE) == []
+
+
+# ---------------------------------------------------------------------------
+# TestPikachuExtendedL
+# ---------------------------------------------------------------------------
+
+_EXTENDED_L_OFFSETS = [(3,1),(3,-1),(-3,1),(-3,-1),(1,3),(1,-3),(-1,3),(-1,-3)]
+
+
+class TestPikachuExtendedL:
+    def test_extended_l_moves_on_empty_board_center(self):
+        # Pikachu at (4,4) on empty board: all 8 extended-L squares in bounds
+        state = empty_state()
+        place(state, PieceType.PIKACHU, Team.RED, 4, 4)
+        move_targets = targets(moves_of_type(get_legal_moves(state), ActionType.MOVE))
+        expected = {(4 + dr, 4 + dc) for dr, dc in _EXTENDED_L_OFFSETS
+                    if 0 <= 4 + dr < 8 and 0 <= 4 + dc < 8}
+        assert expected.issubset(move_targets)
+
+    def test_extended_l_all_eight_reachable_from_center(self):
+        state = empty_state()
+        place(state, PieceType.PIKACHU, Team.RED, 4, 4)
+        move_targets = targets(moves_of_type(get_legal_moves(state), ActionType.MOVE))
+        for dr, dc in _EXTENDED_L_OFFSETS:
+            r, c = 4 + dr, 4 + dc
+            assert (r, c) in move_targets, f"Expected extended-L target ({r},{c}) not in MOVE moves"
+
+    def test_extended_l_friendly_excluded(self):
+        # Friendly at an extended-L square must not appear in MOVE or ATTACK
+        state = empty_state()
+        place(state, PieceType.PIKACHU, Team.RED, 4, 4)
+        place(state, PieceType.SQUIRTLE, Team.RED, 7, 5)  # offset (3,1)
+        pika_moves = moves_from(get_legal_moves(state), 4, 4)
+        all_tgts = targets(pika_moves)
+        assert (7, 5) not in all_tgts
+
+    def test_extended_l_enemy_generates_attack(self):
+        state = empty_state()
+        place(state, PieceType.PIKACHU, Team.RED, 4, 4)
+        place(state, PieceType.SQUIRTLE, Team.BLUE, 7, 5)  # offset (3,1)
+        pika_moves = moves_from(get_legal_moves(state), 4, 4)
+        atk_targets = targets(moves_of_type(pika_moves, ActionType.ATTACK))
+        assert (7, 5) in atk_targets
+
+    def test_extended_l_out_of_bounds_excluded(self):
+        # Pikachu at (0,0): offsets (+3,+1),(+1,+3) in bounds; all negative-row/col ones out
+        state = empty_state()
+        place(state, PieceType.PIKACHU, Team.RED, 0, 0)
+        pika_moves = moves_from(get_legal_moves(state), 0, 0)
+        for m in pika_moves:
+            assert 0 <= m.target_row < 8 and 0 <= m.target_col < 8
+
+    def test_extended_l_does_not_interfere_with_standard_king_moves(self):
+        # Standard king move count (8) still present alongside extended-L moves
+        state = empty_state()
+        place(state, PieceType.PIKACHU, Team.RED, 4, 4)
+        move_targets = targets(moves_of_type(get_legal_moves(state), ActionType.MOVE))
+        # Standard king squares
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                if (dr, dc) != (0, 0):
+                    assert (4 + dr, 4 + dc) in move_targets

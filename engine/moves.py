@@ -56,7 +56,8 @@ _KNIGHT_JUMPS = [
     (2, 1), (2, -1), (-2, 1), (-2, -1),
     (1, 2), (1, -2), (-1, 2), (-1, -2),
 ]
-_MEW_SLOTS = (0, 1, 2, 3)
+_PIKACHU_EXTENDED_L = [(3,1),(3,-1),(-3,1),(-3,-1),(1,3),(1,-3),(-1,3),(-1,-3)]
+_MEW_SLOTS = (0, 1, 2)
 
 
 def _in_bounds(row: int, col: int) -> bool:
@@ -96,6 +97,8 @@ def _trade_moves(piece: Piece, state: GameState) -> list[Move]:
     TRADE with any adjacent (including diagonal) friendly piece that holds a different item.
     Both pieces swap their held_item; only makes sense when items differ.
     """
+    if state.has_traded[piece.team]:
+        return []
     moves = []
     for dr in (-1, 0, 1):
         for dc in (-1, 0, 1):
@@ -268,6 +271,16 @@ def _king_standard_moves(piece: Piece, state: GameState) -> list[Move]:
 
 def _pikachu_moves(piece: Piece, state: GameState) -> list[Move]:
     moves = _king_standard_moves(piece, state)
+    # Extended L-shape jumps (3+1) — leaps over pieces
+    for dr, dc in _PIKACHU_EXTENDED_L:
+        r, c = piece.row + dr, piece.col + dc
+        if not _in_bounds(r, c):
+            continue
+        occupant = state.board[r][c]
+        if occupant is None:
+            moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
+        elif occupant.team != piece.team:
+            moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
     # Evolve to Raichu: costs a full turn; happens in place
     moves.append(Move(piece.row, piece.col, ActionType.EVOLVE, piece.row, piece.col))
     moves += _trade_moves(piece, state)

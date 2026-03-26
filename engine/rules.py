@@ -14,7 +14,7 @@ import dataclasses
 from typing import Optional
 
 from .state import (
-    GameState, Piece, PieceType, Team, Item,
+    GameState, Piece, PieceType, PokemonType, Team, Item,
     PIECE_STATS, KING_TYPES, MATCHUP, ForesightEffect,
 )
 from .moves import Move, ActionType
@@ -30,24 +30,30 @@ _BASE_DAMAGE: dict[PieceType, int] = {
     PieceType.SQUIRTLE:   100,
     PieceType.CHARMANDER: 100,
     PieceType.BULBASAUR:  100,
-    PieceType.PIKACHU:    80,
+    PieceType.PIKACHU:   100,
     PieceType.RAICHU:    100,
-    PieceType.EEVEE:      40,
-    PieceType.VAPOREON:   80,
-    PieceType.FLAREON:    80,
-    PieceType.LEAFEON:    80,
-    PieceType.JOLTEON:    80,
+    PieceType.EEVEE:      50,
+    PieceType.VAPOREON:  100,
+    PieceType.FLAREON:   100,
+    PieceType.LEAFEON:   100,
+    PieceType.JOLTEON:   100,
     PieceType.ESPEON:     80,
 }
 
-# Mew's four escalating move slots.
-# Slot 3 = 200 guarantees a one-shot on any 200 HP starter at neutral matchup (Psychic = 1.0×).
-_MEW_SLOT_DAMAGE: dict[int, int] = {0: 40, 1: 80, 2: 120, 3: 200}
+# Mew's three attack slots: Fire Blast / Hydro Pump / Solar Beam (each 100 base).
+# The slot determines which type is used for the matchup calculation, letting Mew
+# pick super-effective (KO) or not-very-effective (non-lethal, Mew stays put).
+# Foresight is Mew's fourth move and is handled via ActionType.FORESIGHT.
+_MEW_SLOT_TYPES: dict[int, PokemonType] = {
+    0: PokemonType.FIRE,   # Fire Blast
+    1: PokemonType.WATER,  # Hydro Pump
+    2: PokemonType.GRASS,  # Solar Beam
+}
 
 # Pre-calculated Foresight damage (applied when the effect resolves, not when cast).
 _FORESIGHT_DAMAGE: dict[PieceType, int] = {
     PieceType.MEW:    120,
-    PieceType.ESPEON:  80,
+    PieceType.ESPEON: 120,
 }
 
 # Pokeball capture probability (Masterball = 1.0, regular pokeball = 0.5).
@@ -61,6 +67,15 @@ _EEVEE_EVOLUTIONS: list[PieceType] = [
     PieceType.JOLTEON,    # slot 3
     PieceType.ESPEON,     # slot 4
 ]
+
+# Item → evolution slot for Eevee auto-evolve on trade.
+_EEVEE_TRADE_SLOTS: dict[Item, int] = {
+    Item.WATERSTONE:   0,
+    Item.FIRESTONE:    1,
+    Item.LEAFSTONE:    2,
+    Item.THUNDERSTONE: 3,
+    Item.BENTSPOON:    4,
+}
 
 # Piece types that are immune to regular Pokeball capture.
 _POKEBALL_IMMUNE: frozenset[PieceType] = frozenset({PieceType.PIKACHU, PieceType.RAICHU})
@@ -90,22 +105,42 @@ def apply_move(state: GameState, move: Move) -> list[tuple[GameState, float]]:
     # --- Pokeball capture: the only stochastic action ---
     if move.action_type == ActionType.ATTACK and piece.piece_type == PieceType.POKEBALL:
         target = new.board[move.target_row][move.target_col]
+        if target is None:
+            # Target was vacated by Foresight resolving this turn — treat as a miss.
+            new.has_traded[new.active_player] = False
+            _advance_turn(new)
+            return [(new, 1.0)]
         if target.piece_type in _POKEBALL_IMMUNE:
             # Immune target — deterministic failure (turn is still consumed).
+            new.has_traded[new.active_player] = False
             _advance_turn(new)
             return [(new, 1.0)]
         # Build a separate fail state (target survives, nothing else changes).
         fail = state.copy()
         _resolve_foresight(fail)
         fail.foresight_used_last_turn[fail.active_player] = False
+        fail.has_traded[fail.active_player] = False
         _advance_turn(fail)
         # Apply capture to the success branch (new).
         _capture(new, piece, move.target_row, move.target_col)
+        new.has_traded[new.active_player] = False
         _advance_turn(new)
         return [(new, _POKEBALL_CAPTURE_PROB), (fail, 1.0 - _POKEBALL_CAPTURE_PROB)]
 
-    # --- All deterministic actions ---
+    # --- TRADE: free action (does not consume turn) unless Eevee auto-evolves ---
+    if move.action_type == ActionType.TRADE:
+        ends_turn = _do_trade(new, piece, move)
+        if ends_turn:
+            new.has_traded[new.active_player] = False
+            _advance_turn(new)
+        else:
+            new.has_traded[new.active_player] = True
+            # Do NOT advance turn; active player gets to make another move
+        return [(new, 1.0)]
+
+    # --- All deterministic actions (non-POKEBALL, non-TRADE) ---
     _apply_deterministic(new, piece, move)
+    new.has_traded[new.active_player] = False
     _advance_turn(new)
     return [(new, 1.0)]
 
@@ -194,8 +229,6 @@ def _apply_deterministic(state: GameState, piece: Piece, move: Move) -> None:
         _do_attack(state, piece, move)
     elif at == ActionType.FORESIGHT:
         _do_foresight(state, piece, move)
-    elif at == ActionType.TRADE:
-        _do_trade(state, piece, move)
     elif at == ActionType.EVOLVE:
         _do_evolve(state, piece, move)
     elif at == ActionType.QUICK_ATTACK:
@@ -238,9 +271,21 @@ def _do_foresight(state: GameState, piece: Piece, move: Move) -> None:
     state.foresight_used_last_turn[state.active_player] = True
 
 
-def _do_trade(state: GameState, piece: Piece, move: Move) -> None:
+def _do_trade(state: GameState, piece: Piece, move: Move) -> bool:
+    """Swap held items. Returns True if the trade ends the turn (Eevee auto-evolve)."""
     target = state.board[move.target_row][move.target_col]
     piece.held_item, target.held_item = target.held_item, piece.held_item
+    # If Eevee received an evolution stone, auto-evolve and end Blue's turn
+    if target.piece_type == PieceType.EEVEE:
+        evo_slot = _EEVEE_TRADE_SLOTS.get(target.held_item)
+        if evo_slot is not None:
+            evo = _EEVEE_EVOLUTIONS[evo_slot]
+            hp_gain = PIECE_STATS[evo].max_hp - PIECE_STATS[PieceType.EEVEE].max_hp
+            target.piece_type = evo
+            target.current_hp = min(target.current_hp + hp_gain, PIECE_STATS[evo].max_hp)
+            target.held_item = Item.NONE  # stone consumed
+            return True  # ends turn
+    return False
 
 
 def _do_evolve(state: GameState, piece: Piece, move: Move) -> None:
@@ -296,17 +341,19 @@ def _calc_damage(attacker: Piece, target: Piece, move_slot: Optional[int] = None
     """
     Compute damage dealt by attacker to target.
 
-    Formula: round(base × type_mult × item_mult) to nearest 10, min 10.
-    - base: from _BASE_DAMAGE or _MEW_SLOT_DAMAGE
-    - type_mult: from MATCHUP[attacker_type][target_type]
-    - item_mult: 1.5 if held item boosts attacker's own type, else 1.0
+    Formula: round(base × type_mult) to nearest 10, min 10.
+    - base: 100 for all named moves; 50 for Eevee Quick Attack; 80 for Espeon direct
+    - type_mult: from MATCHUP[attack_type][target_type]
+    For Mew, move_slot selects the attack's type (0=Fire, 1=Water, 2=Grass).
     """
     if attacker.piece_type == PieceType.MEW:
-        base = _MEW_SLOT_DAMAGE.get(move_slot, _MEW_SLOT_DAMAGE[0])
+        base = 100
+        atk_type = _MEW_SLOT_TYPES.get(move_slot, PokemonType.FIRE)
     else:
         base = _BASE_DAMAGE.get(attacker.piece_type, 60)
+        atk_type = attacker.pokemon_type
 
-    type_mult = MATCHUP[attacker.pokemon_type][target.pokemon_type]
+    type_mult = MATCHUP[atk_type][target.pokemon_type]
 
     raw = base * type_mult
     return max(10, int(round(raw / 10)) * 10)

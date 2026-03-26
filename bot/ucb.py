@@ -9,8 +9,6 @@ C is the exploration constant (default sqrt(2)).
 
 Unvisited nodes return infinity to ensure they are always explored
 before revisiting any already-visited node.
-
-Implemented in Task #9.
 """
 
 from __future__ import annotations
@@ -21,4 +19,6 @@ DEFAULT_C = math.sqrt(2)
 
 def ucb1(wins: float, visits: int, parent_visits: int, c: float = DEFAULT_C) -> float:
     """Compute UCB1 score. Returns inf for unvisited nodes."""
-    raise NotImplementedError
+    if visits == 0:
+        return float('inf')
+    return wins / visits + c * math.sqrt(math.log(parent_visits) / visits)

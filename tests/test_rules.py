@@ -170,22 +170,46 @@ class TestAttackDamage:
         [(ns, _)] = apply_move(state, make_move(PieceType.SQUIRTLE, 3, 3, ActionType.ATTACK, 3, 4))
         assert ns.board[3][4].team == Team.RED  # attacker now there, not the Blue piece
 
-    def test_mew_slot_0_damage(self):
-        # Mew (Psychic, slot 0 = 40 base) vs Pikachu (Electric) — neutral 1.0× = 40
+    def test_mew_slot_0_fire_blast_neutral(self):
+        # Mew slot 0 = Fire Blast (FIRE, 100 base) vs Pikachu (Electric) — neutral 1.0× = 100
         state = empty_state()
         place(state, PieceType.MEW, Team.RED, 3, 3)
         place(state, PieceType.PIKACHU, Team.BLUE, 3, 4)
         [(ns, _)] = apply_move(state, make_move(PieceType.MEW, 3, 3, ActionType.ATTACK, 3, 4, move_slot=0))
-        assert ns.board[3][4].current_hp == 200 - 40
+        assert ns.board[3][4].current_hp == 200 - 100
 
-    def test_mew_slot_3_oneshots_starter(self):
-        # Slot 3 = 200 base, Psychic vs Water = 1.0× → 200 damage = KO
+    def test_mew_slot_0_fire_blast_supereffective(self):
+        # Mew Fire Blast (FIRE, 100 base) vs Bulbasaur (Grass) — 2.0× = 200 → KO
+        state = empty_state()
+        place(state, PieceType.MEW, Team.RED, 3, 3)
+        place(state, PieceType.BULBASAUR, Team.BLUE, 3, 4)
+        [(ns, _)] = apply_move(state, make_move(PieceType.MEW, 3, 3, ActionType.ATTACK, 3, 4, move_slot=0))
+        assert ns.board[3][4].piece_type == PieceType.MEW
+
+    def test_mew_slot_1_hydro_pump_supereffective(self):
+        # Mew Hydro Pump (WATER, 100 base) vs Charmander (Fire) — 2.0× = 200 → KO
+        state = empty_state()
+        place(state, PieceType.MEW, Team.RED, 3, 3)
+        place(state, PieceType.CHARMANDER, Team.BLUE, 3, 4)
+        [(ns, _)] = apply_move(state, make_move(PieceType.MEW, 3, 3, ActionType.ATTACK, 3, 4, move_slot=1))
+        assert ns.board[3][4].piece_type == PieceType.MEW
+
+    def test_mew_slot_2_solar_beam_supereffective(self):
+        # Mew Solar Beam (GRASS, 100 base) vs Squirtle (Water) — 2.0× = 200 → KO
         state = empty_state()
         place(state, PieceType.MEW, Team.RED, 3, 3)
         place(state, PieceType.SQUIRTLE, Team.BLUE, 3, 4)
-        [(ns, _)] = apply_move(state, make_move(PieceType.MEW, 3, 3, ActionType.ATTACK, 3, 4, move_slot=3))
-        # Squirtle KO'd — Mew captures the square
+        [(ns, _)] = apply_move(state, make_move(PieceType.MEW, 3, 3, ActionType.ATTACK, 3, 4, move_slot=2))
         assert ns.board[3][4].piece_type == PieceType.MEW
+
+    def test_mew_nonlethal_stays_put(self):
+        # Mew Fire Blast (FIRE, 100 base) vs Squirtle (Water) — 0.5× = 50, no KO → Mew stays
+        state = empty_state()
+        place(state, PieceType.MEW, Team.RED, 3, 3)
+        place(state, PieceType.SQUIRTLE, Team.BLUE, 3, 4)
+        [(ns, _)] = apply_move(state, make_move(PieceType.MEW, 3, 3, ActionType.ATTACK, 3, 4, move_slot=0))
+        assert ns.board[3][3].piece_type == PieceType.MEW  # stayed in place
+        assert ns.board[3][4].current_hp == 200 - 50
 
     def test_held_item_does_not_affect_damage(self):
         # Items are only for evolution — held item must not change damage output.
@@ -401,6 +425,34 @@ class TestTradeAction:
         assert ns.board[3][3] is not None
         assert ns.board[3][4] is not None
 
+    def test_trade_does_not_advance_turn(self):
+        # Regular TRADE is a free action — active player stays the same
+        state = empty_state(active=Team.RED)
+        place(state, PieceType.SQUIRTLE,   Team.RED, 3, 3)  # WATERSTONE
+        place(state, PieceType.CHARMANDER, Team.RED, 3, 4)  # FIRESTONE
+        [(ns, _)] = apply_move(state, make_move(PieceType.SQUIRTLE, 3, 3, ActionType.TRADE, 3, 4))
+        assert ns.active_player == Team.RED
+
+    def test_trade_sets_has_traded_flag(self):
+        state = empty_state(active=Team.RED)
+        place(state, PieceType.SQUIRTLE,   Team.RED, 3, 3)  # WATERSTONE
+        place(state, PieceType.CHARMANDER, Team.RED, 3, 4)  # FIRESTONE
+        [(ns, _)] = apply_move(state, make_move(PieceType.SQUIRTLE, 3, 3, ActionType.TRADE, 3, 4))
+        assert ns.has_traded[Team.RED] is True
+
+    def test_eevee_trade_auto_evolves_and_advances_turn(self):
+        # Trading a Waterstone to Eevee triggers auto-evolution and ends the turn
+        state = empty_state(active=Team.BLUE)
+        squirtle = place(state, PieceType.SQUIRTLE, Team.BLUE, 3, 3)  # WATERSTONE
+        eevee    = place(state, PieceType.EEVEE,    Team.BLUE, 3, 4)  # NONE
+        [(ns, _)] = apply_move(state, make_move(PieceType.SQUIRTLE, 3, 3, ActionType.TRADE, 3, 4))
+        # Eevee should have evolved to Vaporeon
+        assert ns.board[3][4].piece_type == PieceType.VAPOREON
+        # Stone consumed
+        assert ns.board[3][4].held_item == Item.NONE
+        # Turn should have advanced
+        assert ns.active_player == Team.RED
+
 
 # ---------------------------------------------------------------------------
 # TestEvolveAction
@@ -490,14 +542,14 @@ class TestQuickAttack:
         move = Move(4, 4, ActionType.QUICK_ATTACK, 4, 5,
                     secondary_row=5, secondary_col=5)
         [(ns, _)] = apply_move(state, move)
-        # Eevee (Normal, 40 base) vs Squirtle (Water) = 1.0× → 40 damage
-        assert ns.board[5][5].current_hp == 200 - 40
+        # Eevee (Normal, 50 base) vs Squirtle (Water) = 1.0× → 50 damage
+        assert ns.board[5][5].current_hp == 200 - 50
 
     def test_quick_attack_ko_eevee_captures(self):
         state = empty_state(active=Team.BLUE)
         place(state, PieceType.EEVEE, Team.BLUE, 4, 4)
         target = place(state, PieceType.SQUIRTLE, Team.RED, 5, 5)
-        target.current_hp = 10  # will be KO'd by 40 damage
+        target.current_hp = 10  # will be KO'd by 50 base damage
         move = Move(4, 4, ActionType.QUICK_ATTACK, 4, 5,
                     secondary_row=5, secondary_col=5)
         [(ns, _)] = apply_move(state, move)
