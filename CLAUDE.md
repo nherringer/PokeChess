@@ -17,6 +17,10 @@ pytest tests/test_moves.py
 
 # Run a single test
 pytest tests/test_moves.py::test_name -v
+
+# Win-rate benchmark (bot vs random, bot vs bot)
+python scripts/benchmark.py                        # 20 games, 0.5s/move
+python scripts/benchmark.py --budget 1.0 --games 50   # slower, more rigorous
 ```
 
 No build step required for Python. C++ extension (cpp/) is added in a later phase via pybind11.
@@ -37,6 +41,7 @@ bot/        MCTS bot — depends on engine, no frontend coupling
 
 cpp/        C++ port of engine hot loop (phase 3, pybind11 bridge)
 tests/      pytest — unit tests per module
+scripts/    Standalone utilities (benchmark.py for win-rate validation)
 docs/       Game design PDFs (rules, piece movement diagrams, board sheets)
 ```
 
