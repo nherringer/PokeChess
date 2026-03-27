@@ -1,0 +1,1091 @@
+#!/usr/bin/env python3
+"""
+PokeChess — Play against the MCTS bot.
+
+Usage:
+    python pokechess_ui.py
+    python pokechess_ui.py --budget 2.0
+"""
+from __future__ import annotations
+import os, sys, threading, random, time, argparse
+from typing import Optional, List, Tuple, Dict
+
+import pygame
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from engine.state import GameState, Team, PieceType, Item, PIECE_STATS
+from engine.moves import get_legal_moves, Move, ActionType
+from engine.rules import apply_move, is_terminal, hp_winner
+from bot.mcts import MCTS
+from bot.transposition import TranspositionTable
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Layout
+# ──────────────────────────────────────────────────────────────────────────────
+WIN_W, WIN_H = 1140, 740
+BOARD_X, BOARD_Y = 20, 70
+CELL = 78
+SPRITE_PX = 60
+PANEL_X = BOARD_X + 8 * CELL + 20   # 658
+PANEL_W = WIN_W - PANEL_X - 10      # ~472
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Palette
+# ──────────────────────────────────────────────────────────────────────────────
+BG         = (18, 20, 30)
+LIGHT_SQ   = (235, 235, 208)
+DARK_SQ    = (110, 143, 82)
+HL_SELECT  = (100, 160, 255)
+HL_MOVE    = (245, 225, 40)
+HL_ATTACK  = (245, 90,  25)
+HL_FORE    = (50,  215, 250)
+HL_ALPHA   = 145
+
+C_WHITE    = (232, 232, 232)
+C_DIM      = (140, 140, 150)
+C_RED      = (215, 55,  55)
+C_BLUE     = (60,  115, 225)
+C_GREEN    = (65,  195, 80)
+C_YELLOW   = (238, 200, 48)
+C_ORANGE   = (238, 140, 28)
+C_CYAN     = (50,  215, 235)
+C_PANEL    = (25,  27,  38)
+C_CARD     = (35,  38,  52)
+C_DIVIDER  = (48,  52,  68)
+C_BTN      = (45,  48,  64)
+C_BTN_HOV  = (60,  64,  82)
+C_BTN_ACT  = (72, 102, 192)
+C_BTN_WARN = (175, 55, 50)
+C_BTN_WH   = (215, 75, 65)
+
+SPRITE_DIR = os.path.join(os.path.dirname(__file__), 'demo', 'sprites')
+
+SPRITE_FILES = {
+    PieceType.BULBASAUR:  '1.png',
+    PieceType.CHARMANDER: '4.png',
+    PieceType.SQUIRTLE:   '7.png',
+    PieceType.PIKACHU:    '25.png',
+    PieceType.RAICHU:     '26.png',
+    PieceType.EEVEE:      '133.png',
+    PieceType.VAPOREON:   '134.png',
+    PieceType.JOLTEON:    '135.png',
+    PieceType.FLAREON:    '136.png',
+    PieceType.MEW:        '151.png',
+    PieceType.ESPEON:     '196.png',
+    PieceType.LEAFEON:    '470.png',
+}
+
+PIECE_LABEL = {
+    PieceType.BULBASAUR:  'Bulbasaur',
+    PieceType.CHARMANDER: 'Charmander',
+    PieceType.SQUIRTLE:   'Squirtle',
+    PieceType.PIKACHU:    'Pikachu',
+    PieceType.RAICHU:     'Raichu',
+    PieceType.EEVEE:      'Eevee',
+    PieceType.VAPOREON:   'Vaporeon',
+    PieceType.JOLTEON:    'Jolteon',
+    PieceType.FLAREON:    'Flareon',
+    PieceType.MEW:        'Mew',
+    PieceType.ESPEON:     'Espeon',
+    PieceType.LEAFEON:    'Leafeon',
+    PieceType.POKEBALL:   'Poke Ball',
+    PieceType.MASTERBALL: 'Master Ball',
+}
+
+ACTION_LABEL = {
+    ActionType.MOVE:         'Move',
+    ActionType.ATTACK:       'Attack',
+    ActionType.FORESIGHT:    'Foresight',
+    ActionType.TRADE:        'Trade',
+    ActionType.EVOLVE:       'Evolve',
+    ActionType.QUICK_ATTACK: 'Quick Attack',
+}
+
+MEW_SLOTS  = {0: 'Fire Blast', 1: 'Hydro Pump', 2: 'Solar Beam'}
+EVO_SLOTS  = {0: 'Vaporeon', 1: 'Flareon', 2: 'Leafeon', 3: 'Jolteon', 4: 'Espeon'}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Gated transposition table (controls bot's access to prior-game knowledge)
+# ──────────────────────────────────────────────────────────────────────────────
+class GatedTT(TranspositionTable):
+    """Wraps TranspositionTable; probabilistically gates reads by access_pct."""
+    def __init__(self):
+        super().__init__()
+        self.access_pct = 1.0   # 0.0 – 1.0
+
+    def get(self, h: int):
+        if self.access_pct >= 1.0 or random.random() < self.access_pct:
+            return super().get(h)
+        return (0.0, 0)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Simple UI widgets
+# ──────────────────────────────────────────────────────────────────────────────
+class Button:
+    def __init__(self, x, y, w, h, label, color=None, text_color=None,
+                 font=None, hover_color=None, corner_radius=6):
+        self.rect   = pygame.Rect(x, y, w, h)
+        self.label  = label
+        self.color  = color or C_BTN
+        self.hcolor = hover_color or C_BTN_HOV
+        self.tcolor = text_color or C_WHITE
+        self.font   = font
+        self.radius = corner_radius
+        self.active = False     # visually pressed/selected
+
+    def draw(self, surf, mouse_pos):
+        hovered = self.rect.collidepoint(mouse_pos)
+        if self.active:
+            c = C_BTN_ACT
+        elif hovered:
+            c = self.hcolor
+        else:
+            c = self.color
+        pygame.draw.rect(surf, c, self.rect, border_radius=self.radius)
+        pygame.draw.rect(surf, C_DIVIDER, self.rect, 1, border_radius=self.radius)
+        if self.font:
+            txt = self.font.render(self.label, True, self.tcolor)
+            surf.blit(txt, txt.get_rect(center=self.rect.center))
+
+    def hit(self, event):
+        return (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
+                and self.rect.collidepoint(event.pos))
+
+
+class Slider:
+    """Horizontal slider.  value is always in [min_val, max_val]."""
+    def __init__(self, x, y, w, min_val, max_val, init_val,
+                 label='', fmt='{:.1f}', font=None, lbl_font=None):
+        self.x, self.y, self.w = x, y, w
+        self.min_v, self.max_v = min_val, max_val
+        self.value   = init_val
+        self.label   = label
+        self.fmt     = fmt
+        self.font    = font
+        self.lbl_font = lbl_font
+        self._drag   = False
+        self.track_h = 6
+        self.knob_r  = 9
+
+    @property
+    def _track_y(self):
+        return self.y + (30 if self.label else 0)
+
+    def _val_to_x(self, v):
+        t = (v - self.min_v) / (self.max_v - self.min_v)
+        return int(self.x + t * self.w)
+
+    def _x_to_val(self, px):
+        t = (px - self.x) / self.w
+        t = max(0.0, min(1.0, t))
+        return self.min_v + t * (self.max_v - self.min_v)
+
+    def draw(self, surf):
+        ty = self._track_y
+        if self.label and self.lbl_font:
+            lbl = self.lbl_font.render(self.label, True, C_DIM)
+            surf.blit(lbl, (self.x, self.y))
+            val_txt = self.font.render(self.fmt.format(self.value), True, C_WHITE)
+            surf.blit(val_txt, (self.x + self.w - val_txt.get_width(), self.y))
+        # track
+        pygame.draw.rect(surf, C_DIVIDER,
+                         (self.x, ty - self.track_h//2, self.w, self.track_h),
+                         border_radius=3)
+        kx = self._val_to_x(self.value)
+        fill_w = kx - self.x
+        if fill_w > 0:
+            pygame.draw.rect(surf, C_BTN_ACT,
+                             (self.x, ty - self.track_h//2, fill_w, self.track_h),
+                             border_radius=3)
+        pygame.draw.circle(surf, C_WHITE, (kx, ty), self.knob_r)
+        pygame.draw.circle(surf, C_BTN_ACT, (kx, ty), self.knob_r - 2)
+
+    def handle(self, event):
+        ty = self._track_y
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            kx = self._val_to_x(self.value)
+            if abs(event.pos[0] - kx) < 14 and abs(event.pos[1] - ty) < 14:
+                self._drag = True
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            self._drag = False
+        elif event.type == pygame.MOUSEMOTION and self._drag:
+            self.value = self._x_to_val(event.pos[0])
+        return self._drag
+
+
+class ScrollLog:
+    """Scrollable text log panel."""
+    def __init__(self, x, y, w, h, font, max_lines=200):
+        self.rect     = pygame.Rect(x, y, w, h)
+        self.font     = font
+        self.lines: List[Tuple[str, tuple]] = []
+        self.max_lines = max_lines
+        self.scroll   = 0   # lines scrolled from bottom
+        self._surf    = None
+
+    def add(self, text: str, color=None):
+        self.lines.append((text, color or C_DIM))
+        if len(self.lines) > self.max_lines:
+            self.lines.pop(0)
+        self.scroll = 0   # snap to bottom
+
+    def draw(self, surf, mouse_pos):
+        pygame.draw.rect(surf, C_CARD, self.rect, border_radius=4)
+        pygame.draw.rect(surf, C_DIVIDER, self.rect, 1, border_radius=4)
+        lh   = self.font.get_height() + 2
+        rows = self.rect.h // lh
+        start = max(0, len(self.lines) - rows - self.scroll)
+        end   = min(len(self.lines), start + rows)
+        clip  = surf.get_clip()
+        surf.set_clip(self.rect.inflate(-4, -4))
+        for i, idx in enumerate(range(start, end)):
+            txt, col = self.lines[idx]
+            rendered = self.font.render(txt, True, col)
+            y = self.rect.y + 4 + i * lh
+            surf.blit(rendered, (self.rect.x + 6, y))
+        surf.set_clip(clip)
+
+    def handle_scroll(self, event):
+        if self.rect.collidepoint(pygame.mouse.get_pos()):
+            if event.type == pygame.MOUSEWHEEL:
+                lh = self.font.get_height() + 2
+                rows = self.rect.h // lh
+                self.scroll = max(0, min(len(self.lines) - rows,
+                                         self.scroll + event.y))
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Main application
+# ──────────────────────────────────────────────────────────────────────────────
+class PokeChessApp:
+    # ── init ────────────────────────────────────────────────────────────────
+    def __init__(self, init_budget: float = 1.0):
+        pygame.init()
+        pygame.display.set_caption('PokeChess')
+        self.screen = pygame.display.set_mode((WIN_W, WIN_H), pygame.RESIZABLE)
+        self.clock  = pygame.time.Clock()
+
+        # fonts
+        self.f_title  = pygame.font.SysFont('Arial', 22, bold=True)
+        self.f_head   = pygame.font.SysFont('Arial', 15, bold=True)
+        self.f_body   = pygame.font.SysFont('Arial', 13)
+        self.f_small  = pygame.font.SysFont('Arial', 11)
+        self.f_coord  = pygame.font.SysFont('Arial', 10)
+        self.f_log    = pygame.font.SysFont('Courier New', 12)
+
+        # sprites
+        self._sprites: Dict[PieceType, pygame.Surface] = {}
+        self._load_sprites()
+
+        # persistent transposition table
+        self.shared_tt = GatedTT()
+
+        # game state
+        self.state: Optional[GameState]   = None
+        self.history: List[GameState]     = []   # board states (snaps after each move)
+        self.move_log: List[str]          = []   # textual move descriptions
+        self.hist_idx: int                = -1   # -1 = live game
+        self.selected: Optional[Tuple[int,int]] = None
+        self.legal_for_sel: List[Move]    = []
+        self.pending_moves: List[Move]    = []   # disambiguation candidates
+        self.player_color: Team           = Team.RED
+
+        # bot state
+        self._bot_thread: Optional[threading.Thread] = None
+        self._bot_result: Optional[Move]  = None
+        self._bot_lock   = threading.Lock()
+        self._bot_running = False
+
+        # UI state
+        self.status_msg   = ''
+        self.status_color = C_WHITE
+        self.tooltip_text = ''
+        self.bot_move_highlight: Optional[Tuple[int,int,int,int]] = None   # (fr,fc,tr,tc)
+        self._last_bot_move_time = 0.0
+
+        # ── build UI widgets ─────────────────────────────────────────────────
+        px = PANEL_X
+
+        # color toggle
+        self.btn_red  = Button(px, 90,  100, 32, 'Play as RED',
+                               font=self.f_body, corner_radius=6)
+        self.btn_blue = Button(px+108, 90, 104, 32, 'Play as BLUE',
+                               font=self.f_body, corner_radius=6)
+        self.btn_red.active = True
+
+        # bot sliders
+        sx = px
+        sw = PANEL_W - 10
+        self.sl_budget = Slider(sx, 160, sw, 0.2, 5.0, init_budget,
+                                label='Bot time budget (s)',
+                                fmt='{:.1f}s',
+                                font=self.f_body, lbl_font=self.f_small)
+        self.sl_tt     = Slider(sx, 210, sw, 0.0, 1.0, 1.0,
+                                label='TT access   (prior knowledge)',
+                                fmt='{:.0%}',
+                                font=self.f_body, lbl_font=self.f_small)
+
+        # game controls
+        bw = (PANEL_W - 10) // 2 - 2
+        self.btn_new   = Button(px,       260, bw, 34, 'New Game',
+                                font=self.f_body, corner_radius=6)
+        self.btn_undo  = Button(px+bw+4,  260, bw, 34, 'Undo',
+                                font=self.f_body, corner_radius=6)
+
+        # history nav
+        nw = (PANEL_W - 10) // 4 - 2
+        self.btn_hprev = Button(px,          302, nw,   28, '|< Start',
+                                font=self.f_small, corner_radius=5)
+        self.btn_prev  = Button(px+nw+3,     302, nw,   28, '< Prev',
+                                font=self.f_small, corner_radius=5)
+        self.btn_hnext = Button(px+2*(nw+3), 302, nw,   28, 'Next >',
+                                font=self.f_small, corner_radius=5)
+        self.btn_live  = Button(px+3*(nw+3), 302, nw,   28, 'Live >|',
+                                font=self.f_small, corner_radius=5)
+
+        # move log
+        self.log_widget = ScrollLog(px, 338, PANEL_W - 10, WIN_H - 338 - 10,
+                                    font=self.f_log)
+
+        # action buttons (disambiguation) — built dynamically, placed below board
+        self.action_btns: List[Button] = []
+
+        self.new_game()
+
+    # ── sprite loading ───────────────────────────────────────────────────────
+    def _load_sprites(self):
+        for pt, fname in SPRITE_FILES.items():
+            path = os.path.join(SPRITE_DIR, fname)
+            if os.path.exists(path):
+                img = pygame.image.load(path).convert_alpha()
+                img = pygame.transform.smoothscale(img, (SPRITE_PX, SPRITE_PX))
+                self._sprites[pt] = img
+
+    # ── coordinate helpers ───────────────────────────────────────────────────
+    def _board_to_screen(self, row: int, col: int) -> Tuple[int, int]:
+        """Top-left pixel of the cell for (row, col)."""
+        if self.player_color == Team.RED:
+            sr = 7 - row   # row 0 → bottom
+            sc = col
+        else:
+            sr = row
+            sc = 7 - col
+        return (BOARD_X + sc * CELL, BOARD_Y + sr * CELL)
+
+    def _screen_to_board(self, px: int, py: int) -> Optional[Tuple[int, int]]:
+        bx, by = px - BOARD_X, py - BOARD_Y
+        if not (0 <= bx < 8 * CELL and 0 <= by < 8 * CELL):
+            return None
+        sc, sr = bx // CELL, by // CELL
+        if self.player_color == Team.RED:
+            return (7 - sr, sc)
+        else:
+            return (sr, 7 - sc)
+
+    # ── game logic ───────────────────────────────────────────────────────────
+    def new_game(self):
+        """Start a fresh game (keeps the shared TT)."""
+        if self._bot_running:
+            return   # don't restart mid-think
+        self.state    = GameState.new_game()
+        self.history  = [self.state]
+        self.move_log = []
+        self.hist_idx = -1
+        self.selected = None
+        self.legal_for_sel = []
+        self.pending_moves = []
+        self.action_btns   = []
+        self.bot_move_highlight = None
+        self.log_widget.lines.clear()
+        self.log_widget.add('─── New game ───', C_YELLOW)
+        self.log_widget.add(f'You play as {"RED" if self.player_color == Team.RED else "BLUE"}', C_WHITE)
+        self.log_widget.add(f'Bot budget: {self.sl_budget.value:.1f}s', C_DIM)
+        tt_pct = int(self.sl_tt.value * 100)
+        self.log_widget.add(f'TT access: {tt_pct}%   |   entries: {len(self.shared_tt):,}', C_DIM)
+        self._update_status()
+        if self._is_bot_turn():
+            self._start_bot()
+
+    def undo(self):
+        """Undo back to the previous human-turn state."""
+        if len(self.history) <= 1:
+            return
+        # If the bot is thinking, abandon its result but still undo
+        self._bot_running = False
+        self._bot_result  = None
+        # Pop states until it's the human's turn (or we've popped enough)
+        popped = 0
+        while len(self.history) > 1 and popped < 4:
+            self.history.pop()
+            popped += 1
+            if self.history[-1].active_player == self.player_color:
+                break
+        self.hist_idx = -1
+        self.selected = None
+        self.legal_for_sel = []
+        self.pending_moves = []
+        self.action_btns   = []
+        self.bot_move_highlight = None
+        self.log_widget.add('Undo', C_ORANGE)
+        self._update_status()
+
+    def _live_state(self) -> GameState:
+        return self.history[-1]
+
+    def _viewing_state(self) -> GameState:
+        if self.hist_idx == -1:
+            return self._live_state()
+        return self.history[self.hist_idx]
+
+    def _is_bot_turn(self) -> bool:
+        s = self._live_state()
+        done, _ = is_terminal(s)
+        return (not done) and (s.active_player != self.player_color)
+
+    def _is_human_turn(self) -> bool:
+        s = self._live_state()
+        done, _ = is_terminal(s)
+        return (not done) and (s.active_player == self.player_color)
+
+    def _update_status(self):
+        s  = self._live_state()
+        done, winner = is_terminal(s)
+        if done:
+            if winner == self.player_color:
+                self.status_msg   = 'You win!'
+                self.status_color = C_GREEN
+            elif winner is None:
+                self.status_msg   = 'Draw'
+                self.status_color = C_YELLOW
+            else:
+                self.status_msg   = 'Bot wins!'
+                self.status_color = C_RED
+        elif self._bot_running:
+            self.status_msg   = f'Bot thinking...  (budget {self.sl_budget.value:.1f}s)'
+            self.status_color = C_CYAN
+        elif self.hist_idx != -1:
+            n = len(self.history)
+            self.status_msg   = f'History view  [{self.hist_idx + 1}/{n}]'
+            self.status_color = C_YELLOW
+        elif s.active_player == self.player_color:
+            color_name = 'RED' if s.active_player == Team.RED else 'BLUE'
+            self.status_msg   = f'Your turn ({color_name})  —  turn {s.turn_number}'
+            self.status_color = C_WHITE
+        else:
+            color_name = 'RED' if s.active_player == Team.RED else 'BLUE'
+            self.status_msg   = f'Waiting for bot ({color_name})'
+            self.status_color = C_DIM
+
+    # ── bot thread ───────────────────────────────────────────────────────────
+    def _start_bot(self):
+        if self._bot_running:
+            return
+        self._bot_running = True
+        self._bot_result  = None
+        self.shared_tt.access_pct = self.sl_tt.value
+        budget = max(0.1, self.sl_budget.value)
+        state  = self._live_state()
+
+        def _think(s, b, tt):
+            bot  = MCTS(time_budget=b, transposition=tt)
+            move = bot.select_move(s)
+            with self._bot_lock:
+                self._bot_result  = move
+                self._bot_running = False
+
+        t = threading.Thread(target=_think,
+                             args=(state, budget, self.shared_tt),
+                             daemon=True)
+        t.start()
+        self._update_status()
+
+    def _maybe_apply_bot_move(self):
+        with self._bot_lock:
+            if self._bot_result is None:
+                return
+            move = self._bot_result
+            self._bot_result = None
+
+        s = self._live_state()
+        done, _ = is_terminal(s)
+        if done:
+            return
+
+        outcomes = apply_move(s, move)
+        new_state = random.choices(
+            [st for st, _ in outcomes],
+            weights=[p for _, p in outcomes]
+        )[0]
+
+        pr, pc = move.piece_row, move.piece_col
+        tr, tc = move.target_row, move.target_col
+        piece = s.board[pr][pc]
+        p_name = PIECE_LABEL.get(piece.piece_type, '?') if piece else '?'
+        team_col = C_RED if s.active_player == Team.RED else C_BLUE
+        self.log_widget.add(
+            f'Bot  {ACTION_LABEL.get(move.action_type,"?")} '
+            f'{p_name} ({pr},{pc})→({tr},{tc})',
+            team_col)
+
+        self.bot_move_highlight = (pr, pc, tr, tc)
+        self._last_bot_move_time = time.monotonic()
+
+        self.history.append(new_state)
+        self._update_status()
+        if self._is_bot_turn():
+            self._start_bot()
+
+    # ── move execution (human) ───────────────────────────────────────────────
+    def _execute_move(self, move: Move):
+        s = self._live_state()
+        outcomes = apply_move(s, move)
+        new_state = random.choices(
+            [st for st, _ in outcomes],
+            weights=[p for _, p in outcomes]
+        )[0]
+
+        pr, pc = move.piece_row, move.piece_col
+        tr, tc = move.target_row, move.target_col
+        piece = s.board[pr][pc]
+        p_name = PIECE_LABEL.get(piece.piece_type, '?') if piece else '?'
+        team_col = C_RED if s.active_player == Team.RED else C_BLUE
+        slot_note = ''
+        if move.action_type == ActionType.ATTACK and piece and piece.piece_type == PieceType.MEW:
+            slot_note = f' [{MEW_SLOTS.get(move.move_slot, "?")}]'
+        if move.action_type == ActionType.EVOLVE:
+            slot_note = f' → {EVO_SLOTS.get(move.move_slot, "?")}'
+        self.log_widget.add(
+            f'You  {ACTION_LABEL.get(move.action_type,"?")} '
+            f'{p_name}{slot_note} ({pr},{pc})→({tr},{tc})',
+            team_col)
+
+        self.history.append(new_state)
+        self.selected = None
+        self.legal_for_sel = []
+        self.pending_moves = []
+        self.action_btns   = []
+        self._update_status()
+
+        done, winner = is_terminal(new_state)
+        if not done and self._is_bot_turn():
+            self._start_bot()
+
+    # ── click handling ───────────────────────────────────────────────────────
+    def _on_board_click(self, row: int, col: int):
+        # History mode: only allow deselect / do nothing
+        if self.hist_idx != -1:
+            self.hist_idx = -1
+            self.action_btns = []
+            self._update_status()
+            return
+
+        if not self._is_human_turn():
+            return
+
+        s = self._live_state()
+
+        # If disambiguation buttons are active, ignore board clicks
+        if self.pending_moves:
+            return
+
+        piece = s.board[row][col]
+
+        if self.selected is None:
+            # Select own piece
+            if piece and piece.team == self.player_color:
+                self.selected = (row, col)
+                all_legal = get_legal_moves(s)
+                self.legal_for_sel = [m for m in all_legal
+                                      if m.piece_row == row and m.piece_col == col]
+                self.action_btns = []
+        else:
+            sr, sc = self.selected
+            if (row, col) == (sr, sc):
+                # Deselect
+                self.selected = None
+                self.legal_for_sel = []
+                self.pending_moves = []
+                self.action_btns   = []
+                return
+            if piece and piece.team == self.player_color:
+                # Switch selection to another own piece
+                all_legal = get_legal_moves(s)
+                self.selected = (row, col)
+                self.legal_for_sel = [m for m in all_legal
+                                      if m.piece_row == row and m.piece_col == col]
+                self.pending_moves = []
+                self.action_btns   = []
+                return
+
+            # Find moves to the clicked target
+            cands = [m for m in self.legal_for_sel
+                     if m.target_row == row and m.target_col == col]
+            # Also check secondary target for Quick Attack
+            if not cands:
+                cands = [m for m in self.legal_for_sel
+                         if m.action_type == ActionType.QUICK_ATTACK
+                         and m.secondary_row == row and m.secondary_col == col]
+
+            if not cands:
+                # Click on empty non-move square → deselect
+                self.selected = None
+                self.legal_for_sel = []
+                self.pending_moves = []
+                self.action_btns   = []
+                return
+
+            if len(cands) == 1:
+                self._execute_move(cands[0])
+            else:
+                # Disambiguation
+                self.pending_moves = cands
+                self._build_action_buttons(cands)
+
+    def _build_action_buttons(self, moves: List[Move]):
+        self.action_btns = []
+        bx = PANEL_X
+        bw = PANEL_W - 10
+        by = 330
+        bh = 32
+        pad = 4
+
+        # Deduplicate by (action_type, move_slot)
+        seen = set()
+        unique: List[Move] = []
+        for m in moves:
+            key = (m.action_type, m.move_slot)
+            if key not in seen:
+                seen.add(key)
+                unique.append(m)
+
+        for i, m in enumerate(unique):
+            at  = m.action_type
+            lbl = ACTION_LABEL.get(at, '?')
+            if at == ActionType.ATTACK and self._live_state().board[m.piece_row][m.piece_col]:
+                p = self._live_state().board[m.piece_row][m.piece_col]
+                if p.piece_type == PieceType.MEW:
+                    lbl = MEW_SLOTS.get(m.move_slot, lbl)
+            if at == ActionType.EVOLVE:
+                lbl = f'Evolve → {EVO_SLOTS.get(m.move_slot, "?")}'
+            # Place buttons vertically in panel, below the nav row
+            y = by + i * (bh + pad)
+            btn = Button(bx, y, bw, bh, lbl,
+                         color=C_BTN_ACT, font=self.f_body, corner_radius=6)
+            btn.active = False
+            btn._move = m
+            self.action_btns.append(btn)
+
+        # Cancel button
+        y = by + len(unique) * (bh + pad)
+        cancel = Button(bx, y, bw, bh, 'Cancel',
+                        color=C_BTN_WARN, hover_color=C_BTN_WH,
+                        font=self.f_body, corner_radius=6)
+        cancel._move = None
+        self.action_btns.append(cancel)
+
+    # ── event loop ───────────────────────────────────────────────────────────
+    def run(self):
+        while True:
+            mouse_pos = pygame.mouse.get_pos()
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    return
+
+                # Sliders
+                self.sl_budget.handle(event)
+                self.sl_tt.handle(event)
+
+                # Log scroll
+                self.log_widget.handle_scroll(event)
+
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    pos = event.pos
+
+                    # Color buttons
+                    if self.btn_red.hit(event) and not self._bot_running:
+                        self.player_color = Team.RED
+                        self.btn_red.active  = True
+                        self.btn_blue.active = False
+                        self.new_game()
+                        continue
+                    if self.btn_blue.hit(event) and not self._bot_running:
+                        self.player_color = Team.BLUE
+                        self.btn_red.active  = False
+                        self.btn_blue.active = True
+                        self.new_game()
+                        continue
+
+                    # Game control buttons
+                    if self.btn_new.hit(event):
+                        self.new_game()
+                        continue
+                    if self.btn_undo.hit(event):
+                        self.undo()
+                        continue
+
+                    # History nav
+                    n = len(self.history)
+                    if self.btn_hprev.hit(event):
+                        self.hist_idx = 0
+                        self.selected = None
+                        self.pending_moves = []
+                        self.action_btns   = []
+                        self._update_status()
+                        continue
+                    if self.btn_prev.hit(event):
+                        cur = self.hist_idx if self.hist_idx != -1 else n - 1
+                        self.hist_idx = max(0, cur - 1)
+                        self.selected = None
+                        self.pending_moves = []
+                        self.action_btns   = []
+                        self._update_status()
+                        continue
+                    if self.btn_hnext.hit(event):
+                        cur = self.hist_idx if self.hist_idx != -1 else n - 1
+                        nxt = cur + 1
+                        self.hist_idx = nxt if nxt < n - 1 else -1
+                        self.selected = None
+                        self.pending_moves = []
+                        self.action_btns   = []
+                        self._update_status()
+                        continue
+                    if self.btn_live.hit(event):
+                        self.hist_idx = -1
+                        self.selected = None
+                        self.pending_moves = []
+                        self.action_btns   = []
+                        self._update_status()
+                        continue
+
+                    # Action disambiguation buttons
+                    for btn in self.action_btns:
+                        if btn.rect.collidepoint(pos):
+                            if btn._move is None:
+                                # Cancel
+                                self.pending_moves = []
+                                self.action_btns   = []
+                                self.selected      = None
+                                self.legal_for_sel = []
+                            else:
+                                self._execute_move(btn._move)
+                                self.pending_moves = []
+                                self.action_btns   = []
+                            break
+
+                    # Board click
+                    rc = self._screen_to_board(pos[0], pos[1])
+                    if rc is not None:
+                        self._on_board_click(rc[0], rc[1])
+
+            # Bot result check
+            self._maybe_apply_bot_move()
+
+            # Fade bot highlight after 1.5s
+            if self.bot_move_highlight and time.monotonic() - self._last_bot_move_time > 1.5:
+                self.bot_move_highlight = None
+
+            # Update status periodically
+            self._update_status()
+
+            # Draw
+            self._draw(mouse_pos)
+            pygame.display.flip()
+            self.clock.tick(30)
+
+    # ── rendering ────────────────────────────────────────────────────────────
+    def _draw(self, mouse_pos):
+        surf = self.screen
+        surf.fill(BG)
+
+        self._draw_title(surf)
+        self._draw_board(surf, mouse_pos)
+        self._draw_panel(surf, mouse_pos)
+
+    def _draw_title(self, surf):
+        # Title bar
+        pygame.draw.rect(surf, C_CARD, (0, 0, WIN_W, 56))
+        pygame.draw.rect(surf, C_DIVIDER, (0, 55, WIN_W, 1))
+        title = self.f_title.render('PokeChess', True, C_WHITE)
+        surf.blit(title, (BOARD_X, 16))
+        state = self._viewing_state()
+        turn_color = C_RED if state.active_player == Team.RED else C_BLUE
+        tc_name = 'RED' if state.active_player == Team.RED else 'BLUE'
+        t_txt = self.f_body.render(
+            f'Turn {state.turn_number}  |  Active: {tc_name}', True, turn_color)
+        surf.blit(t_txt, (BOARD_X + 140, 20))
+
+        # Status
+        st = self.f_head.render(self.status_msg, True, self.status_color)
+        surf.blit(st, (BOARD_X + 400, 18))
+
+        # Bot thinking spinner
+        if self._bot_running:
+            t = int(time.monotonic() * 3) % 4
+            dots = '.' * (t + 1) + '   '
+            sp = self.f_body.render(dots[:4], True, C_CYAN)
+            surf.blit(sp, (BOARD_X + 400 + st.get_width() + 8, 20))
+
+    def _draw_board(self, surf, mouse_pos):
+        state  = self._viewing_state()
+        is_live = (self.hist_idx == -1)
+
+        # Build highlight sets
+        move_sqs: set   = set()
+        attack_sqs: set = set()
+        fore_sqs: set   = set()
+        qa_mid_sqs: set = set()
+
+        if self.selected and is_live:
+            for m in self.legal_for_sel:
+                at = m.action_type
+                if at == ActionType.MOVE:
+                    move_sqs.add((m.target_row, m.target_col))
+                elif at in (ActionType.ATTACK, ActionType.QUICK_ATTACK):
+                    tr, tc = (m.secondary_row, m.secondary_col) if at == ActionType.QUICK_ATTACK else (m.target_row, m.target_col)
+                    attack_sqs.add((tr, tc))
+                    if at == ActionType.QUICK_ATTACK:
+                        qa_mid_sqs.add((m.target_row, m.target_col))
+                elif at == ActionType.FORESIGHT:
+                    fore_sqs.add((m.target_row, m.target_col))
+                elif at in (ActionType.TRADE, ActionType.EVOLVE):
+                    move_sqs.add((m.target_row, m.target_col))
+
+        # Draw squares
+        for r in range(8):
+            for c in range(8):
+                sx, sy = self._board_to_screen(r, c)
+                is_light = (r + c) % 2 == 0
+                base_col = LIGHT_SQ if is_light else DARK_SQ
+                pygame.draw.rect(surf, base_col, (sx, sy, CELL, CELL))
+
+                # Highlights as overlays
+                overlay = None
+                if self.selected and (r, c) == self.selected:
+                    overlay = HL_SELECT
+                elif (r, c) in attack_sqs:
+                    overlay = HL_ATTACK
+                elif (r, c) in fore_sqs:
+                    overlay = HL_FORE
+                elif (r, c) in qa_mid_sqs:
+                    overlay = HL_MOVE
+                elif (r, c) in move_sqs:
+                    overlay = HL_MOVE
+                # Bot last-move highlight
+                if self.bot_move_highlight:
+                    fr, fc, tr, tc = self.bot_move_highlight
+                    fade = max(0, 1.0 - (time.monotonic() - self._last_bot_move_time) / 1.5)
+                    if (r, c) in ((fr, fc), (tr, tc)) and fade > 0:
+                        a = int(fade * 120)
+                        ol = pygame.Surface((CELL, CELL), pygame.SRCALPHA)
+                        ol.fill((200, 200, 50, a))
+                        surf.blit(ol, (sx, sy))
+
+                if overlay:
+                    ol = pygame.Surface((CELL, CELL), pygame.SRCALPHA)
+                    ol.fill((*overlay, HL_ALPHA))
+                    surf.blit(ol, (sx, sy))
+
+                # Piece
+                piece = state.board[r][c]
+                if piece:
+                    self._draw_piece(surf, piece, sx, sy, mouse_pos)
+
+        # Board border
+        brd = pygame.Rect(BOARD_X - 2, BOARD_Y - 2, 8 * CELL + 4, 8 * CELL + 4)
+        pygame.draw.rect(surf, C_DIVIDER, brd, 2, border_radius=3)
+
+        # Rank / file labels
+        for i in range(8):
+            # Rank numbers (left side)
+            if self.player_color == Team.RED:
+                rank_lbl = str(i + 1)     # board row i → label i+1 from bottom = row 0=1
+                rx, ry = self._board_to_screen(i, 0)
+            else:
+                rank_lbl = str(8 - i)
+                rx, ry = self._board_to_screen(i, 0)
+            lt = self.f_coord.render(rank_lbl, True, C_DIM)
+            surf.blit(lt, (rx + 2, ry + 2))
+            # File letters (bottom)
+            file_lbl = chr(ord('a') + i)
+            fx2, fy2 = self._board_to_screen(0, i)
+            ft = self.f_coord.render(file_lbl, True, C_DIM)
+            surf.blit(ft, (fx2 + CELL - ft.get_width() - 2,
+                           fy2 + CELL - ft.get_height() - 1))
+
+    def _draw_piece(self, surf, piece, sx, sy, mouse_pos):
+        cx = sx + CELL // 2
+        cy = sy + CELL // 2 - 4
+
+        # Team ring
+        ring_col = C_RED if piece.team == Team.RED else C_BLUE
+        pygame.draw.circle(surf, ring_col, (cx, cy), SPRITE_PX // 2 + 4)
+        pygame.draw.circle(surf, BG,       (cx, cy), SPRITE_PX // 2 + 2)
+
+        if piece.piece_type in self._sprites:
+            img = self._sprites[piece.piece_type]
+            surf.blit(img, img.get_rect(center=(cx, cy)))
+        elif piece.piece_type in (PieceType.POKEBALL, PieceType.MASTERBALL):
+            self._draw_ball(surf, piece, cx, cy)
+        else:
+            # Fallback: text label
+            lbl = self.f_small.render(piece.piece_type.name[:4], True, C_WHITE)
+            surf.blit(lbl, lbl.get_rect(center=(cx, cy)))
+
+        # HP bar
+        max_hp = PIECE_STATS[piece.piece_type].max_hp if piece.piece_type in PIECE_STATS else 0
+        if max_hp > 0:
+            bar_w = CELL - 10
+            bar_h = 5
+            bx = sx + 5
+            by = sy + CELL - bar_h - 3
+            hp_pct = max(0.0, piece.current_hp / max_hp)
+            pygame.draw.rect(surf, (60, 60, 60), (bx, by, bar_w, bar_h), border_radius=2)
+            if hp_pct > 0:
+                fc = C_GREEN if hp_pct > 0.6 else (C_YELLOW if hp_pct > 0.3 else C_RED)
+                pygame.draw.rect(surf, fc, (bx, by, int(bar_w * hp_pct), bar_h), border_radius=2)
+
+        # Tooltip on hover
+        if pygame.Rect(sx, sy, CELL, CELL).collidepoint(mouse_pos):
+            max_hp = PIECE_STATS[piece.piece_type].max_hp if piece.piece_type in PIECE_STATS else 0
+            hp_str = f'  HP {piece.current_hp}/{max_hp}' if max_hp > 0 else ''
+            item_str = f'  [{piece.held_item.name}]' if piece.held_item != Item.NONE else ''
+            king_str = ' (King)' if piece.is_king else ''
+            self.tooltip_text = (
+                f'{PIECE_LABEL.get(piece.piece_type, "?")}'
+                f'{king_str}  {"RED" if piece.team == Team.RED else "BLUE"}'
+                f'{hp_str}{item_str}'
+            )
+
+    def _draw_ball(self, surf, piece, cx, cy):
+        is_master = piece.piece_type == PieceType.MASTERBALL
+        outer = (200, 50, 50) if not is_master else (130, 0, 160)
+        inner = (240, 240, 240)
+        pygame.draw.circle(surf, outer, (cx, cy), 22)
+        pygame.draw.circle(surf, inner, (cx, cy + 11), 11)
+        pygame.draw.line(surf, (30, 30, 30), (cx - 22, cy), (cx + 22, cy), 2)
+        pygame.draw.circle(surf, inner, (cx, cy), 7)
+        pygame.draw.circle(surf, (30, 30, 30), (cx, cy), 7, 1)
+        if is_master:
+            dot = self.f_small.render('M', True, (130, 0, 160))
+            surf.blit(dot, dot.get_rect(center=(cx, cy)))
+
+    def _draw_panel(self, surf, mouse_pos):
+        # Panel background
+        pygame.draw.rect(surf, C_PANEL,
+                         (PANEL_X - 10, 0, PANEL_W + 20, WIN_H))
+        pygame.draw.rect(surf, C_DIVIDER, (PANEL_X - 10, 0, 1, WIN_H))
+
+        px = PANEL_X
+
+        # ── Section: Color choice ──────────────────────────────────────────
+        lbl = self.f_head.render('You play as:', True, C_DIM)
+        surf.blit(lbl, (px, 68))
+        self.btn_red.draw(surf, mouse_pos)
+        self.btn_blue.draw(surf, mouse_pos)
+
+        # ── Section: Bot settings ─────────────────────────────────────────
+        pygame.draw.rect(surf, C_DIVIDER, (px, 138, PANEL_W - 10, 1))
+        bl = self.f_head.render('Bot Settings', True, C_DIM)
+        surf.blit(bl, (px, 144))
+        self.sl_budget.draw(surf)
+        self.sl_tt.draw(surf)
+
+        # TT stats
+        tt_entries = len(self.shared_tt)
+        tt_txt = self.f_small.render(
+            f'Transposition table: {tt_entries:,} entries  '
+            f'(accumulates across games)', True, C_DIM)
+        surf.blit(tt_txt, (px, 235))
+
+        # ── Section: Controls ─────────────────────────────────────────────
+        pygame.draw.rect(surf, C_DIVIDER, (px, 252, PANEL_W - 10, 1))
+        self.btn_new.draw(surf, mouse_pos)
+        self.btn_undo.draw(surf, mouse_pos)
+
+        # History nav
+        n = len(self.history)
+        cur_h = self.hist_idx if self.hist_idx != -1 else n - 1
+        h_lbl = self.f_small.render(
+            f'History: [{cur_h + 1}/{n}]  (scroll log to navigate)',
+            True, C_DIM)
+        surf.blit(h_lbl, (px, 304))
+        self.btn_hprev.draw(surf, mouse_pos)
+        self.btn_prev.draw(surf, mouse_pos)
+        self.btn_hnext.draw(surf, mouse_pos)
+        self.btn_live.draw(surf, mouse_pos)
+
+        # ── Section: Action / disambiguation ──────────────────────────────
+        if self.pending_moves or self.action_btns:
+            py = 332
+            pygame.draw.rect(surf, C_DIVIDER, (px, py - 4, PANEL_W - 10, 1))
+            al = self.f_head.render('Choose action:', True, C_YELLOW)
+            surf.blit(al, (px, py))
+            for btn in self.action_btns:
+                btn.draw(surf, mouse_pos)
+        elif self.selected:
+            sr, sc = self.selected
+            s  = self._viewing_state()
+            piece = s.board[sr][sc]
+            if piece:
+                pname = PIECE_LABEL.get(piece.piece_type, '?')
+                max_hp = PIECE_STATS[piece.piece_type].max_hp if piece.piece_type in PIECE_STATS else 0
+                sl = self.f_head.render(
+                    f'Selected: {pname}  HP {piece.current_hp}/{max_hp}',
+                    True, C_YELLOW)
+                surf.blit(sl, (px, 332))
+                nl = self.f_small.render(
+                    f'{len(self.legal_for_sel)} legal moves — click a highlighted square',
+                    True, C_DIM)
+                surf.blit(nl, (px, 352))
+            else:
+                self.log_widget.rect.y = 338
+
+        # ── Section: Move log ─────────────────────────────────────────────
+        log_y = 370
+        if self.pending_moves or self.action_btns:
+            log_y = 338 + len(self.action_btns) * 36 + 20
+        pygame.draw.rect(surf, C_DIVIDER, (px, log_y - 6, PANEL_W - 10, 1))
+        ll = self.f_small.render('Move log', True, C_DIM)
+        surf.blit(ll, (px, log_y - 18))
+        self.log_widget.rect.y = log_y
+        self.log_widget.rect.h = WIN_H - log_y - 10
+        self.log_widget.draw(surf, mouse_pos)
+
+        # ── Tooltip ───────────────────────────────────────────────────────
+        if self.tooltip_text:
+            tip = self.f_small.render(self.tooltip_text, True, C_WHITE)
+            tw, th = tip.get_size()
+            tx = min(mouse_pos[0] + 12, WIN_W - tw - 6)
+            ty = min(mouse_pos[1] + 12, WIN_H - th - 6)
+            bg = pygame.Surface((tw + 8, th + 4))
+            bg.fill((20, 20, 30))
+            bg.set_alpha(220)
+            surf.blit(bg, (tx - 4, ty - 2))
+            surf.blit(tip, (tx, ty))
+            self.tooltip_text = ''
+
+        # ── Game-over overlay ─────────────────────────────────────────────
+        done, winner = is_terminal(self._live_state())
+        if done:
+            s2 = self.f_head.render('Game over  —  press New Game to play again',
+                                    True, C_YELLOW)
+            surf.blit(s2, (BOARD_X, BOARD_Y + 8 * CELL + 8))
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Entry point
+# ──────────────────────────────────────────────────────────────────────────────
+def main():
+    ap = argparse.ArgumentParser(description='PokeChess — play against the MCTS bot')
+    ap.add_argument('--budget', type=float, default=1.0,
+                    help='Initial bot time budget in seconds (default 1.0)')
+    args = ap.parse_args()
+    PokeChessApp(init_budget=args.budget).run()
+
+
+if __name__ == '__main__':
+    main()
