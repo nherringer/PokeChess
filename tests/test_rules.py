@@ -259,26 +259,28 @@ class TestPokeballCapture:
         probs = sorted(p for _, p in results)
         assert probs == [0.5, 0.5]
 
-    def test_capture_state_target_removed(self):
+    def test_capture_state_both_removed(self):
         state = empty_state()
         place(state, PieceType.POKEBALL, Team.RED, 3, 3)
         place(state, PieceType.SQUIRTLE, Team.BLUE, 3, 4)
         results = apply_move(state, make_move(PieceType.POKEBALL, 3, 3, ActionType.ATTACK, 3, 4))
-        capture_state = max(results, key=lambda x: x[1])[0]  # both 0.5, take first
-        # Exactly one outcome has pokeball at (3,4) and blue piece gone
-        capture_states = [s for s, _ in results if s.board[3][4] is not None and s.board[3][4].team == Team.RED]
-        fail_states    = [s for s, _ in results if s.board[3][4] is not None and s.board[3][4].team == Team.BLUE]
+        # Capture: both pokeball (3,3) and target (3,4) are removed
+        capture_states = [s for s, _ in results if s.board[3][3] is None and s.board[3][4] is None]
+        # Fail: pokeball consumed (3,3 empty), target survives (3,4 has Squirtle)
+        fail_states    = [s for s, _ in results if s.board[3][3] is None
+                          and s.board[3][4] is not None and s.board[3][4].team == Team.BLUE]
         assert len(capture_states) == 1
         assert len(fail_states) == 1
 
-    def test_fail_state_pokeball_stays(self):
+    def test_fail_state_pokeball_consumed(self):
         state = empty_state()
         place(state, PieceType.POKEBALL, Team.RED, 3, 3)
         place(state, PieceType.SQUIRTLE, Team.BLUE, 3, 4)
         results = apply_move(state, make_move(PieceType.POKEBALL, 3, 3, ActionType.ATTACK, 3, 4))
         fail_states = [s for s, _ in results if s.board[3][4] is not None and s.board[3][4].team == Team.BLUE]
         fail = fail_states[0]
-        assert fail.board[3][3] is not None and fail.board[3][3].team == Team.RED
+        # Pokeball is consumed (thrown and missed) — gone from its original square
+        assert fail.board[3][3] is None
 
     def test_pikachu_immune_returns_one_outcome(self):
         state = empty_state()
@@ -296,14 +298,15 @@ class TestPokeballCapture:
         assert ns.board[3][4].piece_type == PieceType.PIKACHU  # still there
         assert ns.board[3][3].piece_type == PieceType.POKEBALL  # pokeball stays
 
-    def test_raichu_also_immune(self):
+    def test_raichu_not_immune(self):
+        # Raichu loses Pikachu's immunity after evolution — pokeball can attempt capture
         state = empty_state()
         place(state, PieceType.POKEBALL, Team.RED, 3, 3)
         place(state, PieceType.RAICHU, Team.BLUE, 3, 4)
         results = apply_move(state, make_move(PieceType.POKEBALL, 3, 3, ActionType.ATTACK, 3, 4))
-        assert len(results) == 1
-        [(ns, _)] = results
-        assert ns.board[3][4].piece_type == PieceType.RAICHU
+        assert len(results) == 2  # stochastic: 50% catch, 50% fail
+        probs = sorted(p for _, p in results)
+        assert probs == [0.5, 0.5]
 
 
 # ---------------------------------------------------------------------------
@@ -319,7 +322,9 @@ class TestMasterballCapture:
         assert len(results) == 1
         [(ns, p)] = results
         assert p == 1.0
-        assert ns.board[3][4].piece_type == PieceType.MASTERBALL
+        # Masterball is consumed on use — both pieces gone
+        assert ns.board[3][3] is None
+        assert ns.board[3][4] is None
 
     def test_masterball_can_capture_pikachu(self):
         state = empty_state()
@@ -327,7 +332,9 @@ class TestMasterballCapture:
         place(state, PieceType.PIKACHU, Team.BLUE, 3, 4)
         [(ns, p)] = apply_move(state, make_move(PieceType.MASTERBALL, 3, 3, ActionType.ATTACK, 3, 4))
         assert p == 1.0
-        assert ns.board[3][4].piece_type == PieceType.MASTERBALL
+        # Masterball is consumed on use — both pieces gone
+        assert ns.board[3][3] is None
+        assert ns.board[3][4] is None
 
 
 # ---------------------------------------------------------------------------

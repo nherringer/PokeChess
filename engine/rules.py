@@ -15,7 +15,7 @@ from typing import Optional
 
 from .state import (
     GameState, Piece, PieceType, PokemonType, Team, Item,
-    PIECE_STATS, KING_TYPES, MATCHUP, ForesightEffect,
+    PIECE_STATS, KING_TYPES, MATCHUP, ForesightEffect, PAWN_TYPES,
 )
 from .moves import Move, ActionType
 
@@ -77,8 +77,9 @@ _EEVEE_TRADE_SLOTS: dict[Item, int] = {
     Item.BENTSPOON:    4,
 }
 
-# Piece types that are immune to regular Pokeball capture.
-_POKEBALL_IMMUNE: frozenset[PieceType] = frozenset({PieceType.PIKACHU, PieceType.RAICHU})
+# Only Pikachu is immune to regular Pokeball capture (lore ability).
+# Raichu loses this immunity on evolution.
+_POKEBALL_IMMUNE: frozenset[PieceType] = frozenset({PieceType.PIKACHU})
 
 
 # ---------------------------------------------------------------------------
@@ -115,14 +116,15 @@ def apply_move(state: GameState, move: Move) -> list[tuple[GameState, float]]:
             new.has_traded[new.active_player] = False
             _advance_turn(new)
             return [(new, 1.0)]
-        # Build a separate fail state (target survives, nothing else changes).
+        # Build fail state: pokeball is spent (thrown and missed), target survives.
         fail = state.copy()
         _resolve_foresight(fail)
         fail.foresight_used_last_turn[fail.active_player] = False
         fail.has_traded[fail.active_player] = False
+        fail.board[move.piece_row][move.piece_col] = None   # pokeball disappears on throw
         _advance_turn(fail)
-        # Apply capture to the success branch (new).
-        _capture(new, piece, move.target_row, move.target_col)
+        # Success branch: both pieces disappear (pokemon caught, pokeball consumed).
+        _capture_both(new, piece, move.target_row, move.target_col)
         new.has_traded[new.active_player] = False
         _advance_turn(new)
         return [(new, _POKEBALL_CAPTURE_PROB), (fail, 1.0 - _POKEBALL_CAPTURE_PROB)]
@@ -252,7 +254,11 @@ def _do_attack(state: GameState, piece: Piece, move: Move) -> None:
     if target is None:
         return
     if piece.piece_type == PieceType.MASTERBALL:
-        _capture(state, piece, move.target_row, move.target_col)
+        # Masterball: guaranteed capture — both disappear (pawn consumed on use).
+        _capture_both(state, piece, move.target_row, move.target_col)
+    elif target.piece_type in PAWN_TYPES:
+        # Pokemon walks into a pokeball/masterball — pokemon is caught, both disappear.
+        _capture_both(state, piece, move.target_row, move.target_col)
     else:
         damage = _calc_damage(piece, target, move.move_slot)
         target.current_hp -= damage
@@ -319,6 +325,12 @@ def _do_quick_attack(state: GameState, piece: Piece, move: Move) -> None:
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
+def _capture_both(state: GameState, attacker: Piece, target_row: int, target_col: int) -> None:
+    """Remove both attacker and target (pokeball mechanic — pawn is consumed on use)."""
+    state.board[attacker.row][attacker.col] = None
+    state.board[target_row][target_col] = None
+
 
 def _capture(state: GameState, attacker: Piece, target_row: int, target_col: int) -> None:
     """Remove the target; attacker occupies the vacated square."""

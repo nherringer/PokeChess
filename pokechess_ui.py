@@ -14,7 +14,7 @@ import pygame
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from engine.state import GameState, Team, PieceType, Item, PIECE_STATS
+from engine.state import GameState, Team, PieceType, Item, PIECE_STATS, PAWN_TYPES
 from engine.moves import get_legal_moves, Move, ActionType
 from engine.rules import apply_move, is_terminal, hp_winner
 from bot.mcts import MCTS
@@ -26,7 +26,8 @@ from bot.transposition import TranspositionTable
 WIN_W, WIN_H = 1140, 740
 BOARD_X, BOARD_Y = 20, 70
 CELL = 78
-SPRITE_PX = 68
+SPRITE_PX = 76   # scaled sprite image size
+RING_R    = 36   # outer ring radius (fits inside CELL=78 given the 4px cy offset)
 PANEL_X = BOARD_X + 8 * CELL + 20   # 658
 PANEL_W = WIN_W - PANEL_X - 10      # ~472
 
@@ -515,20 +516,40 @@ class PokeChessApp:
             return
 
         outcomes = apply_move(s, move)
-        new_state = random.choices(
-            [st for st, _ in outcomes],
-            weights=[p for _, p in outcomes]
-        )[0]
+        is_stochastic = len(outcomes) > 1
+        if is_stochastic:
+            picked = random.choices(range(len(outcomes)),
+                                    weights=[p for _, p in outcomes])[0]
+        else:
+            picked = 0
+        new_state = outcomes[picked][0]
 
         pr, pc = move.piece_row, move.piece_col
         tr, tc = move.target_row, move.target_col
-        piece = s.board[pr][pc]
+        piece  = s.board[pr][pc]
+        target = s.board[tr][tc]
         p_name = PIECE_LABEL.get(piece.piece_type, '?') if piece else '?'
+        t_name = PIECE_LABEL.get(target.piece_type, '?') if target else '?'
         team_col = C_RED if s.active_player == Team.RED else C_BLUE
+        slot_note = ''
+        if move.action_type == ActionType.ATTACK and piece and piece.piece_type == PieceType.MEW:
+            slot_note = f' [{MEW_SLOTS.get(move.move_slot, "?")}]'
+        if move.action_type == ActionType.EVOLVE:
+            slot_note = f' -> {EVO_SLOTS.get(move.move_slot, "?")}'
         self.log_widget.add(
             f'Bot  {ACTION_LABEL.get(move.action_type,"?")} '
-            f'{p_name} ({pr},{pc})→({tr},{tc})',
+            f'{p_name}{slot_note} ({pr},{pc})→({tr},{tc})',
             team_col)
+        # Stochastic outcome note
+        if is_stochastic:
+            if picked == 0:
+                self.log_widget.add(f'  >> Caught {t_name}!', C_GREEN)
+            else:
+                self.log_widget.add(f'  >> {t_name} got away!', C_ORANGE)
+        # Pokemon-attacks-pokeball note (deterministic catch)
+        elif (move.action_type == ActionType.ATTACK and target is not None
+              and target.piece_type in PAWN_TYPES):
+            self.log_widget.add(f'  >> {p_name} was caught by {t_name}!', C_ORANGE)
 
         self.bot_move_highlight = (pr, pc, tr, tc)
         self._last_bot_move_time = time.monotonic()
@@ -542,25 +563,40 @@ class PokeChessApp:
     def _execute_move(self, move: Move):
         s = self._live_state()
         outcomes = apply_move(s, move)
-        new_state = random.choices(
-            [st for st, _ in outcomes],
-            weights=[p for _, p in outcomes]
-        )[0]
+        is_stochastic = len(outcomes) > 1
+        if is_stochastic:
+            picked = random.choices(range(len(outcomes)),
+                                    weights=[p for _, p in outcomes])[0]
+        else:
+            picked = 0
+        new_state = outcomes[picked][0]
 
         pr, pc = move.piece_row, move.piece_col
         tr, tc = move.target_row, move.target_col
-        piece = s.board[pr][pc]
+        piece  = s.board[pr][pc]
+        target = s.board[tr][tc]
         p_name = PIECE_LABEL.get(piece.piece_type, '?') if piece else '?'
+        t_name = PIECE_LABEL.get(target.piece_type, '?') if target else '?'
         team_col = C_RED if s.active_player == Team.RED else C_BLUE
         slot_note = ''
         if move.action_type == ActionType.ATTACK and piece and piece.piece_type == PieceType.MEW:
             slot_note = f' [{MEW_SLOTS.get(move.move_slot, "?")}]'
         if move.action_type == ActionType.EVOLVE:
-            slot_note = f' → {EVO_SLOTS.get(move.move_slot, "?")}'
+            slot_note = f' -> {EVO_SLOTS.get(move.move_slot, "?")}'
         self.log_widget.add(
             f'You  {ACTION_LABEL.get(move.action_type,"?")} '
-            f'{p_name}{slot_note} ({pr},{pc})→({tr},{tc})',
+            f'{p_name}{slot_note} ({pr},{pc})->({tr},{tc})',
             team_col)
+        # Stochastic outcome note
+        if is_stochastic:
+            if picked == 0:
+                self.log_widget.add(f'  >> Caught {t_name}!', C_GREEN)
+            else:
+                self.log_widget.add(f'  >> {t_name} got away!', C_ORANGE)
+        # Pokemon-attacks-pokeball note (deterministic catch)
+        elif (move.action_type == ActionType.ATTACK and target is not None
+              and target.piece_type in PAWN_TYPES):
+            self.log_widget.add(f'  >> {p_name} was caught by {t_name}!', C_ORANGE)
 
         self.history.append(new_state)
         self.selected = None
@@ -626,11 +662,9 @@ class PokeChessApp:
                                if m.action_type == ActionType.TRADE
                                and m.target_row == row and m.target_col == col]
                 if trade_moves:
-                    if len(trade_moves) == 1:
-                        self._execute_move(trade_moves[0])
-                    else:
-                        self.pending_moves = trade_moves
-                        self._build_action_buttons(trade_moves)
+                    # Always show confirmation panel (even for a single trade move)
+                    self.pending_moves = trade_moves
+                    self._build_action_buttons(trade_moves)
                     return
                 # No trade → switch selection to the clicked ally
                 all_legal = get_legal_moves(s)
@@ -669,7 +703,7 @@ class PokeChessApp:
         self.action_btns = []
         bx = PANEL_X
         bw = PANEL_W - 10
-        by = 330
+        by = 374   # below history nav (ends at y≈348) with room for header
         bh = 32
         pad = 4
 
@@ -948,9 +982,9 @@ class PokeChessApp:
         cx = sx + CELL // 2
         cy = sy + CELL // 2 - 4
 
-        # Team ring — thick coloured border
+        # Team ring — thick coloured border (fixed radius, independent of sprite size)
         ring_col = C_RED if piece.team == Team.RED else C_BLUE
-        ring_r = SPRITE_PX // 2 + 5
+        ring_r   = RING_R
         pygame.draw.circle(surf, ring_col, (cx, cy), ring_r)
         pygame.draw.circle(surf, BG,       (cx, cy), ring_r - 4)
 
@@ -992,7 +1026,7 @@ class PokeChessApp:
     def _draw_ball(self, surf, piece, cx, cy):
         import math
         is_master = piece.piece_type == PieceType.MASTERBALL
-        r = 26
+        r = RING_R - 4   # pokeball fills the ring's inner circle
         top_col  = (200, 50, 50)   if not is_master else (128, 0, 180)
         bot_col  = (240, 240, 240)
         line_col = (20, 20, 20)
@@ -1065,50 +1099,49 @@ class PokeChessApp:
         self.btn_hnext.draw(surf, mouse_pos)
         self.btn_live.draw(surf, mouse_pos)
 
-        # ── Section: Action / disambiguation ──────────────────────────────
+        # ── Section: Action / disambiguation OR selected info + log ──────
+        pygame.draw.rect(surf, C_DIVIDER, (px, 352, PANEL_W - 10, 1))
+
         if self.pending_moves or self.action_btns:
-            py = 332
-            pygame.draw.rect(surf, C_DIVIDER, (px, py - 4, PANEL_W - 10, 1))
+            # Disambiguation panel takes over the lower half — log is hidden
             al = self.f_head.render('Choose action:', True, C_YELLOW)
-            surf.blit(al, (px, py))
+            surf.blit(al, (px, 356))
             for btn in self.action_btns:
                 btn.draw(surf, mouse_pos)
-        elif self.selected:
-            sr, sc = self.selected
-            s  = self._viewing_state()
-            piece = s.board[sr][sc]
-            if piece:
-                pname = PIECE_LABEL.get(piece.piece_type, '?')
-                max_hp = PIECE_STATS[piece.piece_type].max_hp if piece.piece_type in PIECE_STATS else 0
-                sel_col = C_GREEN if any(m.action_type == ActionType.EVOLVE
-                                          for m in self.legal_for_sel) else C_YELLOW
-                sl = self.f_head.render(
-                    f'Selected: {pname}  HP {piece.current_hp}/{max_hp}',
-                    True, sel_col)
-                surf.blit(sl, (px, 332))
-                hints = []
-                if any(m.action_type == ActionType.EVOLVE for m in self.legal_for_sel):
-                    hints.append('click piece again to evolve')
-                if any(m.action_type == ActionType.TRADE for m in self.legal_for_sel):
-                    hints.append('cyan=trade target')
-                hint_str = '  |  '.join(hints) if hints else 'click a highlighted square'
-                nl = self.f_small.render(
-                    f'{len(self.legal_for_sel)} moves — {hint_str}',
-                    True, C_DIM)
-                surf.blit(nl, (px, 352))
-            else:
-                self.log_widget.rect.y = 338
+        else:
+            # Selected piece info (if any)
+            info_y = 356
+            if self.selected:
+                sr, sc = self.selected
+                s  = self._viewing_state()
+                piece = s.board[sr][sc]
+                if piece:
+                    pname  = PIECE_LABEL.get(piece.piece_type, '?')
+                    max_hp = PIECE_STATS[piece.piece_type].max_hp if piece.piece_type in PIECE_STATS else 0
+                    sel_col = C_GREEN if any(m.action_type == ActionType.EVOLVE
+                                              for m in self.legal_for_sel) else C_YELLOW
+                    sl = self.f_head.render(
+                        f'Selected: {pname}  HP {piece.current_hp}/{max_hp}', True, sel_col)
+                    surf.blit(sl, (px, info_y))
+                    hints = []
+                    if any(m.action_type == ActionType.EVOLVE for m in self.legal_for_sel):
+                        hints.append('click piece again to evolve')
+                    if any(m.action_type == ActionType.TRADE for m in self.legal_for_sel):
+                        hints.append('cyan = trade')
+                    hint_str = '  |  '.join(hints) if hints else 'click a highlighted square'
+                    nl = self.f_small.render(
+                        f'{len(self.legal_for_sel)} moves — {hint_str}', True, C_DIM)
+                    surf.blit(nl, (px, info_y + 18))
+                    info_y += 38
 
-        # ── Section: Move log ─────────────────────────────────────────────
-        log_y = 370
-        if self.pending_moves or self.action_btns:
-            log_y = 338 + len(self.action_btns) * 36 + 20
-        pygame.draw.rect(surf, C_DIVIDER, (px, log_y - 6, PANEL_W - 10, 1))
-        ll = self.f_small.render('Move log', True, C_DIM)
-        surf.blit(ll, (px, log_y - 18))
-        self.log_widget.rect.y = log_y
-        self.log_widget.rect.h = WIN_H - log_y - 10
-        self.log_widget.draw(surf, mouse_pos)
+            # Move log
+            log_y = info_y + 8
+            pygame.draw.rect(surf, C_DIVIDER, (px, log_y - 6, PANEL_W - 10, 1))
+            ll = self.f_small.render('Move log', True, C_DIM)
+            surf.blit(ll, (px, log_y - 18))
+            self.log_widget.rect.y = log_y
+            self.log_widget.rect.h = WIN_H - log_y - 10
+            self.log_widget.draw(surf, mouse_pos)
 
         # ── Tooltip ───────────────────────────────────────────────────────
         if self.tooltip_text:
