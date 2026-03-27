@@ -26,7 +26,7 @@ from bot.transposition import TranspositionTable
 WIN_W, WIN_H = 1140, 740
 BOARD_X, BOARD_Y = 20, 70
 CELL = 78
-SPRITE_PX = 60
+SPRITE_PX = 68
 PANEL_X = BOARD_X + 8 * CELL + 20   # 658
 PANEL_W = WIN_W - PANEL_X - 10      # ~472
 
@@ -323,27 +323,27 @@ class PokeChessApp:
                                 label='Bot time budget (s)',
                                 fmt='{:.1f}s',
                                 font=self.f_body, lbl_font=self.f_small)
-        self.sl_tt     = Slider(sx, 210, sw, 0.0, 1.0, 1.0,
-                                label='TT access   (prior knowledge)',
+        self.sl_tt     = Slider(sx, 215, sw, 0.0, 1.0, 1.0,
+                                label='TT access  (prior knowledge)',
                                 fmt='{:.0%}',
                                 font=self.f_body, lbl_font=self.f_small)
 
         # game controls
         bw = (PANEL_W - 10) // 2 - 2
-        self.btn_new   = Button(px,       260, bw, 34, 'New Game',
+        self.btn_new   = Button(px,       278, bw, 34, 'New Game',
                                 font=self.f_body, corner_radius=6)
-        self.btn_undo  = Button(px+bw+4,  260, bw, 34, 'Undo',
+        self.btn_undo  = Button(px+bw+4,  278, bw, 34, 'Undo',
                                 font=self.f_body, corner_radius=6)
 
         # history nav
         nw = (PANEL_W - 10) // 4 - 2
-        self.btn_hprev = Button(px,          302, nw,   28, '|< Start',
+        self.btn_hprev = Button(px,          320, nw,   28, '|< Start',
                                 font=self.f_small, corner_radius=5)
-        self.btn_prev  = Button(px+nw+3,     302, nw,   28, '< Prev',
+        self.btn_prev  = Button(px+nw+3,     320, nw,   28, '< Prev',
                                 font=self.f_small, corner_radius=5)
-        self.btn_hnext = Button(px+2*(nw+3), 302, nw,   28, 'Next >',
+        self.btn_hnext = Button(px+2*(nw+3), 320, nw,   28, 'Next >',
                                 font=self.f_small, corner_radius=5)
-        self.btn_live  = Button(px+3*(nw+3), 302, nw,   28, 'Live >|',
+        self.btn_live  = Button(px+3*(nw+3), 320, nw,   28, 'Live >|',
                                 font=self.f_small, corner_radius=5)
 
         # move log
@@ -603,15 +603,36 @@ class PokeChessApp:
                 self.action_btns = []
         else:
             sr, sc = self.selected
+
             if (row, col) == (sr, sc):
-                # Deselect
-                self.selected = None
-                self.legal_for_sel = []
-                self.pending_moves = []
-                self.action_btns   = []
+                # Clicking the selected piece's own square:
+                # check for EVOLVE moves (target == piece square) before deselecting
+                evo_moves = [m for m in self.legal_for_sel
+                             if m.action_type == ActionType.EVOLVE]
+                if evo_moves:
+                    self.pending_moves = evo_moves
+                    self._build_action_buttons(evo_moves)
+                else:
+                    # Deselect
+                    self.selected = None
+                    self.legal_for_sel = []
+                    self.pending_moves = []
+                    self.action_btns   = []
                 return
+
             if piece and piece.team == self.player_color:
-                # Switch selection to another own piece
+                # Check for TRADE moves from selected piece to this ally first
+                trade_moves = [m for m in self.legal_for_sel
+                               if m.action_type == ActionType.TRADE
+                               and m.target_row == row and m.target_col == col]
+                if trade_moves:
+                    if len(trade_moves) == 1:
+                        self._execute_move(trade_moves[0])
+                    else:
+                        self.pending_moves = trade_moves
+                        self._build_action_buttons(trade_moves)
+                    return
+                # No trade → switch selection to the clicked ally
                 all_legal = get_legal_moves(s)
                 self.selected = (row, col)
                 self.legal_for_sel = [m for m in all_legal
@@ -620,7 +641,7 @@ class PokeChessApp:
                 self.action_btns   = []
                 return
 
-            # Find moves to the clicked target
+            # Find moves to the clicked enemy/empty target
             cands = [m for m in self.legal_for_sel
                      if m.target_row == row and m.target_col == col]
             # Also check secondary target for Quick Attack
@@ -630,7 +651,7 @@ class PokeChessApp:
                          and m.secondary_row == row and m.secondary_col == col]
 
             if not cands:
-                # Click on empty non-move square → deselect
+                # Click on a non-reachable square → deselect
                 self.selected = None
                 self.legal_for_sel = []
                 self.pending_moves = []
@@ -835,9 +856,11 @@ class PokeChessApp:
 
         # Build highlight sets
         move_sqs: set   = set()
+        trade_sqs: set  = set()
         attack_sqs: set = set()
         fore_sqs: set   = set()
         qa_mid_sqs: set = set()
+        can_evolve: bool = False
 
         if self.selected and is_live:
             for m in self.legal_for_sel:
@@ -851,8 +874,10 @@ class PokeChessApp:
                         qa_mid_sqs.add((m.target_row, m.target_col))
                 elif at == ActionType.FORESIGHT:
                     fore_sqs.add((m.target_row, m.target_col))
-                elif at in (ActionType.TRADE, ActionType.EVOLVE):
-                    move_sqs.add((m.target_row, m.target_col))
+                elif at == ActionType.TRADE:
+                    trade_sqs.add((m.target_row, m.target_col))
+                elif at == ActionType.EVOLVE:
+                    can_evolve = True   # target == own square; signal via sel highlight
 
         # Draw squares
         for r in range(8):
@@ -865,13 +890,16 @@ class PokeChessApp:
                 # Highlights as overlays
                 overlay = None
                 if self.selected and (r, c) == self.selected:
-                    overlay = HL_SELECT
+                    # Green ring when evolution is available (click piece again)
+                    overlay = (80, 230, 80) if can_evolve else HL_SELECT
                 elif (r, c) in attack_sqs:
                     overlay = HL_ATTACK
                 elif (r, c) in fore_sqs:
                     overlay = HL_FORE
                 elif (r, c) in qa_mid_sqs:
                     overlay = HL_MOVE
+                elif (r, c) in trade_sqs:
+                    overlay = C_CYAN      # cyan for trade targets
                 elif (r, c) in move_sqs:
                     overlay = HL_MOVE
                 # Bot last-move highlight
@@ -920,10 +948,11 @@ class PokeChessApp:
         cx = sx + CELL // 2
         cy = sy + CELL // 2 - 4
 
-        # Team ring
+        # Team ring — thick coloured border
         ring_col = C_RED if piece.team == Team.RED else C_BLUE
-        pygame.draw.circle(surf, ring_col, (cx, cy), SPRITE_PX // 2 + 4)
-        pygame.draw.circle(surf, BG,       (cx, cy), SPRITE_PX // 2 + 2)
+        ring_r = SPRITE_PX // 2 + 5
+        pygame.draw.circle(surf, ring_col, (cx, cy), ring_r)
+        pygame.draw.circle(surf, BG,       (cx, cy), ring_r - 4)
 
         if piece.piece_type in self._sprites:
             img = self._sprites[piece.piece_type]
@@ -961,17 +990,36 @@ class PokeChessApp:
             )
 
     def _draw_ball(self, surf, piece, cx, cy):
+        import math
         is_master = piece.piece_type == PieceType.MASTERBALL
-        outer = (200, 50, 50) if not is_master else (130, 0, 160)
-        inner = (240, 240, 240)
-        pygame.draw.circle(surf, outer, (cx, cy), 22)
-        pygame.draw.circle(surf, inner, (cx, cy + 11), 11)
-        pygame.draw.line(surf, (30, 30, 30), (cx - 22, cy), (cx + 22, cy), 2)
-        pygame.draw.circle(surf, inner, (cx, cy), 7)
-        pygame.draw.circle(surf, (30, 30, 30), (cx, cy), 7, 1)
+        r = 26
+        top_col  = (200, 50, 50)   if not is_master else (128, 0, 180)
+        bot_col  = (240, 240, 240)
+        line_col = (20, 20, 20)
+
+        # Full circle in bottom colour (white), then top semicircle in top colour
+        pygame.draw.circle(surf, bot_col, (cx, cy), r)
+        # Top half polygon: centre + arc from 0° to 180° (standard math, y-flipped)
+        pts = [(cx, cy)]
+        for deg in range(0, 181, 3):
+            rad = math.radians(deg)
+            pts.append((cx + r * math.cos(rad), cy - r * math.sin(rad)))
+        pygame.draw.polygon(surf, top_col, pts)
+        # For Masterball: add a small "M" cap in the upper-top portion
         if is_master:
-            dot = self.f_small.render('M', True, (130, 0, 160))
-            surf.blit(dot, dot.get_rect(center=(cx, cy)))
+            cap_pts = [(cx, cy - r // 2)]
+            for deg in range(30, 151, 5):
+                rad = math.radians(deg)
+                cap_pts.append((cx + r * math.cos(rad), cy - r * math.sin(rad)))
+            pygame.draw.polygon(surf, (200, 140, 220), cap_pts)
+        # Circle border
+        pygame.draw.circle(surf, line_col, (cx, cy), r, 2)
+        # Horizontal dividing line
+        pygame.draw.line(surf, line_col, (cx - r, cy), (cx + r, cy), 2)
+        # Centre button
+        btn_r = 7
+        pygame.draw.circle(surf, bot_col,  (cx, cy), btn_r)
+        pygame.draw.circle(surf, line_col, (cx, cy), btn_r, 2)
 
     def _draw_panel(self, surf, mouse_pos):
         # Panel background
@@ -994,15 +1042,14 @@ class PokeChessApp:
         self.sl_budget.draw(surf)
         self.sl_tt.draw(surf)
 
-        # TT stats
+        # TT stats — placed BELOW sl_tt track (track is at sl_tt.y+30 = 245, knob r=9 → bottom at 254)
         tt_entries = len(self.shared_tt)
         tt_txt = self.f_small.render(
-            f'Transposition table: {tt_entries:,} entries  '
-            f'(accumulates across games)', True, C_DIM)
-        surf.blit(tt_txt, (px, 235))
+            f'TT entries: {tt_entries:,}  (grows across games)', True, C_DIM)
+        surf.blit(tt_txt, (px, 258))
 
         # ── Section: Controls ─────────────────────────────────────────────
-        pygame.draw.rect(surf, C_DIVIDER, (px, 252, PANEL_W - 10, 1))
+        pygame.draw.rect(surf, C_DIVIDER, (px, 270, PANEL_W - 10, 1))
         self.btn_new.draw(surf, mouse_pos)
         self.btn_undo.draw(surf, mouse_pos)
 
@@ -1010,9 +1057,9 @@ class PokeChessApp:
         n = len(self.history)
         cur_h = self.hist_idx if self.hist_idx != -1 else n - 1
         h_lbl = self.f_small.render(
-            f'History: [{cur_h + 1}/{n}]  (scroll log to navigate)',
+            f'History: [{cur_h + 1}/{n}]',
             True, C_DIM)
-        surf.blit(h_lbl, (px, 304))
+        surf.blit(h_lbl, (px, 318))
         self.btn_hprev.draw(surf, mouse_pos)
         self.btn_prev.draw(surf, mouse_pos)
         self.btn_hnext.draw(surf, mouse_pos)
@@ -1033,12 +1080,20 @@ class PokeChessApp:
             if piece:
                 pname = PIECE_LABEL.get(piece.piece_type, '?')
                 max_hp = PIECE_STATS[piece.piece_type].max_hp if piece.piece_type in PIECE_STATS else 0
+                sel_col = C_GREEN if any(m.action_type == ActionType.EVOLVE
+                                          for m in self.legal_for_sel) else C_YELLOW
                 sl = self.f_head.render(
                     f'Selected: {pname}  HP {piece.current_hp}/{max_hp}',
-                    True, C_YELLOW)
+                    True, sel_col)
                 surf.blit(sl, (px, 332))
+                hints = []
+                if any(m.action_type == ActionType.EVOLVE for m in self.legal_for_sel):
+                    hints.append('click piece again to evolve')
+                if any(m.action_type == ActionType.TRADE for m in self.legal_for_sel):
+                    hints.append('cyan=trade target')
+                hint_str = '  |  '.join(hints) if hints else 'click a highlighted square'
                 nl = self.f_small.render(
-                    f'{len(self.legal_for_sel)} legal moves — click a highlighted square',
+                    f'{len(self.legal_for_sel)} moves — {hint_str}',
                     True, C_DIM)
                 surf.blit(nl, (px, 352))
             else:

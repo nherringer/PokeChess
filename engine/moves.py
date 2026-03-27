@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional, TYPE_CHECKING
 
-from .state import PieceType, Team, Item
+from .state import PieceType, Team, Item, PAWN_TYPES
 
 if TYPE_CHECKING:
     from .state import GameState, Piece
@@ -200,41 +200,52 @@ def _add_steps(
         c += dc
 
 
+def _pawn_filter(moves: list[Move], state: GameState) -> list[Move]:
+    """Remove ATTACK moves whose target is an enemy pawn (pokeball/masterball)."""
+    return [
+        m for m in moves
+        if not (
+            m.action_type == ActionType.ATTACK
+            and state.board[m.target_row][m.target_col] is not None
+            and state.board[m.target_row][m.target_col].piece_type in PAWN_TYPES
+        )
+    ]
+
+
 def _pokeball_moves(piece: Piece, state: GameState) -> list[Move]:
     """
     Pokeball movement:
       - Up to 2 squares forward (own direction)
       - Up to 2 squares horizontal (left or right)
       - 1 square forward-diagonal (left and right)
-    All reachable squares can be moved to (if empty) or attacked (if enemy).
+    Pokeballs cannot target enemy pawns (pokeball/masterball) for capture.
     """
     moves: list[Move] = []
     fwd = _forward(piece.team)
-    _add_steps(piece, state, moves, fwd,  0, 2)   # forward
-    _add_steps(piece, state, moves,   0,  1, 2)   # right
-    _add_steps(piece, state, moves,   0, -1, 2)   # left
-    _add_steps(piece, state, moves, fwd,  1, 1)   # forward-right diagonal
-    _add_steps(piece, state, moves, fwd, -1, 1)   # forward-left diagonal
-    return moves
+    _add_steps(piece, state, moves, fwd,  0, 2)
+    _add_steps(piece, state, moves,   0,  1, 2)
+    _add_steps(piece, state, moves,   0, -1, 2)
+    _add_steps(piece, state, moves, fwd,  1, 1)
+    _add_steps(piece, state, moves, fwd, -1, 1)
+    return _pawn_filter(moves, state)
 
 
 def _masterball_moves(piece: Piece, state: GameState) -> list[Move]:
     """
-    Masterball = Pokeball + backward movement:
-      - Up to 2 squares backward
-      - 1 square backward-diagonal (left and right)
+    Masterball = Pokeball + backward movement.
+    Masterballs cannot target enemy pawns (pokeball/masterball) for capture.
     """
     moves: list[Move] = []
     fwd = _forward(piece.team)
-    _add_steps(piece, state, moves,  fwd,  0, 2)  # forward
-    _add_steps(piece, state, moves,    0,  1, 2)  # right
-    _add_steps(piece, state, moves,    0, -1, 2)  # left
-    _add_steps(piece, state, moves,  fwd,  1, 1)  # forward-right diagonal
-    _add_steps(piece, state, moves,  fwd, -1, 1)  # forward-left diagonal
-    _add_steps(piece, state, moves, -fwd,  0, 2)  # backward
-    _add_steps(piece, state, moves, -fwd,  1, 1)  # backward-right diagonal
-    _add_steps(piece, state, moves, -fwd, -1, 1)  # backward-left diagonal
-    return moves
+    _add_steps(piece, state, moves,  fwd,  0, 2)
+    _add_steps(piece, state, moves,    0,  1, 2)
+    _add_steps(piece, state, moves,    0, -1, 2)
+    _add_steps(piece, state, moves,  fwd,  1, 1)
+    _add_steps(piece, state, moves,  fwd, -1, 1)
+    _add_steps(piece, state, moves, -fwd,  0, 2)
+    _add_steps(piece, state, moves, -fwd,  1, 1)
+    _add_steps(piece, state, moves, -fwd, -1, 1)
+    return _pawn_filter(moves, state)
 
 
 # --- king and evolution generators ---
