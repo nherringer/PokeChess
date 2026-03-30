@@ -299,7 +299,18 @@ def _pikachu_moves(piece: Piece, state: GameState) -> list[Move]:
 
 
 def _raichu_moves(piece: Piece, state: GameState) -> list[Move]:
-    return _king_standard_moves(piece, state) + _trade_moves(piece, state)
+    """Raichu: king + same extended L-shape jumps as Pikachu (retained after evolution)."""
+    moves = _king_standard_moves(piece, state)
+    for dr, dc in _PIKACHU_EXTENDED_L:
+        r, c = piece.row + dr, piece.col + dc
+        if not _in_bounds(r, c):
+            continue
+        occupant = state.board[r][c]
+        if occupant is None:
+            moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
+        elif occupant.team != piece.team:
+            moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
+    return moves + _trade_moves(piece, state)
 
 
 def _eevee_quick_attacks(piece: Piece, state: GameState) -> list[Move]:
@@ -341,25 +352,74 @@ def _eevee_moves(piece: Piece, state: GameState) -> list[Move]:
     return moves
 
 
-def _evolved_eevee_moves(piece: Piece, state: GameState) -> list[Move]:
-    """Vaporeon / Flareon / Leafeon / Jolteon: standard king movement."""
-    return _king_standard_moves(piece, state) + _trade_moves(piece, state)
+def _vaporeon_moves(piece: Piece, state: GameState) -> list[Move]:
+    """Vaporeon: king + rook sliding."""
+    empties, enemies = _sliding_squares(piece, state, _ROOK_DIRS)
+    moves = _king_standard_moves(piece, state)
+    king_targets = {(m.target_row, m.target_col) for m in moves}
+    moves += [Move(piece.row, piece.col, ActionType.MOVE, r, c)
+              for r, c in empties if (r, c) not in king_targets]
+    moves += [Move(piece.row, piece.col, ActionType.ATTACK, r, c)
+              for r, c in enemies if (r, c) not in king_targets]
+    return moves + _trade_moves(piece, state)
+
+
+def _flareon_moves(piece: Piece, state: GameState) -> list[Move]:
+    """Flareon: king + knight jumps (mirrors Charmander, the fire knight)."""
+    moves = _king_standard_moves(piece, state)
+    for dr, dc in _KNIGHT_JUMPS:
+        r, c = piece.row + dr, piece.col + dc
+        if not _in_bounds(r, c):
+            continue
+        occupant = state.board[r][c]
+        if occupant is None:
+            moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
+        elif occupant.team != piece.team:
+            moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
+    return moves + _trade_moves(piece, state)
+
+
+def _leafeon_moves(piece: Piece, state: GameState) -> list[Move]:
+    """Leafeon: king + bishop sliding."""
+    empties, enemies = _sliding_squares(piece, state, _BISHOP_DIRS)
+    moves = _king_standard_moves(piece, state)
+    king_targets = {(m.target_row, m.target_col) for m in moves}
+    moves += [Move(piece.row, piece.col, ActionType.MOVE, r, c)
+              for r, c in empties if (r, c) not in king_targets]
+    moves += [Move(piece.row, piece.col, ActionType.ATTACK, r, c)
+              for r, c in enemies if (r, c) not in king_targets]
+    return moves + _trade_moves(piece, state)
+
+
+def _jolteon_moves(piece: Piece, state: GameState) -> list[Move]:
+    """Jolteon: same pattern as Raichu — king + extended L-shape jumps."""
+    moves = _king_standard_moves(piece, state)
+    for dr, dc in _PIKACHU_EXTENDED_L:
+        r, c = piece.row + dr, piece.col + dc
+        if not _in_bounds(r, c):
+            continue
+        occupant = state.board[r][c]
+        if occupant is None:
+            moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
+        elif occupant.team != piece.team:
+            moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
+    return moves + _trade_moves(piece, state)
 
 
 def _espeon_moves(piece: Piece, state: GameState) -> list[Move]:
-    """Espeon: king movement + Foresight targeting any adjacent reachable square."""
+    """Espeon: queen movement (king + full sliding) + Foresight on all reachable squares."""
+    empties, enemies = _sliding_squares(piece, state, _QUEEN_DIRS)
     moves = _king_standard_moves(piece, state)
+    king_targets = {(m.target_row, m.target_col) for m in moves}
+    moves += [Move(piece.row, piece.col, ActionType.MOVE, r, c)
+              for r, c in empties if (r, c) not in king_targets]
+    moves += [Move(piece.row, piece.col, ActionType.ATTACK, r, c)
+              for r, c in enemies if (r, c) not in king_targets]
     if not state.foresight_used_last_turn[piece.team]:
-        for dr, dc in _KING_DIRS:
-            r, c = piece.row + dr, piece.col + dc
-            if not _in_bounds(r, c):
-                continue
-            occupant = state.board[r][c]
-            # Can foresight any adjacent square not occupied by a friendly
-            if occupant is None or occupant.team != piece.team:
-                moves.append(Move(piece.row, piece.col, ActionType.FORESIGHT, r, c))
-    moves += _trade_moves(piece, state)
-    return moves
+        # Foresight can target any queen-range reachable square (like Mew)
+        for r, c in empties + enemies:
+            moves.append(Move(piece.row, piece.col, ActionType.FORESIGHT, r, c))
+    return moves + _trade_moves(piece, state)
 
 
 # Dispatch table (all piece types now covered).
@@ -373,10 +433,10 @@ _PIECE_MOVE_FN = {
     PieceType.PIKACHU:    _pikachu_moves,
     PieceType.RAICHU:     _raichu_moves,
     PieceType.EEVEE:      _eevee_moves,
-    PieceType.VAPOREON:   _evolved_eevee_moves,
-    PieceType.FLAREON:    _evolved_eevee_moves,
-    PieceType.LEAFEON:    _evolved_eevee_moves,
-    PieceType.JOLTEON:    _evolved_eevee_moves,
+    PieceType.VAPOREON:   _vaporeon_moves,
+    PieceType.FLAREON:    _flareon_moves,
+    PieceType.LEAFEON:    _leafeon_moves,
+    PieceType.JOLTEON:    _jolteon_moves,
     PieceType.ESPEON:     _espeon_moves,
 }
 

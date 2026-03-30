@@ -707,24 +707,32 @@ class PokeChessApp:
         bh = 32
         pad = 4
 
-        # Deduplicate by (action_type, move_slot)
+        # Deduplicate: Quick Attack is keyed by (dest, attack-target); others by (type, slot)
         seen = set()
         unique: List[Move] = []
         for m in moves:
-            key = (m.action_type, m.move_slot)
+            if m.action_type == ActionType.QUICK_ATTACK:
+                key = (m.action_type, m.target_row, m.target_col, m.secondary_row, m.secondary_col)
+            else:
+                key = (m.action_type, m.move_slot)
             if key not in seen:
                 seen.add(key)
                 unique.append(m)
 
+        s = self._live_state()
         for i, m in enumerate(unique):
             at  = m.action_type
             lbl = ACTION_LABEL.get(at, '?')
-            if at == ActionType.ATTACK and self._live_state().board[m.piece_row][m.piece_col]:
-                p = self._live_state().board[m.piece_row][m.piece_col]
+            if at == ActionType.ATTACK and s.board[m.piece_row][m.piece_col]:
+                p = s.board[m.piece_row][m.piece_col]
                 if p.piece_type == PieceType.MEW:
                     lbl = MEW_SLOTS.get(m.move_slot, lbl)
             if at == ActionType.EVOLVE:
                 lbl = f'Evolve → {EVO_SLOTS.get(m.move_slot, "?")}'
+            if at == ActionType.QUICK_ATTACK:
+                target = s.board[m.secondary_row][m.secondary_col]
+                t_name = PIECE_LABEL.get(target.piece_type, '?') if target else '?'
+                lbl = f'QA via ({m.target_row},{m.target_col}) → {t_name}'
             # Place buttons vertically in panel, below the nav row
             y = by + i * (bh + pad)
             btn = Button(bx, y, bw, bh, lbl,

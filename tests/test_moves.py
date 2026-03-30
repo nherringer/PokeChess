@@ -592,30 +592,41 @@ class TestMasterballMoves:
 # ---------------------------------------------------------------------------
 
 class TestKingMoves:
-    @pytest.mark.parametrize("pt", [
-        PieceType.RAICHU,  # Pikachu excluded: has additional extended-L jumps
-        PieceType.EEVEE,
-        PieceType.VAPOREON, PieceType.FLAREON,
-        PieceType.LEAFEON, PieceType.JOLTEON, PieceType.ESPEON,
-    ])
-    def test_open_center_move_count(self, pt):
-        # All king types (except Pikachu) can reach all 8 adjacent squares from the center
+    def test_eevee_open_center_move_count(self):
+        # Eevee (pure king) reaches exactly 8 adjacent squares from center
         state = empty_state()
-        place(state, pt, Team.RED, 4, 4)
+        place(state, PieceType.EEVEE, Team.RED, 4, 4)
         assert len(moves_of_type(get_legal_moves(state), ActionType.MOVE)) == 8
 
-    @pytest.mark.parametrize("pt", [
-        PieceType.RAICHU,  # Pikachu excluded: has additional extended-L jumps
-        PieceType.EEVEE,
-        PieceType.VAPOREON, PieceType.FLAREON,
-        PieceType.LEAFEON, PieceType.JOLTEON, PieceType.ESPEON,
-    ])
-    def test_corner_limits_moves(self, pt):
-        # From (0,0) only 3 adjacent squares are in bounds (Pikachu excluded — has extra jumps)
+    def test_eevee_corner_limits_moves(self):
+        # From (0,0) only 3 adjacent squares are in bounds
         state = empty_state()
-        place(state, pt, Team.RED, 0, 0)
-        move_count = len(moves_of_type(get_legal_moves(state), ActionType.MOVE))
-        assert move_count == 3
+        place(state, PieceType.EEVEE, Team.RED, 0, 0)
+        assert len(moves_of_type(get_legal_moves(state), ActionType.MOVE)) == 3
+
+    @pytest.mark.parametrize("pt", [
+        PieceType.PIKACHU, PieceType.RAICHU, PieceType.JOLTEON,
+    ])
+    def test_extended_l_kings_have_more_than_8_moves_from_center(self, pt):
+        # Kings with extended L-jumps have 8 adjacent + up to 8 extended = >8 total
+        state = empty_state()
+        place(state, pt, Team.RED, 4, 4)
+        assert len(moves_of_type(get_legal_moves(state), ActionType.MOVE)) > 8
+
+    @pytest.mark.parametrize("pt", [
+        PieceType.VAPOREON, PieceType.LEAFEON, PieceType.ESPEON,
+    ])
+    def test_sliding_kings_have_more_than_8_moves_from_center(self, pt):
+        # Kings with sliding movement have 8 adjacent + sliding extensions = >8 total
+        state = empty_state()
+        place(state, pt, Team.RED, 4, 4)
+        assert len(moves_of_type(get_legal_moves(state), ActionType.MOVE)) > 8
+
+    def test_flareon_has_more_than_8_moves_from_center(self):
+        # Flareon (king + knight) has 8 adjacent + 8 knight squares = 16 total
+        state = empty_state()
+        place(state, PieceType.FLAREON, Team.RED, 4, 4)
+        assert len(moves_of_type(get_legal_moves(state), ActionType.MOVE)) == 16
 
     @pytest.mark.parametrize("pt", [
         PieceType.PIKACHU, PieceType.RAICHU,
@@ -788,20 +799,20 @@ class TestEeveeMoves:
 # ---------------------------------------------------------------------------
 
 class TestEspeonMoves:
-    def test_foresight_targets_adjacent_squares(self):
+    def test_foresight_targets_queen_range(self):
         state = empty_state(active=Team.BLUE)
         place(state, PieceType.ESPEON, Team.BLUE, 4, 4)
         fs = moves_of_type(get_legal_moves(state), ActionType.FORESIGHT)
-        # All 8 adjacent squares are valid foresight targets on an empty board
-        assert len(fs) == 8
+        # Espeon has queen-range foresight — all 27 reachable squares on an empty board
+        assert len(fs) == 27
 
-    def test_foresight_targets_only_adjacent(self):
+    def test_foresight_can_target_non_adjacent(self):
         state = empty_state(active=Team.BLUE)
         place(state, PieceType.ESPEON, Team.BLUE, 4, 4)
-        for m in moves_of_type(get_legal_moves(state), ActionType.FORESIGHT):
-            dr = abs(m.target_row - 4)
-            dc = abs(m.target_col - 4)
-            assert max(dr, dc) == 1, "Espeon foresight must target adjacent squares only"
+        fs_targets = targets(moves_of_type(get_legal_moves(state), ActionType.FORESIGHT))
+        # Should be able to target squares beyond adjacent range (queen sliding)
+        assert (4, 0) in fs_targets  # far left on same row
+        assert (0, 0) in fs_targets  # far diagonal
 
     def test_foresight_blocked_on_consecutive_turns(self):
         state = empty_state(active=Team.BLUE)
