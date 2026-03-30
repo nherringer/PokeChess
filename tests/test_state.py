@@ -90,7 +90,10 @@ class TestPieceClassification:
         PieceType.EEVEE, PieceType.VAPOREON, PieceType.FLAREON,
         PieceType.LEAFEON, PieceType.JOLTEON, PieceType.ESPEON,
     }
-    PAWN_PIECE_TYPES = {PieceType.POKEBALL, PieceType.MASTERBALL}
+    PAWN_PIECE_TYPES = {
+        PieceType.POKEBALL, PieceType.MASTERBALL,
+        PieceType.SAFETYBALL, PieceType.MASTER_SAFETYBALL,
+    }
 
     def test_king_types_set(self):
         assert KING_TYPES == self.KING_PIECE_TYPES
@@ -265,10 +268,12 @@ class TestNewGame:
         assert len(state.all_pieces(Team.RED)) == 16
         assert len(state.all_pieces(Team.BLUE)) == 16
 
-    def test_each_team_has_eight_pokeballs(self, state):
+    def test_each_team_has_four_pokeballs_and_four_safetyballs(self, state):
         for team in Team:
-            pawns = [p for p in state.all_pieces(team) if p.piece_type == PieceType.POKEBALL]
-            assert len(pawns) == 8
+            stealballs = [p for p in state.all_pieces(team) if p.piece_type == PieceType.POKEBALL]
+            safetyballs = [p for p in state.all_pieces(team) if p.piece_type == PieceType.SAFETYBALL]
+            assert len(stealballs) == 4
+            assert len(safetyballs) == 4
 
     def test_middle_rows_empty(self, state):
         for row in range(2, 6):
@@ -310,17 +315,20 @@ class TestNewGame:
         assert piece.team == Team.BLUE
 
     def test_red_pawn_rank(self, state):
+        # Even cols = Stealball (POKEBALL), odd cols = Safetyball (alternating pattern)
         for col in range(8):
             piece = state.piece_at(1, col)
             assert piece is not None
-            assert piece.piece_type == PieceType.POKEBALL
+            expected = PieceType.POKEBALL if col % 2 == 0 else PieceType.SAFETYBALL
+            assert piece.piece_type == expected
             assert piece.team == Team.RED
 
     def test_blue_pawn_rank(self, state):
         for col in range(8):
             piece = state.piece_at(6, col)
             assert piece is not None
-            assert piece.piece_type == PieceType.POKEBALL
+            expected = PieceType.POKEBALL if col % 2 == 0 else PieceType.SAFETYBALL
+            assert piece.piece_type == expected
             assert piece.team == Team.BLUE
 
     def test_all_pieces_start_at_full_hp(self, state):

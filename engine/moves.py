@@ -17,19 +17,20 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional, TYPE_CHECKING
 
-from .state import PieceType, Team, Item, PAWN_TYPES
+from .state import PieceType, Team, Item, PAWN_TYPES, SAFETYBALL_TYPES, MATCHUP, PokemonType
 
 if TYPE_CHECKING:
     from .state import GameState, Piece
 
 
 class ActionType(Enum):
-    MOVE         = auto()  # Move to empty square
+    MOVE         = auto()  # Move to empty square (or Safetyball onto injured ally)
     ATTACK       = auto()  # Attack target in movement range
     FORESIGHT    = auto()  # Delayed attack (Mew/Espeon)
     TRADE        = auto()  # Swap held items with adjacent teammate
     EVOLVE       = auto()  # Trigger evolution (costs full turn)
-    QUICK_ATTACK = auto()  # Eevee only: move + attack same turn
+    QUICK_ATTACK = auto()  # Eevee only: attack then move same turn
+    RELEASE      = auto()  # Safetyball: release stored Pokémon in place
 
 
 @dataclass
@@ -83,7 +84,9 @@ def _sliding_squares(
             if occupant is None:
                 empties.append((r, c))
             elif occupant.team != piece.team:
-                enemies.append((r, c))
+                # Enemy Safetyballs block the ray but cannot be attacked
+                if occupant.piece_type not in SAFETYBALL_TYPES:
+                    enemies.append((r, c))
                 break
             else:
                 break  # friendly blocks the ray
@@ -137,7 +140,7 @@ def _charmander_moves(piece: Piece, state: GameState) -> list[Move]:
         occupant = state.board[r][c]
         if occupant is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
-        elif occupant.team != piece.team:
+        elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
             moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
     moves += _trade_moves(piece, state)
     return moves
@@ -192,7 +195,9 @@ def _add_steps(
         if occupant is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
         elif occupant.team != piece.team:
-            moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
+            # Enemy Safetyballs block but cannot be attacked
+            if occupant.piece_type not in SAFETYBALL_TYPES:
+                moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
             break
         else:
             break  # friendly blocks
@@ -275,7 +280,7 @@ def _king_standard_moves(piece: Piece, state: GameState) -> list[Move]:
         occupant = state.board[r][c]
         if occupant is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
-        elif occupant.team != piece.team:
+        elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
             moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
     return moves
 
@@ -290,7 +295,7 @@ def _pikachu_moves(piece: Piece, state: GameState) -> list[Move]:
         occupant = state.board[r][c]
         if occupant is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
-        elif occupant.team != piece.team:
+        elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
             moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
     # Evolve to Raichu: costs a full turn; happens in place
     moves.append(Move(piece.row, piece.col, ActionType.EVOLVE, piece.row, piece.col))
@@ -308,33 +313,121 @@ def _raichu_moves(piece: Piece, state: GameState) -> list[Move]:
         occupant = state.board[r][c]
         if occupant is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
-        elif occupant.team != piece.team:
+        elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
             moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
     return moves + _trade_moves(piece, state)
 
 
 def _eevee_quick_attacks(piece: Piece, state: GameState) -> list[Move]:
     """
-    Quick Attack: move to an empty adjacent square, then attack any enemy
-    adjacent (king range) to that destination — all in one turn.
-    target = movement destination; secondary = attack target from new position.
+    Quick Attack (attack-then-move): attack an adjacent enemy first, then move
+    king-range from the post-attack position.
+    target = attack target; secondary = movement destination after attack.
+    If the attack KOs, Eevee occupies the vacated square and moves from there.
+    If no KO, Eevee stays and moves from its original square.
     """
     moves = []
     for dr, dc in _KING_DIRS:
-        dest_r, dest_c = piece.row + dr, piece.col + dc
-        if not _in_bounds(dest_r, dest_c) or state.board[dest_r][dest_c] is not None:
-            continue  # destination must be empty
-        for adr, adc in _KING_DIRS:
-            att_r, att_c = dest_r + adr, dest_c + adc
-            if not _in_bounds(att_r, att_c):
+        att_r, att_c = piece.row + dr, piece.col + dc
+        if not _in_bounds(att_r, att_c):
+            continue
+        target = state.board[att_r][att_c]
+        if target is None or target.team == piece.team:
+            continue
+        if target.piece_type in SAFETYBALL_TYPES:
+            continue
+
+        # Determine if attack KOs (Eevee is NORMAL type, base damage 50)
+        type_mult = MATCHUP[PokemonType.NORMAL][target.pokemon_type]
+        damage = max(10, round(50 * type_mult / 10) * 10)
+        will_ko = damage >= target.current_hp
+
+        # Post-attack position: target square (if KO) or original square (if no KO)
+        post_r = att_r if will_ko else piece.row
+        post_c = att_c if will_ko else piece.col
+
+        for mdr, mdc in _KING_DIRS:
+            dest_r, dest_c = post_r + mdr, post_c + mdc
+            if not _in_bounds(dest_r, dest_c):
                 continue
-            occupant = state.board[att_r][att_c]
-            if occupant is not None and occupant.team != piece.team:
+            occupant = state.board[dest_r][dest_c]
+            # In the KO case, Eevee's original square will be vacated after the attack
+            if will_ko and dest_r == piece.row and dest_c == piece.col:
+                occupant = None  # treat as empty (Eevee will have left)
+            if occupant is None:
                 moves.append(Move(
                     piece.row, piece.col, ActionType.QUICK_ATTACK,
-                    dest_r, dest_c,
-                    secondary_row=att_r, secondary_col=att_c,
+                    att_r, att_c,
+                    secondary_row=dest_r, secondary_col=dest_c,
                 ))
+    return moves
+
+
+def _add_safetyball_steps(
+    piece: Piece,
+    state: GameState,
+    moves: list,
+    dr: int,
+    dc: int,
+    max_steps: int,
+) -> None:
+    """
+    Append Safetyball movement steps. Can move to empty squares or injured
+    allied Pokémon (triggering storage). Stops at friendlies, enemies, and board edge.
+    """
+    r, c = piece.row + dr, piece.col + dc
+    for _ in range(max_steps):
+        if not _in_bounds(r, c):
+            break
+        occupant = state.board[r][c]
+        if occupant is None:
+            moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
+        elif occupant.team == piece.team:
+            # Storable if: Safetyball is empty, ally is injured (has HP), not Pikachu,
+            # and storing would leave at least one other piece on the board.
+            if (
+                piece.stored_piece is None
+                and occupant.max_hp > 0
+                and occupant.current_hp < occupant.max_hp
+                and occupant.piece_type != PieceType.PIKACHU
+                and len(state.all_pieces(piece.team)) >= 3
+            ):
+                moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
+            break  # friendly always stops the ray
+        else:
+            break  # enemy stops the ray
+        r += dr
+        c += dc
+
+
+def _safetyball_moves(piece: Piece, state: GameState) -> list[Move]:
+    """Safetyball: defensive pawn — stores and heals allied Pokémon."""
+    moves: list[Move] = []
+    fwd = _forward(piece.team)
+    if piece.stored_piece is not None:
+        moves.append(Move(piece.row, piece.col, ActionType.RELEASE, piece.row, piece.col))
+    _add_safetyball_steps(piece, state, moves, fwd,  0, 2)
+    _add_safetyball_steps(piece, state, moves,   0,  1, 2)
+    _add_safetyball_steps(piece, state, moves,   0, -1, 2)
+    _add_safetyball_steps(piece, state, moves, fwd,  1, 1)
+    _add_safetyball_steps(piece, state, moves, fwd, -1, 1)
+    return moves
+
+
+def _master_safetyball_moves(piece: Piece, state: GameState) -> list[Move]:
+    """Master Safetyball: promoted Safetyball with omnidirectional movement."""
+    moves: list[Move] = []
+    fwd = _forward(piece.team)
+    if piece.stored_piece is not None:
+        moves.append(Move(piece.row, piece.col, ActionType.RELEASE, piece.row, piece.col))
+    _add_safetyball_steps(piece, state, moves,  fwd,  0, 2)
+    _add_safetyball_steps(piece, state, moves,    0,  1, 2)
+    _add_safetyball_steps(piece, state, moves,    0, -1, 2)
+    _add_safetyball_steps(piece, state, moves,  fwd,  1, 1)
+    _add_safetyball_steps(piece, state, moves,  fwd, -1, 1)
+    _add_safetyball_steps(piece, state, moves, -fwd,  0, 2)
+    _add_safetyball_steps(piece, state, moves, -fwd,  1, 1)
+    _add_safetyball_steps(piece, state, moves, -fwd, -1, 1)
     return moves
 
 
@@ -374,7 +467,7 @@ def _flareon_moves(piece: Piece, state: GameState) -> list[Move]:
         occupant = state.board[r][c]
         if occupant is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
-        elif occupant.team != piece.team:
+        elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
             moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
     return moves + _trade_moves(piece, state)
 
@@ -401,7 +494,7 @@ def _jolteon_moves(piece: Piece, state: GameState) -> list[Move]:
         occupant = state.board[r][c]
         if occupant is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
-        elif occupant.team != piece.team:
+        elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
             moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
     return moves + _trade_moves(piece, state)
 
@@ -424,20 +517,22 @@ def _espeon_moves(piece: Piece, state: GameState) -> list[Move]:
 
 # Dispatch table (all piece types now covered).
 _PIECE_MOVE_FN = {
-    PieceType.SQUIRTLE:   _squirtle_moves,
-    PieceType.CHARMANDER: _charmander_moves,
-    PieceType.BULBASAUR:  _bulbasaur_moves,
-    PieceType.MEW:        _mew_moves,
-    PieceType.POKEBALL:   _pokeball_moves,
-    PieceType.MASTERBALL: _masterball_moves,
-    PieceType.PIKACHU:    _pikachu_moves,
-    PieceType.RAICHU:     _raichu_moves,
-    PieceType.EEVEE:      _eevee_moves,
-    PieceType.VAPOREON:   _vaporeon_moves,
-    PieceType.FLAREON:    _flareon_moves,
-    PieceType.LEAFEON:    _leafeon_moves,
-    PieceType.JOLTEON:    _jolteon_moves,
-    PieceType.ESPEON:     _espeon_moves,
+    PieceType.SQUIRTLE:          _squirtle_moves,
+    PieceType.CHARMANDER:        _charmander_moves,
+    PieceType.BULBASAUR:         _bulbasaur_moves,
+    PieceType.MEW:               _mew_moves,
+    PieceType.POKEBALL:          _pokeball_moves,
+    PieceType.MASTERBALL:        _masterball_moves,
+    PieceType.SAFETYBALL:        _safetyball_moves,
+    PieceType.MASTER_SAFETYBALL: _master_safetyball_moves,
+    PieceType.PIKACHU:           _pikachu_moves,
+    PieceType.RAICHU:            _raichu_moves,
+    PieceType.EEVEE:             _eevee_moves,
+    PieceType.VAPOREON:          _vaporeon_moves,
+    PieceType.FLAREON:           _flareon_moves,
+    PieceType.LEAFEON:           _leafeon_moves,
+    PieceType.JOLTEON:           _jolteon_moves,
+    PieceType.ESPEON:            _espeon_moves,
 }
 
 

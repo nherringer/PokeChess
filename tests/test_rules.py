@@ -532,22 +532,24 @@ class TestEvolveAction:
 # ---------------------------------------------------------------------------
 
 class TestQuickAttack:
-    def test_eevee_moves_to_destination(self):
+    def test_eevee_vacates_original_square(self):
+        # Eevee attacks adjacent enemy (5,5), no KO; then moves to (4,5).
         state = empty_state(active=Team.BLUE)
         place(state, PieceType.EEVEE, Team.BLUE, 4, 4)
-        place(state, PieceType.SQUIRTLE, Team.RED, 6, 6)
+        place(state, PieceType.SQUIRTLE, Team.RED, 5, 5)
+        # target=(5,5) attack; secondary=(4,5) movement
         move = Move(4, 4, ActionType.QUICK_ATTACK, 5, 5,
-                    secondary_row=6, secondary_col=6)
+                    secondary_row=4, secondary_col=5)
         [(ns, _)] = apply_move(state, move)
-        # Target square occupant depends on KO; either Eevee at (5,5) or (6,6)
         assert ns.board[4][4] is None  # original square vacated
 
     def test_quick_attack_deals_damage(self):
         state = empty_state(active=Team.BLUE)
         place(state, PieceType.EEVEE, Team.BLUE, 4, 4)
-        target = place(state, PieceType.SQUIRTLE, Team.RED, 5, 5)
-        move = Move(4, 4, ActionType.QUICK_ATTACK, 4, 5,
-                    secondary_row=5, secondary_col=5)
+        place(state, PieceType.SQUIRTLE, Team.RED, 5, 5)
+        # Attack (5,5) directly [adjacent diag]; move to (4,5) after
+        move = Move(4, 4, ActionType.QUICK_ATTACK, 5, 5,
+                    secondary_row=4, secondary_col=5)
         [(ns, _)] = apply_move(state, move)
         # Eevee (Normal, 50 base) vs Squirtle (Water) = 1.0× → 50 damage
         assert ns.board[5][5].current_hp == 200 - 50
@@ -557,11 +559,13 @@ class TestQuickAttack:
         place(state, PieceType.EEVEE, Team.BLUE, 4, 4)
         target = place(state, PieceType.SQUIRTLE, Team.RED, 5, 5)
         target.current_hp = 10  # will be KO'd by 50 base damage
-        move = Move(4, 4, ActionType.QUICK_ATTACK, 4, 5,
-                    secondary_row=5, secondary_col=5)
+        # Attack (5,5) → KO; Eevee occupies (5,5); then moves to (5,6)
+        move = Move(4, 4, ActionType.QUICK_ATTACK, 5, 5,
+                    secondary_row=5, secondary_col=6)
         [(ns, _)] = apply_move(state, move)
-        assert ns.board[5][5].team == Team.BLUE   # Eevee captured
-        assert ns.board[4][5] is None              # intermediate square vacated
+        assert ns.board[4][4] is None              # original square vacated
+        assert ns.board[5][5] is None              # KO target; Eevee moved on
+        assert ns.board[5][6].team == Team.BLUE    # Eevee at secondary destination
 
 
 # ---------------------------------------------------------------------------

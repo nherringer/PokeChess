@@ -15,7 +15,7 @@ from typing import Optional
 
 from .state import (
     GameState, Piece, PieceType, PokemonType, Team, Item,
-    PIECE_STATS, KING_TYPES, MATCHUP, ForesightEffect, PAWN_TYPES,
+    PIECE_STATS, KING_TYPES, MATCHUP, ForesightEffect, PAWN_TYPES, SAFETYBALL_TYPES,
 )
 from .moves import Move, ActionType
 
@@ -111,7 +111,7 @@ def apply_move(state: GameState, move: Move) -> list[tuple[GameState, float]]:
             new.has_traded[new.active_player] = False
             _advance_turn(new)
             return [(new, 1.0)]
-        if target.piece_type in _POKEBALL_IMMUNE:
+        if target.piece_type in _POKEBALL_IMMUNE or target.piece_type in SAFETYBALL_TYPES:
             # Immune target — deterministic failure (turn is still consumed).
             new.has_traded[new.active_player] = False
             _advance_turn(new)
@@ -162,8 +162,10 @@ def is_terminal(state: GameState) -> tuple[bool, Optional[Team]]:
 
 
 _PAWN_HP_VALUE: dict[PieceType, int] = {
-    PieceType.POKEBALL:   50,
-    PieceType.MASTERBALL: 200,
+    PieceType.POKEBALL:          50,
+    PieceType.MASTERBALL:        200,
+    PieceType.SAFETYBALL:        50,
+    PieceType.MASTER_SAFETYBALL: 200,
 }
 
 
@@ -174,10 +176,12 @@ def hp_winner(state: GameState) -> Optional[Team]:
     Returns the leading team or None for a tie.
     """
     def _team_hp(team: Team) -> int:
-        return sum(
-            _PAWN_HP_VALUE.get(p.piece_type, p.current_hp)
-            for p in state.all_pieces(team)
-        )
+        total = 0
+        for p in state.all_pieces(team):
+            total += _PAWN_HP_VALUE.get(p.piece_type, p.current_hp)
+            if p.stored_piece is not None:
+                total += p.stored_piece.current_hp
+        return total
 
     red_hp  = _team_hp(Team.RED)
     blue_hp = _team_hp(Team.BLUE)
@@ -212,7 +216,7 @@ def _resolve_foresight(state: GameState) -> None:
     if fx is None or fx.resolves_on_turn != state.turn_number:
         return
     target = state.board[fx.target_row][fx.target_col]
-    if target is not None:
+    if target is not None and target.piece_type not in SAFETYBALL_TYPES:
         target.current_hp -= fx.damage
         if target.current_hp <= 0:
             state.board[fx.target_row][fx.target_col] = None
@@ -235,6 +239,8 @@ def _apply_deterministic(state: GameState, piece: Piece, move: Move) -> None:
         _do_evolve(state, piece, move)
     elif at == ActionType.QUICK_ATTACK:
         _do_quick_attack(state, piece, move)
+    elif at == ActionType.RELEASE:
+        _do_release(state, piece, move)
 
 
 # ---------------------------------------------------------------------------
@@ -243,16 +249,27 @@ def _apply_deterministic(state: GameState, piece: Piece, move: Move) -> None:
 
 def _do_move(state: GameState, piece: Piece, move: Move) -> None:
     state.board[piece.row][piece.col] = None
+    old_target = state.board[move.target_row][move.target_col]
     piece.row, piece.col = move.target_row, move.target_col
     state.board[piece.row][piece.col] = piece
     if piece.is_pawn:
         _check_promotion(state, piece)
+    if piece.piece_type in SAFETYBALL_TYPES:
+        if old_target is not None and old_target.team == piece.team:
+            # Moving onto an injured ally — store it and apply initial heal
+            piece.stored_piece = old_target
+            _safetyball_heal(state, piece)
+        elif piece.stored_piece is not None:
+            # Moving while carrying — heal stored Pokémon
+            _safetyball_heal(state, piece)
 
 
 def _do_attack(state: GameState, piece: Piece, move: Move) -> None:
     target = state.board[move.target_row][move.target_col]
     if target is None:
         return
+    if target.piece_type in SAFETYBALL_TYPES:
+        return  # Defensive: Safetyballs are immune (move gen should not reach here)
     if piece.piece_type == PieceType.MASTERBALL:
         # Masterball: guaranteed capture — both disappear (pawn consumed on use).
         _capture_both(state, piece, move.target_row, move.target_col)
@@ -308,18 +325,41 @@ def _do_evolve(state: GameState, piece: Piece, move: Move) -> None:
         piece.held_item = Item.NONE  # Evolution stone consumed
 
 
+def _do_release(state: GameState, piece: Piece, move: Move) -> None:
+    """Place the stored Pokémon on the Safetyball's square; Safetyball is consumed."""
+    stored = piece.stored_piece
+    stored.row, stored.col = piece.row, piece.col
+    state.board[piece.row][piece.col] = stored
+
+
+def _safetyball_heal(state: GameState, piece: Piece) -> None:
+    """
+    Heal the stored Pokémon by ¼ (basic) or ½ (master) of its max HP.
+    If the stored Pokémon reaches full HP, auto-release it in place.
+    """
+    stored = piece.stored_piece
+    heal = stored.max_hp // 2 if piece.piece_type == PieceType.MASTER_SAFETYBALL else stored.max_hp // 4
+    stored.current_hp = min(stored.current_hp + heal, stored.max_hp)
+    if stored.current_hp >= stored.max_hp:
+        stored.row, stored.col = piece.row, piece.col
+        state.board[piece.row][piece.col] = stored
+
+
 def _do_quick_attack(state: GameState, piece: Piece, move: Move) -> None:
-    # Step 1: Move Eevee to the intermediate destination.
-    state.board[piece.row][piece.col] = None
-    piece.row, piece.col = move.target_row, move.target_col
-    state.board[piece.row][piece.col] = piece
-    # Step 2: Attack from the new position.
-    target = state.board[move.secondary_row][move.secondary_col]
+    # Step 1: Attack the adjacent target.
+    target = state.board[move.target_row][move.target_col]
     if target is not None:
         damage = _calc_damage(piece, target)
         target.current_hp -= damage
         if target.current_hp <= 0:
-            _capture(state, piece, move.secondary_row, move.secondary_col)
+            # KO: Eevee occupies the vacated square (standard capture rule).
+            _capture(state, piece, move.target_row, move.target_col)
+        # No KO: Eevee stays at its current position.
+    # Step 2: Move to the chosen secondary destination.
+    if move.secondary_row is not None and move.secondary_col is not None:
+        state.board[piece.row][piece.col] = None
+        piece.row, piece.col = move.secondary_row, move.secondary_col
+        state.board[piece.row][piece.col] = piece
 
 
 # ---------------------------------------------------------------------------
@@ -343,10 +383,13 @@ def _capture(state: GameState, attacker: Piece, target_row: int, target_col: int
 
 
 def _check_promotion(state: GameState, piece: Piece) -> None:
-    """Pokeball reaching the opponent's back rank promotes to Masterball."""
+    """Pawn reaching the opponent's back rank promotes."""
     promo_row = 7 if piece.team == Team.RED else 0
-    if piece.row == promo_row and piece.piece_type == PieceType.POKEBALL:
-        piece.piece_type = PieceType.MASTERBALL
+    if piece.row == promo_row:
+        if piece.piece_type == PieceType.POKEBALL:
+            piece.piece_type = PieceType.MASTERBALL
+        elif piece.piece_type == PieceType.SAFETYBALL:
+            piece.piece_type = PieceType.MASTER_SAFETYBALL
 
 
 def _calc_damage(attacker: Piece, target: Piece, move_slot: Optional[int] = None) -> int:

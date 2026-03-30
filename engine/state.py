@@ -19,20 +19,22 @@ class Team(Enum):
 
 
 class PieceType(Enum):
-    SQUIRTLE   = auto()  # Rook
-    CHARMANDER = auto()  # Knight
-    BULBASAUR  = auto()  # Bishop
-    MEW        = auto()  # Queen
-    POKEBALL   = auto()
-    MASTERBALL = auto()
-    PIKACHU    = auto()
-    RAICHU     = auto()
-    EEVEE      = auto()
-    VAPOREON   = auto()
-    FLAREON    = auto()
-    LEAFEON    = auto()
-    JOLTEON    = auto()
-    ESPEON     = auto()
+    SQUIRTLE         = auto()  # Rook
+    CHARMANDER       = auto()  # Knight
+    BULBASAUR        = auto()  # Bishop
+    MEW              = auto()  # Queen
+    POKEBALL         = auto()  # Stealball (offensive pawn)
+    MASTERBALL       = auto()  # Master Stealball (promoted Stealball)
+    SAFETYBALL       = auto()  # Defensive pawn — stores/heals allies
+    MASTER_SAFETYBALL = auto() # Promoted Safetyball
+    PIKACHU          = auto()
+    RAICHU           = auto()
+    EEVEE            = auto()
+    VAPOREON         = auto()
+    FLAREON          = auto()
+    LEAFEON          = auto()
+    JOLTEON          = auto()
+    ESPEON           = auto()
 
 
 class Item(Enum):
@@ -76,20 +78,22 @@ class PieceStats(NamedTuple):
 
 # Single source of truth for all per-type constants.
 PIECE_STATS: dict[PieceType, PieceStats] = {
-    PieceType.SQUIRTLE:   PieceStats(PokemonType.WATER,    200, Item.WATERSTONE),
-    PieceType.CHARMANDER: PieceStats(PokemonType.FIRE,     200, Item.FIRESTONE),
-    PieceType.BULBASAUR:  PieceStats(PokemonType.GRASS,    200, Item.LEAFSTONE),
-    PieceType.MEW:        PieceStats(PokemonType.PSYCHIC,  250, Item.BENTSPOON),
-    PieceType.POKEBALL:   PieceStats(PokemonType.NONE,     0,   Item.NONE),
-    PieceType.MASTERBALL: PieceStats(PokemonType.NONE,     0,   Item.NONE),
-    PieceType.PIKACHU:    PieceStats(PokemonType.ELECTRIC, 200, Item.THUNDERSTONE),
-    PieceType.RAICHU:     PieceStats(PokemonType.ELECTRIC, 250, Item.NONE),
-    PieceType.EEVEE:      PieceStats(PokemonType.NORMAL,   120, Item.NONE),
-    PieceType.VAPOREON:   PieceStats(PokemonType.WATER,    220, Item.NONE),
-    PieceType.FLAREON:    PieceStats(PokemonType.FIRE,     220, Item.NONE),
-    PieceType.LEAFEON:    PieceStats(PokemonType.GRASS,    220, Item.NONE),
-    PieceType.JOLTEON:    PieceStats(PokemonType.ELECTRIC, 220, Item.NONE),
-    PieceType.ESPEON:     PieceStats(PokemonType.PSYCHIC,  220, Item.NONE),
+    PieceType.SQUIRTLE:          PieceStats(PokemonType.WATER,    200, Item.WATERSTONE),
+    PieceType.CHARMANDER:        PieceStats(PokemonType.FIRE,     200, Item.FIRESTONE),
+    PieceType.BULBASAUR:         PieceStats(PokemonType.GRASS,    200, Item.LEAFSTONE),
+    PieceType.MEW:               PieceStats(PokemonType.PSYCHIC,  250, Item.BENTSPOON),
+    PieceType.POKEBALL:          PieceStats(PokemonType.NONE,     0,   Item.NONE),
+    PieceType.MASTERBALL:        PieceStats(PokemonType.NONE,     0,   Item.NONE),
+    PieceType.SAFETYBALL:        PieceStats(PokemonType.NONE,     0,   Item.NONE),
+    PieceType.MASTER_SAFETYBALL: PieceStats(PokemonType.NONE,     0,   Item.NONE),
+    PieceType.PIKACHU:           PieceStats(PokemonType.ELECTRIC, 200, Item.THUNDERSTONE),
+    PieceType.RAICHU:            PieceStats(PokemonType.ELECTRIC, 250, Item.NONE),
+    PieceType.EEVEE:             PieceStats(PokemonType.NORMAL,   120, Item.NONE),
+    PieceType.VAPOREON:          PieceStats(PokemonType.WATER,    220, Item.NONE),
+    PieceType.FLAREON:           PieceStats(PokemonType.FIRE,     220, Item.NONE),
+    PieceType.LEAFEON:           PieceStats(PokemonType.GRASS,    220, Item.NONE),
+    PieceType.JOLTEON:           PieceStats(PokemonType.ELECTRIC, 220, Item.NONE),
+    PieceType.ESPEON:            PieceStats(PokemonType.PSYCHIC,  220, Item.NONE),
 }
 
 # Authoritative sets used by Piece.is_king and Piece.is_pawn.
@@ -98,7 +102,14 @@ KING_TYPES: frozenset[PieceType] = frozenset({
     PieceType.EEVEE, PieceType.VAPOREON, PieceType.FLAREON,
     PieceType.LEAFEON, PieceType.JOLTEON, PieceType.ESPEON,
 })
-PAWN_TYPES: frozenset[PieceType] = frozenset({PieceType.POKEBALL, PieceType.MASTERBALL})
+PAWN_TYPES: frozenset[PieceType] = frozenset({
+    PieceType.POKEBALL, PieceType.MASTERBALL,
+    PieceType.SAFETYBALL, PieceType.MASTER_SAFETYBALL,
+})
+# Safetyballs cannot be attacked or captured by any piece.
+SAFETYBALL_TYPES: frozenset[PieceType] = frozenset({
+    PieceType.SAFETYBALL, PieceType.MASTER_SAFETYBALL,
+})
 
 
 @dataclass
@@ -109,6 +120,8 @@ class Piece:
     col: int
     current_hp: int
     held_item: Item
+    # Safetyball only: the Pokémon currently stored inside (None if empty).
+    stored_piece: Optional['Piece'] = None
 
     @classmethod
     def create(cls, piece_type: PieceType, team: Team, row: int, col: int) -> Piece:
@@ -139,7 +152,10 @@ class Piece:
         return self.piece_type in PAWN_TYPES
 
     def copy(self) -> Piece:
-        return dataclasses.replace(self)
+        c = dataclasses.replace(self)
+        if self.stored_piece is not None:
+            c.stored_piece = self.stored_piece.copy()
+        return c
 
 
 @dataclass
@@ -236,6 +252,8 @@ def _place_starting_pieces(board: list[list[Optional[Piece]]]) -> None:
     board[0][4] = Piece.create(PieceType.PIKACHU, Team.RED, 0, 4)
     board[7][4] = Piece.create(PieceType.EEVEE, Team.BLUE, 7, 4)
 
+    # Pawn row: alternating Stealball (POKEBALL) / Safetyball — even cols = Pokeball, odd = Safetyball
     for col in range(8):
-        board[1][col] = Piece.create(PieceType.POKEBALL, Team.RED, 1, col)
-        board[6][col] = Piece.create(PieceType.POKEBALL, Team.BLUE, 6, col)
+        pawn_type = PieceType.POKEBALL if col % 2 == 0 else PieceType.SAFETYBALL
+        board[1][col] = Piece.create(pawn_type, Team.RED, 1, col)
+        board[6][col] = Piece.create(pawn_type, Team.BLUE, 6, col)
