@@ -90,8 +90,10 @@ PIECE_LABEL = {
     PieceType.MEW:        'Mew',
     PieceType.ESPEON:     'Espeon',
     PieceType.LEAFEON:    'Leafeon',
-    PieceType.POKEBALL:   'Poke Ball',
-    PieceType.MASTERBALL: 'Master Ball',
+    PieceType.POKEBALL:          'Stealball',
+    PieceType.MASTERBALL:        'Master Stealball',
+    PieceType.SAFETYBALL:        'Safetyball',
+    PieceType.MASTER_SAFETYBALL: 'Master Safetyball',
 }
 
 ACTION_LABEL = {
@@ -101,6 +103,7 @@ ACTION_LABEL = {
     ActionType.TRADE:        'Trade',
     ActionType.EVOLVE:       'Evolve',
     ActionType.QUICK_ATTACK: 'Quick Attack',
+    ActionType.RELEASE:      'Release',
 }
 
 MEW_SLOTS  = {0: 'Fire Blast', 1: 'Hydro Pump', 2: 'Solar Beam'}
@@ -999,7 +1002,8 @@ class PokeChessApp:
         if piece.piece_type in self._sprites:
             img = self._sprites[piece.piece_type]
             surf.blit(img, img.get_rect(center=(cx, cy)))
-        elif piece.piece_type in (PieceType.POKEBALL, PieceType.MASTERBALL):
+        elif piece.piece_type in (PieceType.POKEBALL, PieceType.MASTERBALL,
+                                   PieceType.SAFETYBALL, PieceType.MASTER_SAFETYBALL):
             self._draw_ball(surf, piece, cx, cy)
         else:
             # Fallback: text label
@@ -1025,21 +1029,25 @@ class PokeChessApp:
             hp_str = f'  HP {piece.current_hp}/{max_hp}' if max_hp > 0 else ''
             item_str = f'  [{piece.held_item.name}]' if piece.held_item != Item.NONE else ''
             king_str = ' (King)' if piece.is_king else ''
+            stored = piece.stored_piece
+            stored_str = (f'  [Storing: {stored.piece_type.name} {stored.current_hp}/{stored.max_hp}HP]'
+                          if stored is not None else '')
             self.tooltip_text = (
                 f'{PIECE_LABEL.get(piece.piece_type, "?")}'
                 f'{king_str}  {"RED" if piece.team == Team.RED else "BLUE"}'
-                f'{hp_str}{item_str}'
+                f'{hp_str}{item_str}{stored_str}'
             )
 
     def _draw_ball(self, surf, piece, cx, cy):
         import math
-        is_master = piece.piece_type == PieceType.MASTERBALL
-        r = RING_R - 4   # pokeball fills the ring's inner circle
-        top_col  = (200, 50, 50)   if not is_master else (128, 0, 180)
-        bot_col  = (240, 240, 240)
-        line_col = (20, 20, 20)
+        is_master  = piece.piece_type in (PieceType.MASTERBALL, PieceType.MASTER_SAFETYBALL)
+        is_safety  = piece.piece_type in (PieceType.SAFETYBALL, PieceType.MASTER_SAFETYBALL)
+        r          = RING_R - 4   # pokeball fills the ring's inner circle
+        top_col    = (200, 50, 50) if not is_master else (128, 0, 180)
+        bot_col    = (30, 30, 30)  if is_safety    else (240, 240, 240)
+        line_col   = (20, 20, 20)
 
-        # Full circle in bottom colour (white), then top semicircle in top colour
+        # Full circle in bottom colour, then top semicircle in top colour
         pygame.draw.circle(surf, bot_col, (cx, cy), r)
         # Top half polygon: centre + arc from 0° to 180° (standard math, y-flipped)
         pts = [(cx, cy)]
@@ -1047,7 +1055,7 @@ class PokeChessApp:
             rad = math.radians(deg)
             pts.append((cx + r * math.cos(rad), cy - r * math.sin(rad)))
         pygame.draw.polygon(surf, top_col, pts)
-        # For Masterball: add a small "M" cap in the upper-top portion
+        # Master balls: small decorative cap in the upper portion
         if is_master:
             cap_pts = [(cx, cy - r // 2)]
             for deg in range(30, 151, 5):
