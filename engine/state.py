@@ -252,8 +252,8 @@ def _place_starting_pieces(board: list[list[Optional[Piece]]]) -> None:
     board[0][4] = Piece.create(PieceType.PIKACHU, Team.RED, 0, 4)
     board[7][4] = Piece.create(PieceType.EEVEE, Team.BLUE, 7, 4)
 
-    # Pawn row: alternating Stealball (POKEBALL) / Safetyball — even cols = Pokeball, odd = Safetyball
+    # Pawn row: Safetyballs on middle 4 cols (2-5), Stealballs on outer 4 cols (0-1, 6-7)
     for col in range(8):
-        pawn_type = PieceType.POKEBALL if col % 2 == 0 else PieceType.SAFETYBALL
+        pawn_type = PieceType.SAFETYBALL if 2 <= col <= 5 else PieceType.POKEBALL
         board[1][col] = Piece.create(pawn_type, Team.RED, 1, col)
         board[6][col] = Piece.create(pawn_type, Team.BLUE, 6, col)

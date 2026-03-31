@@ -26,8 +26,9 @@ from bot.transposition import TranspositionTable
 WIN_W, WIN_H = 1140, 740
 BOARD_X, BOARD_Y = 20, 70
 CELL = 78
-SPRITE_PX = 76   # scaled sprite image size
-RING_R    = 36   # outer ring radius (fits inside CELL=78 given the 4px cy offset)
+RING_R      = 36   # outer ring radius (fits inside CELL=78 given the 4px cy offset)
+RING_BORDER = 6    # team-colour ring thickness in pixels
+SPRITE_PX   = (RING_R - RING_BORDER) * 2  # sprite fills the inner circle
 PANEL_X = BOARD_X + 8 * CELL + 20   # 658
 PANEL_W = WIN_W - PANEL_X - 10      # ~472
 
@@ -365,6 +366,12 @@ class PokeChessApp:
             path = os.path.join(SPRITE_DIR, fname)
             if os.path.exists(path):
                 img = pygame.image.load(path).convert_alpha()
+                # Crop transparent padding so the Pokemon fills the circle
+                bb = img.get_bounding_rect()
+                if bb.width > 0 and bb.height > 0:
+                    cropped = pygame.Surface((bb.width, bb.height), pygame.SRCALPHA)
+                    cropped.blit(img, (0, 0), bb)
+                    img = cropped
                 img = pygame.transform.smoothscale(img, (SPRITE_PX, SPRITE_PX))
                 self._sprites[pt] = img
 
@@ -539,20 +546,24 @@ class PokeChessApp:
             slot_note = f' [{MEW_SLOTS.get(move.move_slot, "?")}]'
         if move.action_type == ActionType.EVOLVE:
             slot_note = f' -> {EVO_SLOTS.get(move.move_slot, "?")}'
-        self.log_widget.add(
-            f'Bot  {ACTION_LABEL.get(move.action_type,"?")} '
-            f'{p_name}{slot_note} ({pr},{pc})→({tr},{tc})',
-            team_col)
-        # Stochastic outcome note
-        if is_stochastic:
-            if picked == 0:
-                self.log_widget.add(f'  >> Caught {t_name}!', C_GREEN)
-            else:
-                self.log_widget.add(f'  >> {t_name} got away!', C_ORANGE)
-        # Pokemon-attacks-pokeball note (deterministic catch)
-        elif (move.action_type == ActionType.ATTACK and target is not None
-              and target.piece_type in PAWN_TYPES):
-            self.log_widget.add(f'  >> {p_name} was caught by {t_name}!', C_ORANGE)
+        if move.action_type == ActionType.TRADE:
+            self.log_widget.add(
+                f'Bot  Trade  {p_name} ↔ {t_name}', C_DIM)
+        else:
+            self.log_widget.add(
+                f'Bot  {ACTION_LABEL.get(move.action_type,"?")} '
+                f'{p_name}{slot_note} ({pr},{pc})→({tr},{tc})',
+                team_col)
+            # Stochastic outcome note
+            if is_stochastic:
+                if picked == 0:
+                    self.log_widget.add(f'  >> Caught {t_name}!', C_GREEN)
+                else:
+                    self.log_widget.add(f'  >> {t_name} got away!', C_ORANGE)
+            # Pokemon-attacks-pokeball note (deterministic catch)
+            elif (move.action_type == ActionType.ATTACK and target is not None
+                  and target.piece_type in PAWN_TYPES):
+                self.log_widget.add(f'  >> {p_name} was caught by {t_name}!', C_ORANGE)
 
         self.bot_move_highlight = (pr, pc, tr, tc)
         self._last_bot_move_time = time.monotonic()
@@ -586,20 +597,24 @@ class PokeChessApp:
             slot_note = f' [{MEW_SLOTS.get(move.move_slot, "?")}]'
         if move.action_type == ActionType.EVOLVE:
             slot_note = f' -> {EVO_SLOTS.get(move.move_slot, "?")}'
-        self.log_widget.add(
-            f'You  {ACTION_LABEL.get(move.action_type,"?")} '
-            f'{p_name}{slot_note} ({pr},{pc})->({tr},{tc})',
-            team_col)
-        # Stochastic outcome note
-        if is_stochastic:
-            if picked == 0:
-                self.log_widget.add(f'  >> Caught {t_name}!', C_GREEN)
-            else:
-                self.log_widget.add(f'  >> {t_name} got away!', C_ORANGE)
-        # Pokemon-attacks-pokeball note (deterministic catch)
-        elif (move.action_type == ActionType.ATTACK and target is not None
-              and target.piece_type in PAWN_TYPES):
-            self.log_widget.add(f'  >> {p_name} was caught by {t_name}!', C_ORANGE)
+        if move.action_type == ActionType.TRADE:
+            self.log_widget.add(
+                f'You  Trade  {p_name} ↔ {t_name}', C_DIM)
+        else:
+            self.log_widget.add(
+                f'You  {ACTION_LABEL.get(move.action_type,"?")} '
+                f'{p_name}{slot_note} ({pr},{pc})->({tr},{tc})',
+                team_col)
+            # Stochastic outcome note
+            if is_stochastic:
+                if picked == 0:
+                    self.log_widget.add(f'  >> Caught {t_name}!', C_GREEN)
+                else:
+                    self.log_widget.add(f'  >> {t_name} got away!', C_ORANGE)
+            # Pokemon-attacks-pokeball note (deterministic catch)
+            elif (move.action_type == ActionType.ATTACK and target is not None
+                  and target.piece_type in PAWN_TYPES):
+                self.log_widget.add(f'  >> {p_name} was caught by {t_name}!', C_ORANGE)
 
         self.history.append(new_state)
         self.selected = None
@@ -669,7 +684,14 @@ class PokeChessApp:
                     self.pending_moves = trade_moves
                     self._build_action_buttons(trade_moves)
                     return
-                # No trade → switch selection to the clicked ally
+                # Check for MOVE moves targeting this ally (e.g. Safetyball storage)
+                move_to_ally = [m for m in self.legal_for_sel
+                                if m.action_type == ActionType.MOVE
+                                and m.target_row == row and m.target_col == col]
+                if move_to_ally:
+                    self._execute_move(move_to_ally[0])
+                    return
+                # No applicable move → switch selection to the clicked ally
                 all_legal = get_legal_moves(s)
                 self.selected = (row, col)
                 self.legal_for_sel = [m for m in all_legal
@@ -993,11 +1015,11 @@ class PokeChessApp:
         cx = sx + CELL // 2
         cy = sy + CELL // 2 - 4
 
-        # Team ring — thick coloured border (fixed radius, independent of sprite size)
+        # Team ring — thick coloured border
         ring_col = C_RED if piece.team == Team.RED else C_BLUE
         ring_r   = RING_R
         pygame.draw.circle(surf, ring_col, (cx, cy), ring_r)
-        pygame.draw.circle(surf, BG,       (cx, cy), ring_r - 4)
+        pygame.draw.circle(surf, BG,       (cx, cy), ring_r - RING_BORDER)
 
         if piece.piece_type in self._sprites:
             img = self._sprites[piece.piece_type]
@@ -1044,7 +1066,7 @@ class PokeChessApp:
         is_safety  = piece.piece_type in (PieceType.SAFETYBALL, PieceType.MASTER_SAFETYBALL)
         r          = RING_R - 4   # pokeball fills the ring's inner circle
         top_col    = (200, 50, 50) if not is_master else (128, 0, 180)
-        bot_col    = (30, 30, 30)  if is_safety    else (240, 240, 240)
+        bot_col    = (240, 240, 240) if is_safety    else (30, 30, 30)
         line_col   = (20, 20, 20)
 
         # Full circle in bottom colour, then top semicircle in top colour
@@ -1055,13 +1077,11 @@ class PokeChessApp:
             rad = math.radians(deg)
             pts.append((cx + r * math.cos(rad), cy - r * math.sin(rad)))
         pygame.draw.polygon(surf, top_col, pts)
-        # Master balls: small decorative cap in the upper portion
+        # Master balls: 'M' label on the upper half
         if is_master:
-            cap_pts = [(cx, cy - r // 2)]
-            for deg in range(30, 151, 5):
-                rad = math.radians(deg)
-                cap_pts.append((cx + r * math.cos(rad), cy - r * math.sin(rad)))
-            pygame.draw.polygon(surf, (200, 140, 220), cap_pts)
+            font = pygame.font.SysFont('Arial', r, bold=True)
+            lbl  = font.render('M', True, (240, 240, 255))
+            surf.blit(lbl, lbl.get_rect(center=(cx, cy - r // 2)))
         # Circle border
         pygame.draw.circle(surf, line_col, (cx, cy), r, 2)
         # Horizontal dividing line

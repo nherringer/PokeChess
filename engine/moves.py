@@ -114,6 +114,8 @@ def _trade_moves(piece: Piece, state: GameState) -> list[Move]:
             if (
                 neighbor is not None
                 and neighbor.team == piece.team
+                and neighbor.piece_type not in PAWN_TYPES
+                and piece.piece_type not in PAWN_TYPES
                 and neighbor.held_item != piece.held_item
             ):
                 moves.append(Move(piece.row, piece.col, ActionType.TRADE, r, c))
@@ -205,14 +207,16 @@ def _add_steps(
         c += dc
 
 
+_STEALBALL_CANNOT_TARGET: frozenset = frozenset({PieceType.PIKACHU}) | PAWN_TYPES
+
 def _pawn_filter(moves: list[Move], state: GameState) -> list[Move]:
-    """Remove ATTACK moves whose target is an enemy pawn (pokeball/masterball)."""
+    """Remove ATTACK moves whose target is an enemy pawn or Pikachu (immune to stealballs)."""
     return [
         m for m in moves
         if not (
             m.action_type == ActionType.ATTACK
             and state.board[m.target_row][m.target_col] is not None
-            and state.board[m.target_row][m.target_col].piece_type in PAWN_TYPES
+            and state.board[m.target_row][m.target_col].piece_type in _STEALBALL_CANNOT_TARGET
         )
     ]
 
@@ -303,8 +307,27 @@ def _pikachu_moves(piece: Piece, state: GameState) -> list[Move]:
     return moves
 
 
+_RAICHU_EXTRA_CARDINALS = [(2, 0), (-2, 0), (0, 2), (0, -2)]
+
+
+def _raichu_extra_cardinals(piece: 'Piece', state: 'GameState', moves: list) -> None:
+    """Add 2-square cardinal slides (blocked if the intermediate square is occupied)."""
+    for dr, dc in _RAICHU_EXTRA_CARDINALS:
+        mid_r, mid_c  = piece.row + dr // 2, piece.col + dc // 2
+        dest_r, dest_c = piece.row + dr,      piece.col + dc
+        if not _in_bounds(dest_r, dest_c):
+            continue
+        if state.board[mid_r][mid_c] is not None:
+            continue  # intermediate square occupied — slide blocked
+        dest = state.board[dest_r][dest_c]
+        if dest is None:
+            moves.append(Move(piece.row, piece.col, ActionType.MOVE, dest_r, dest_c))
+        elif dest.team != piece.team and dest.piece_type not in SAFETYBALL_TYPES:
+            moves.append(Move(piece.row, piece.col, ActionType.ATTACK, dest_r, dest_c))
+
+
 def _raichu_moves(piece: Piece, state: GameState) -> list[Move]:
-    """Raichu: king + same extended L-shape jumps as Pikachu (retained after evolution)."""
+    """Raichu: Pikachu pattern (king + L-jumps) plus 2-square cardinal slides."""
     moves = _king_standard_moves(piece, state)
     for dr, dc in _PIKACHU_EXTENDED_L:
         r, c = piece.row + dr, piece.col + dc
@@ -315,6 +338,7 @@ def _raichu_moves(piece: Piece, state: GameState) -> list[Move]:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
         elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
             moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
+    _raichu_extra_cardinals(piece, state, moves)
     return moves + _trade_moves(piece, state)
 
 
@@ -485,7 +509,7 @@ def _leafeon_moves(piece: Piece, state: GameState) -> list[Move]:
 
 
 def _jolteon_moves(piece: Piece, state: GameState) -> list[Move]:
-    """Jolteon: same pattern as Raichu — king + extended L-shape jumps."""
+    """Jolteon: identical pattern to Raichu — king + L-jumps + 2-square cardinal slides."""
     moves = _king_standard_moves(piece, state)
     for dr, dc in _PIKACHU_EXTENDED_L:
         r, c = piece.row + dr, piece.col + dc
@@ -496,6 +520,7 @@ def _jolteon_moves(piece: Piece, state: GameState) -> list[Move]:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
         elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
             moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
+    _raichu_extra_cardinals(piece, state, moves)
     return moves + _trade_moves(piece, state)
 
 

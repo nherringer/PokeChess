@@ -315,11 +315,11 @@ class TestNewGame:
         assert piece.team == Team.BLUE
 
     def test_red_pawn_rank(self, state):
-        # Even cols = Stealball (POKEBALL), odd cols = Safetyball (alternating pattern)
+        # Middle 4 cols (2-5) = Safetyball, outer 4 cols (0-1, 6-7) = Stealball
         for col in range(8):
             piece = state.piece_at(1, col)
             assert piece is not None
-            expected = PieceType.POKEBALL if col % 2 == 0 else PieceType.SAFETYBALL
+            expected = PieceType.SAFETYBALL if 2 <= col <= 5 else PieceType.POKEBALL
             assert piece.piece_type == expected
             assert piece.team == Team.RED
 
@@ -327,7 +327,7 @@ class TestNewGame:
         for col in range(8):
             piece = state.piece_at(6, col)
             assert piece is not None
-            expected = PieceType.POKEBALL if col % 2 == 0 else PieceType.SAFETYBALL
+            expected = PieceType.SAFETYBALL if 2 <= col <= 5 else PieceType.POKEBALL
             assert piece.piece_type == expected
             assert piece.team == Team.BLUE
 
