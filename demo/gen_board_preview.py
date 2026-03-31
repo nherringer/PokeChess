@@ -24,6 +24,7 @@ _POKEMON_DEX = {
     PieceType.EEVEE: 133, PieceType.VAPOREON: 134, PieceType.FLAREON: 136,
     PieceType.LEAFEON: 470, PieceType.JOLTEON: 135, PieceType.ESPEON: 196,
     PieceType.POKEBALL: None, PieceType.MASTERBALL: None,
+    PieceType.SAFETYBALL: None, PieceType.MASTER_SAFETYBALL: None,
 }
 _cache = {}
 
@@ -34,14 +35,14 @@ def _fetch_sprite(pt):
     if dex is None:
         img = np.zeros((SPRITE_SIZE, SPRITE_SIZE, 4), dtype=np.uint8)
         cx = cy = SPRITE_SIZE // 2; r = SPRITE_SIZE // 2 - 4
+        is_master  = pt in (PieceType.MASTERBALL, PieceType.MASTER_SAFETYBALL)
+        is_safety  = pt in (PieceType.SAFETYBALL, PieceType.MASTER_SAFETYBALL)
+        top_col    = [130, 50, 220, 255] if is_master else [220, 50, 50, 255]
+        bot_col    = [240, 240, 240, 255] if is_safety else [30, 30, 30, 255]
         for y in range(SPRITE_SIZE):
             for x in range(SPRITE_SIZE):
                 if (x-cx)**2 + (y-cy)**2 <= r**2:
-                    top = y < cy
-                    if pt == PieceType.MASTERBALL:
-                        img[y,x] = [130,50,220,255] if top else [240,240,240,255]
-                    else:
-                        img[y,x] = [220,50,50,255] if top else [240,240,240,255]
+                    img[y,x] = top_col if y < cy else bot_col
         _cache[pt] = img; return img
     path = os.path.join(SPRITE_DIR, f'{dex}.png')
     if not os.path.exists(path):
@@ -103,10 +104,10 @@ def _render(state, ax, title='Starting Position'):
             if totals.get(key,1) > 1:
                 ax.text(c*CELL+CELL-4,(7-r)*CELL+12, str(indices[(r,c)]),
                         fontsize=7, fontweight='bold', color=ec, ha='right', va='top')
-            if p.piece_type == PieceType.MASTERBALL:
+            if p.piece_type in (PieceType.MASTERBALL, PieceType.MASTER_SAFETYBALL):
                 ax.text(c*CELL+CELL//2, (7-r)*CELL+int(CELL*0.36), 'M',
                         fontsize=int(CELL*0.28), fontweight='bold',
-                        color='black', ha='center', va='center')
+                        color='white', ha='center', va='center')
     ax.set_xticks([c*CELL+CELL//2 for c in range(8)])
     ax.set_yticks([(7-r)*CELL+CELL//2 for r in range(8)])
     ax.set_xticklabels(range(8), fontsize=9)
