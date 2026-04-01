@@ -23,7 +23,14 @@ python scripts/benchmark.py                        # 20 games, 0.5s/move
 python scripts/benchmark.py --budget 1.0 --games 50   # slower, more rigorous
 ```
 
-No build step required for Python. C++ extension (cpp/) is added in a later phase via pybind11.
+No build step required for Python. The C++ extension is optional but strongly recommended for performance.
+
+```bash
+# Build C++ rollout extension (requires pybind11: pip install pybind11)
+python setup.py build_ext --inplace
+
+# The bot auto-detects the extension at import time; falls back to pure Python if not built.
+```
 
 ## Architecture
 
@@ -39,7 +46,9 @@ bot/        MCTS bot — depends on engine, no frontend coupling
   ucb.py          UCB1 formula with tunable exploration constant C
   transposition.py Persistent hash→(wins,visits) table across games
 
-cpp/        C++ port of engine hot loop (phase 3, pybind11 bridge)
+cpp/        C++ rollout engine (pybind11 bridge)
+  engine.cpp    Full rollout hot-loop in C++; exposes run_rollouts() and run_rollout_with_rolls()
+  state_codec.py  Python→wire-format encoder consumed by the C++ decoder
 tests/      pytest — unit tests per module
 scripts/    Standalone utilities (benchmark.py for win-rate validation)
 docs/       Game design PDFs (rules, piece movement diagrams, board sheets)
@@ -54,6 +63,8 @@ docs/       Game design PDFs (rules, piece movement diagrams, board sheets)
 **Inter-game learning:** Transposition table (Zobrist hash → wins/visits) persists across games. Common positions accumulate statistics, giving warm-start priors.
 
 **HP:** Always a multiple of 10. Zobrist hp_bucket = current_hp // 50.
+
+**C++ move ordering:** `get_legal_moves` in C++ iterates the board in row-major order (not the `pieces[]` array). This matches Python's `all_pieces()` board iteration. If you change this to array-index order the fixed-roll tests will fail (different moves selected for the same roll).
 
 ## Game Rules Summary
 

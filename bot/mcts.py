@@ -30,6 +30,21 @@ from engine.zobrist import hash_state, ZOBRIST_TABLE
 
 DEFAULT_ROLLOUT_DEPTH_LIMIT = 150
 
+# ---------------------------------------------------------------------------
+# C++ rollout engine (optional — falls back to pure Python if not built)
+# ---------------------------------------------------------------------------
+
+try:
+    import pokechess_cpp as _cpp
+    from cpp.state_codec import encode_state as _encode_state
+    _CPP_AVAILABLE = True
+except ImportError:
+    _CPP_AVAILABLE = False
+
+# Number of C++ rollouts to batch per MCTS expansion.
+# Higher = fewer Python↔C++ round-trips; lower = finer-grained time checks.
+_CPP_BATCH = 8
+
 
 # ---------------------------------------------------------------------------
 # Tree node
@@ -220,10 +235,27 @@ class MCTS:
             self._warm_start(node)
 
         # 3. Simulation: random rollout from the new node
+        if _CPP_AVAILABLE and not node._terminal:
+            self._iterate_cpp_batch(node)
+            return
         winner = self._rollout(node)
 
         # 4. Backpropagation: update wins/visits up to the root
         self._backprop(node, winner)
+
+    def _iterate_cpp_batch(self, node: MCTSNode) -> None:
+        """Run _CPP_BATCH C++ rollouts for a single node and backprop all results."""
+        buf = _encode_state(node.state)
+        seed = _random.getrandbits(64)
+        red, blue, draws = _cpp.run_rollouts(
+            buf, _CPP_BATCH, self.rollout_depth_limit, seed
+        )
+        for _ in range(red):
+            self._backprop(node, Team.RED)
+        for _ in range(blue):
+            self._backprop(node, Team.BLUE)
+        for _ in range(draws):
+            self._backprop(node, None)
 
     def _rollout(self, node: MCTSNode) -> Optional[Team]:
         """

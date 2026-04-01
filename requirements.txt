@@ -1,2 +1,3 @@
 pytest
 ipympl
+pybind11
