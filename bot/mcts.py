@@ -163,6 +163,17 @@ class MCTS:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
+    def ponder(self, state: GameState, should_stop) -> None:
+        """
+        Run MCTS indefinitely on state until should_stop() returns True.
+        Reuses the existing tree if it matches state (same as select_move).
+        Called from a background thread during the opponent's turn.
+        """
+        self._root = self._find_or_create_root(state)
+        self._warm_start(self._root)
+        while not should_stop():
+            self._iterate()
+
     def select_move(self, state: GameState) -> Move:
         """
         Run MCTS for time_budget seconds and return the best move.
