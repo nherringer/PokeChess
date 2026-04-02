@@ -914,9 +914,15 @@ static void apply_move(State& s, const Move& mv, float roll) {
         if (is_safetyball(tgt.type)) { advance_turn(s); return; }
 
         if (p.type == PT_MASTERBALL || is_pawn(tgt.type)) {
-            // Capture: both disappear
-            kill_piece(s, pidx);
-            kill_piece(s, (int)t8);
+            // Pikachu is immune to regular pokeballs — pokeball destroyed, Pikachu advances
+            if (p.type == PT_PIKACHU && tgt.type == PT_POKEBALL) {
+                kill_piece(s, (int)t8);
+                move_piece(s, pidx, mv.tr, mv.tc);
+            } else {
+                // Capture: both disappear
+                kill_piece(s, pidx);
+                kill_piece(s, (int)t8);
+            }
         } else {
             int dmg = calc_damage(p.type, tgt.type, mv.slot);
             tgt.hp -= (int16_t)dmg;
@@ -962,9 +968,16 @@ static int is_terminal(const State& s) {
     bool red_alive = false, blue_alive = false;
     for (int i = 0; i < s.n_pieces; i++) {
         const Piece& p = s.pieces[i];
-        if (p.type == PT_NONE || !is_king(p.type)) continue;
-        if (p.team == TEAM_RED) red_alive  = true;
-        else                    blue_alive = true;
+        if (p.type == PT_NONE) continue;
+        if (is_king(p.type)) {
+            if (p.team == TEAM_RED) red_alive  = true;
+            else                    blue_alive = true;
+        }
+        // Kings stored inside safetyballs are alive (healing, not eliminated)
+        if (p.stored.type != PT_NONE && is_king(p.stored.type)) {
+            if (p.stored.team == TEAM_RED) red_alive  = true;
+            else                           blue_alive = true;
+        }
     }
     if (red_alive && blue_alive) return WIN_NONE;
     if (!red_alive && !blue_alive) return WIN_DRAW;
@@ -1037,7 +1050,7 @@ static int rollout_fixed(State s, const std::vector<float>& rolls, int depth) {
 // Python-facing functions
 // ---------------------------------------------------------------------------
 
-static py::tuple run_rollouts(
+static std::tuple<int,int,int> run_rollouts(
     py::bytes state_bytes, int n_rollouts, int depth_limit, uint64_t seed)
 {
     std::string buf = state_bytes;
@@ -1050,7 +1063,7 @@ static py::tuple run_rollouts(
         else if (r == WIN_BLUE) blue++;
         else                    draws++;
     }
-    return py::make_tuple(red, blue, draws);
+    return std::make_tuple(red, blue, draws);
 }
 
 static int run_rollout_with_rolls(

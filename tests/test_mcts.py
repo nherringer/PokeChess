@@ -141,9 +141,9 @@ def test_node_fully_expanded_after_all_moves():
 def test_node_select_child_returns_highest_ucb():
     root = MCTSNode(GameState.new_game())
     root.visits = 100
-    c1 = MCTSNode(GameState.new_game(), parent=root)
+    c1 = MCTSNode(GameState.new_game())
     c1.wins, c1.visits = 90, 100
-    c2 = MCTSNode(GameState.new_game(), parent=root)
+    c2 = MCTSNode(GameState.new_game())
     c2.wins, c2.visits = 10, 100
     root.children = [c1, c2]
     assert root.select_child(DEFAULT_C) is c1

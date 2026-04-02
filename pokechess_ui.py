@@ -14,7 +14,7 @@ import pygame
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from engine.state import GameState, Team, PieceType, Item, PIECE_STATS, PAWN_TYPES
+from engine.state import GameState, Team, PieceType, Item, PIECE_STATS, PAWN_TYPES, KING_TYPES
 from engine.moves import get_legal_moves, Move, ActionType
 from engine.rules import apply_move, is_terminal, hp_winner
 from bot.mcts import MCTS
@@ -23,14 +23,21 @@ from bot.transposition import TranspositionTable
 # ──────────────────────────────────────────────────────────────────────────────
 # Layout
 # ──────────────────────────────────────────────────────────────────────────────
-WIN_W, WIN_H = 1140, 740
+TT_SAVE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'transposition_table.bin')
+
+WIN_W, WIN_H = 1140, 780
 BOARD_X, BOARD_Y = 20, 70
 CELL = 78
 RING_R      = 36   # outer ring radius (fits inside CELL=78 given the 4px cy offset)
 RING_BORDER = 6    # team-colour ring thickness in pixels
 SPRITE_PX   = (RING_R - RING_BORDER) * 2  # sprite fills the inner circle
-PANEL_X = BOARD_X + 8 * CELL + 20   # 658
-PANEL_W = WIN_W - PANEL_X - 10      # ~472
+PANEL_X = BOARD_X + 8 * CELL + 20   # 664
+PANEL_W = WIN_W - PANEL_X - 30      # leaves ~30px right margin to avoid edge clipping
+
+# Captured-pieces chip geometry (drawn below board)
+CHIP_R        = 12
+CHIP_INNER_R  = CHIP_R - 2
+CHIP_SPRITE_PX = CHIP_INNER_R * 2
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Palette
@@ -268,6 +275,7 @@ class ScrollLog:
 class PokeChessApp:
     # ── init ────────────────────────────────────────────────────────────────
     def __init__(self, init_budget: float = 1.0):
+        os.environ.setdefault('SDL_VIDEO_WINDOW_POS', '0,0')
         pygame.init()
         pygame.display.set_caption('PokeChess')
         self.screen = pygame.display.set_mode((WIN_W, WIN_H), pygame.RESIZABLE)
@@ -285,8 +293,12 @@ class PokeChessApp:
         self._sprites: Dict[PieceType, pygame.Surface] = {}
         self._load_sprites()
 
-        # persistent transposition table
+        # persistent transposition table (loaded from disk if available)
         self.shared_tt = GatedTT()
+        self.shared_tt.load(TT_SAVE_PATH)
+
+        # captured pieces: team → list of PieceType lost by that team this game
+        self._captures: dict[Team, list] = {Team.RED: [], Team.BLUE: []}
 
         # game state
         self.state: Optional[GameState]   = None
@@ -323,8 +335,8 @@ class PokeChessApp:
 
         # bot sliders
         sx = px
-        sw = PANEL_W - 10
-        self.sl_budget = Slider(sx, 160, sw, 0.2, 5.0, init_budget,
+        sw = PANEL_W - 4   # PANEL_W already includes 30px right margin via the constant
+        self.sl_budget = Slider(sx, 160, sw, 0.2, 10.0, init_budget,
                                 label='Bot time budget (s)',
                                 fmt='{:.1f}s',
                                 font=self.f_body, lbl_font=self.f_small)
@@ -362,6 +374,7 @@ class PokeChessApp:
 
     # ── sprite loading ───────────────────────────────────────────────────────
     def _load_sprites(self):
+        self._chip_sprites: Dict[PieceType, pygame.Surface] = {}
         for pt, fname in SPRITE_FILES.items():
             path = os.path.join(SPRITE_DIR, fname)
             if os.path.exists(path):
@@ -372,8 +385,9 @@ class PokeChessApp:
                     cropped = pygame.Surface((bb.width, bb.height), pygame.SRCALPHA)
                     cropped.blit(img, (0, 0), bb)
                     img = cropped
-                img = pygame.transform.smoothscale(img, (SPRITE_PX, SPRITE_PX))
-                self._sprites[pt] = img
+                self._sprites[pt] = pygame.transform.smoothscale(img, (SPRITE_PX, SPRITE_PX))
+                self._chip_sprites[pt] = pygame.transform.smoothscale(
+                    img, (CHIP_SPRITE_PX, CHIP_SPRITE_PX))
 
     # ── coordinate helpers ───────────────────────────────────────────────────
     def _board_to_screen(self, row: int, col: int) -> Tuple[int, int]:
@@ -399,8 +413,11 @@ class PokeChessApp:
     # ── game logic ───────────────────────────────────────────────────────────
     def new_game(self):
         """Start a fresh game (keeps the shared TT)."""
-        if self._bot_running:
-            return   # don't restart mid-think
+        # Abandon any in-flight bot thread (it's a daemon and will terminate on its own).
+        # We clear the flags first so its result is ignored when it eventually finishes.
+        with self._bot_lock:
+            self._bot_running = False
+            self._bot_result  = None
         self.state    = GameState.new_game()
         self.history  = [self.state]
         self.move_log = []
@@ -410,6 +427,7 @@ class PokeChessApp:
         self.pending_moves = []
         self.action_btns   = []
         self.bot_move_highlight = None
+        self._captures = {Team.RED: [], Team.BLUE: []}
         self.log_widget.lines.clear()
         self.log_widget.add('─── New game ───', C_YELLOW)
         self.log_widget.add(f'You play as {"RED" if self.player_color == Team.RED else "BLUE"}', C_WHITE)
@@ -442,6 +460,50 @@ class PokeChessApp:
         self.bot_move_highlight = None
         self.log_widget.add('Undo', C_ORANGE)
         self._update_status()
+
+    # ── HP and capture helpers ────────────────────────────────────────────────
+
+    _PAWN_HP = {
+        PieceType.POKEBALL:          50,
+        PieceType.MASTERBALL:        200,
+        PieceType.SAFETYBALL:        50,
+        PieceType.MASTER_SAFETYBALL: 200,
+    }
+
+    def _team_hp(self, state: GameState, team: Team) -> int:
+        total = 0
+        for p in state.all_pieces(team):
+            total += self._PAWN_HP.get(p.piece_type, p.current_hp)
+            if p.stored_piece is not None:
+                total += p.stored_piece.current_hp
+        return total
+
+    def _record_captures(self, old_state: GameState, new_state: GameState) -> None:
+        """Detect pieces that disappeared between states and record them as captured."""
+        def counts(state):
+            c: dict[tuple, int] = {}
+            for p in state.all_pieces():
+                c[(p.team, p.piece_type)] = c.get((p.team, p.piece_type), 0) + 1
+                if p.stored_piece is not None:
+                    k = (p.stored_piece.team, p.stored_piece.piece_type)
+                    c[k] = c.get(k, 0) + 1
+            return c
+
+        old_c = counts(old_state)
+        new_c = counts(new_state)
+
+        for (team, ptype), old_n in old_c.items():
+            removed = old_n - new_c.get((team, ptype), 0)
+            if removed <= 0:
+                continue
+            # Skip king evolutions: king disappeared but team's king count unchanged
+            if ptype in KING_TYPES:
+                old_kings = sum(v for (t, pt), v in old_c.items() if t == team and pt in KING_TYPES)
+                new_kings = sum(v for (t, pt), v in new_c.items() if t == team and pt in KING_TYPES)
+                if new_kings >= old_kings:
+                    continue
+            for _ in range(removed):
+                self._captures[team].append(ptype)
 
     def _live_state(self) -> GameState:
         return self.history[-1]
@@ -501,8 +563,14 @@ class PokeChessApp:
         state  = self._live_state()
 
         def _think(s, b, tt):
-            bot  = MCTS(time_budget=b, transposition=tt)
-            move = bot.select_move(s)
+            move = None
+            try:
+                bot  = MCTS(time_budget=b, transposition=tt)
+                move = bot.select_move(s)
+            except Exception:
+                import traceback
+                traceback.print_exc()
+                self.log_widget.add('Bot error — see terminal', C_ORANGE)
             with self._bot_lock:
                 self._bot_result  = move
                 self._bot_running = False
@@ -568,6 +636,7 @@ class PokeChessApp:
         self.bot_move_highlight = (pr, pc, tr, tc)
         self._last_bot_move_time = time.monotonic()
 
+        self._record_captures(s, new_state)
         self.history.append(new_state)
         self._update_status()
         if self._is_bot_turn():
@@ -616,6 +685,7 @@ class PokeChessApp:
                   and target.piece_type in PAWN_TYPES):
                 self.log_widget.add(f'  >> {p_name} was caught by {t_name}!', C_ORANGE)
 
+        self._record_captures(s, new_state)
         self.history.append(new_state)
         self.selected = None
         self.legal_for_sel = []
@@ -780,6 +850,7 @@ class PokeChessApp:
             mouse_pos = pygame.mouse.get_pos()
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
+                    self.shared_tt.save(TT_SAVE_PATH)
                     pygame.quit()
                     return
 
@@ -891,6 +962,7 @@ class PokeChessApp:
 
         self._draw_title(surf)
         self._draw_board(surf, mouse_pos)
+        self._draw_captured_chips(surf)
         self._draw_panel(surf, mouse_pos)
 
     def _draw_title(self, surf):
@@ -1060,6 +1132,52 @@ class PokeChessApp:
                 f'{hp_str}{item_str}{stored_str}'
             )
 
+    def _draw_chip_ball(self, surf, ptype: PieceType, cx: int, cy: int, r: int) -> None:
+        """Draw a pokeball icon at (cx, cy) with radius r, styled by ptype."""
+        import math
+        is_master = ptype in (PieceType.MASTERBALL, PieceType.MASTER_SAFETYBALL)
+        is_safety = ptype in (PieceType.SAFETYBALL, PieceType.MASTER_SAFETYBALL)
+        top_col = (200, 50, 50) if not is_master else (128, 0, 180)
+        bot_col = (240, 240, 240) if is_safety    else (30,  30,  30)
+        line_col = (20, 20, 20)
+        pygame.draw.circle(surf, bot_col, (cx, cy), r)
+        pts = [(cx, cy)]
+        for deg in range(0, 181, 6):
+            rad = math.radians(deg)
+            pts.append((cx + r * math.cos(rad), cy - r * math.sin(rad)))
+        pygame.draw.polygon(surf, top_col, pts)
+        pygame.draw.circle(surf, line_col, (cx, cy), r, 1)
+        pygame.draw.line(surf, line_col, (cx - r, cy), (cx + r, cy), 1)
+        btn_r = max(2, r // 4)
+        pygame.draw.circle(surf, bot_col,  (cx, cy), btn_r)
+        pygame.draw.circle(surf, line_col, (cx, cy), btn_r, 1)
+
+    def _draw_captured_chips(self, surf) -> None:
+        """Draw two rows of piece chips below the board (one row per team's losses)."""
+        chip_spacing = CHIP_R * 2 + 3
+        label_w      = 24
+        base_y       = BOARD_Y + 8 * CELL + CHIP_R + 8   # first row centre
+
+        for row_idx, (team, color) in enumerate(
+            [(Team.RED, C_RED), (Team.BLUE, C_BLUE)]
+        ):
+            y_center = base_y + row_idx * (CHIP_R * 2 + 6)
+
+            lbl = self.f_small.render('R×' if team == Team.RED else 'B×', True, color)
+            surf.blit(lbl, (BOARD_X, y_center - lbl.get_height() // 2))
+
+            x = BOARD_X + label_w
+            for ptype in self._captures[team]:
+                cx = x + CHIP_R
+                pygame.draw.circle(surf, color, (cx, y_center), CHIP_R)
+                pygame.draw.circle(surf, BG,    (cx, y_center), CHIP_INNER_R)
+                chip_spr = self._chip_sprites.get(ptype)
+                if chip_spr:
+                    surf.blit(chip_spr, chip_spr.get_rect(center=(cx, y_center)))
+                else:
+                    self._draw_chip_ball(surf, ptype, cx, y_center, CHIP_INNER_R)
+                x += chip_spacing
+
     def _draw_ball(self, surf, piece, cx, cy):
         import math
         is_master  = piece.piece_type in (PieceType.MASTERBALL, PieceType.MASTER_SAFETYBALL)
@@ -1098,6 +1216,33 @@ class PokeChessApp:
         pygame.draw.rect(surf, C_DIVIDER, (PANEL_X - 10, 0, 1, WIN_H))
 
         px = PANEL_X
+        bar_w = PANEL_W - 4   # PANEL_W already has 30px right margin baked in
+
+        # ── Section: HP balance bar ────────────────────────────────────────
+        state = self._viewing_state()
+        red_hp  = self._team_hp(state, Team.RED)
+        blue_hp = self._team_hp(state, Team.BLUE)
+        total_hp = red_hp + blue_hp
+
+        hp_lbl = self.f_small.render('Total HP', True, C_DIM)
+        surf.blit(hp_lbl, (px, 4))
+
+        bar_x, bar_y, bar_h = px, 18, 12
+        pygame.draw.rect(surf, C_DIVIDER, (bar_x, bar_y, bar_w, bar_h), border_radius=4)
+        if total_hp > 0:
+            red_w = int(bar_w * red_hp / total_hp)
+            if red_w > 0:
+                pygame.draw.rect(surf, C_RED,  (bar_x, bar_y, red_w, bar_h),
+                                 border_radius=4)
+            if bar_w - red_w > 0:
+                pygame.draw.rect(surf, C_BLUE, (bar_x + red_w, bar_y, bar_w - red_w, bar_h),
+                                 border_radius=4)
+        red_hp_lbl  = self.f_small.render(f'R {red_hp}', True, C_RED)
+        blue_hp_lbl = self.f_small.render(f'B {blue_hp}', True, C_BLUE)
+        surf.blit(red_hp_lbl,  (bar_x, bar_y + bar_h + 2))
+        surf.blit(blue_hp_lbl, (bar_x + bar_w - blue_hp_lbl.get_width(), bar_y + bar_h + 2))
+
+        pygame.draw.rect(surf, C_DIVIDER, (px, 44, bar_w, 1))
 
         # ── Section: Color choice ──────────────────────────────────────────
         lbl = self.f_head.render('You play as:', True, C_DIM)
