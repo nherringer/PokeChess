@@ -109,11 +109,13 @@ def apply_move(state: GameState, move: Move) -> list[tuple[GameState, float]]:
         if target is None:
             # Target was vacated by Foresight resolving this turn — treat as a miss.
             new.has_traded[new.active_player] = False
+            _discharge_unmoved_safetyballs(new, piece)
             _advance_turn(new)
             return [(new, 1.0)]
         if target.piece_type in _POKEBALL_IMMUNE or target.piece_type in SAFETYBALL_TYPES:
             # Immune target — deterministic failure (turn is still consumed).
             new.has_traded[new.active_player] = False
+            _discharge_unmoved_safetyballs(new, piece)
             _advance_turn(new)
             return [(new, 1.0)]
         # Build fail state: pokeball is spent (thrown and missed), target survives.
@@ -121,11 +123,14 @@ def apply_move(state: GameState, move: Move) -> list[tuple[GameState, float]]:
         _resolve_foresight(fail)
         fail.foresight_used_last_turn[fail.active_player] = False
         fail.has_traded[fail.active_player] = False
+        fail_piece = fail.board[move.piece_row][move.piece_col]
         fail.board[move.piece_row][move.piece_col] = None   # pokeball disappears on throw
+        _discharge_unmoved_safetyballs(fail, fail_piece)
         _advance_turn(fail)
         # Success branch: both pieces disappear (pokemon caught, pokeball consumed).
         _capture_both(new, piece, move.target_row, move.target_col)
         new.has_traded[new.active_player] = False
+        _discharge_unmoved_safetyballs(new, piece)
         _advance_turn(new)
         return [(new, _POKEBALL_CAPTURE_PROB), (fail, 1.0 - _POKEBALL_CAPTURE_PROB)]
 
@@ -134,6 +139,7 @@ def apply_move(state: GameState, move: Move) -> list[tuple[GameState, float]]:
         ends_turn = _do_trade(new, piece, move)
         if ends_turn:
             new.has_traded[new.active_player] = False
+            _discharge_unmoved_safetyballs(new, piece)
             _advance_turn(new)
         else:
             new.has_traded[new.active_player] = True
@@ -143,6 +149,7 @@ def apply_move(state: GameState, move: Move) -> list[tuple[GameState, float]]:
     # --- All deterministic actions (non-POKEBALL, non-TRADE) ---
     _apply_deterministic(new, piece, move)
     new.has_traded[new.active_player] = False
+    _discharge_unmoved_safetyballs(new, piece)
     _advance_turn(new)
     return [(new, 1.0)]
 
@@ -343,6 +350,26 @@ def _do_release(state: GameState, piece: Piece, move: Move) -> None:
     stored = piece.stored_piece
     stored.row, stored.col = piece.row, piece.col
     state.board[piece.row][piece.col] = stored
+
+
+def _discharge_unmoved_safetyballs(state: GameState, moved_piece: Piece) -> None:
+    """
+    If the active player did NOT move a safetyball this turn, auto-release any
+    stored Pokémon from their safetyballs back to the board.
+
+    A safetyball heals its passenger only when it moves.  If the owner acts
+    elsewhere (moves another piece, attacks, evolves, etc.) the stored Pokémon
+    is immediately discharged back to the board.  The safetyball is consumed on
+    discharge (same as the auto-release-at-full-HP path).
+    """
+    if moved_piece.piece_type in SAFETYBALL_TYPES:
+        return   # player used a safetyball this turn — no forced discharge
+    for p in list(state.all_pieces(state.active_player)):
+        if p.piece_type in SAFETYBALL_TYPES and p.stored_piece is not None:
+            stored = p.stored_piece
+            stored.row, stored.col = p.row, p.col
+            state.board[p.row][p.col] = stored
+            p.stored_piece = None
 
 
 def _safetyball_heal(state: GameState, piece: Piece) -> None:
