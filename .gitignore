@@ -7,3 +7,14 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+
+# Runtime / session files
+transposition_table.bin
+resume_claude_session.txt
+
+# Claude Code internals
+.claude/
+memory/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
