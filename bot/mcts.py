@@ -13,6 +13,11 @@ therefore directly maximises the active player's win rate over children.
 
 Tree reuse: after a move is made and the opponent responds, the subtree
 rooted at (our_move → opponent_response) is retained as the new root.
+
+Memory: MCTSNode stores no parent link. The backprop path is collected
+during selection as a plain list. Without parent back-edges the tree is a
+pure downward DAG — no reference cycles, so it is freed by reference
+counting the moment the root is released (no GC needed).
 """
 
 from __future__ import annotations
@@ -30,6 +35,21 @@ from engine.zobrist import hash_state, ZOBRIST_TABLE
 
 DEFAULT_ROLLOUT_DEPTH_LIMIT = 150
 
+# ---------------------------------------------------------------------------
+# C++ rollout engine (optional — falls back to pure Python if not built)
+# ---------------------------------------------------------------------------
+
+try:
+    import pokechess_cpp as _cpp
+    from cpp.state_codec import encode_state as _encode_state
+    _CPP_AVAILABLE = True
+except ImportError:
+    _CPP_AVAILABLE = False
+
+# Number of C++ rollouts to batch per MCTS expansion.
+# Higher = fewer Python↔C++ round-trips; lower = finer-grained time checks.
+_CPP_BATCH = 8
+
 
 # ---------------------------------------------------------------------------
 # Tree node
@@ -39,7 +59,7 @@ class MCTSNode:
     """A node in the MCTS tree."""
 
     __slots__ = (
-        'state', 'parent', 'move',
+        'state', 'move',
         'wins', 'visits', 'children',
         '_untried', '_terminal', '_winner', '_hash',
     )
@@ -47,11 +67,9 @@ class MCTSNode:
     def __init__(
         self,
         state: GameState,
-        parent: Optional[MCTSNode] = None,
         move: Optional[Move] = None,
     ) -> None:
         self.state   = state
-        self.parent  = parent
         self.move    = move
         self.wins    = 0.0
         self.visits  = 0
@@ -107,7 +125,7 @@ class MCTSNode:
                 weights=[p for _, p in outcomes],
             )[0]
 
-        child = MCTSNode(new_state, parent=self, move=move)
+        child = MCTSNode(new_state, move=move)
         self.children.append(child)
         return child
 
@@ -144,6 +162,17 @@ class MCTS:
         self._root: Optional[MCTSNode] = None
 
     # ── Public API ────────────────────────────────────────────────────────────
+
+    def ponder(self, state: GameState, should_stop) -> None:
+        """
+        Run MCTS indefinitely on state until should_stop() returns True.
+        Reuses the existing tree if it matches state (same as select_move).
+        Called from a background thread during the opponent's turn.
+        """
+        self._root = self._find_or_create_root(state)
+        self._warm_start(self._root)
+        while not should_stop():
+            self._iterate()
 
     def select_move(self, state: GameState) -> Move:
         """
@@ -186,7 +215,6 @@ class MCTS:
             (c for c in our_child.children if c.move == opp_move), None
         )
         self._root = opp_child if opp_child is not None else our_child
-        self._root.parent = None   # sever upward link to allow GC
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -209,21 +237,43 @@ class MCTS:
 
     def _iterate(self) -> None:
         """One full MCTS iteration: selection → expansion → simulation → backprop."""
-        # 1. Selection: descend via UCB1 until a non-fully-expanded or terminal node
+        # 1. Selection: descend via UCB1, recording the path for backprop.
+        #    No parent links are stored in nodes; the path list is the only
+        #    record of the ancestry for this iteration.
         node = self._root
+        path = [node]
         while node.is_fully_expanded and node.children:
             node = node.select_child(self.exploration_c)
+            path.append(node)
 
         # 2. Expansion: grow the tree by one node
         if not node._terminal and not node.is_fully_expanded:
             node = node.expand()
+            path.append(node)
             self._warm_start(node)
 
         # 3. Simulation: random rollout from the new node
+        if _CPP_AVAILABLE and not node._terminal:
+            self._iterate_cpp_batch(node, path)
+            return
         winner = self._rollout(node)
 
         # 4. Backpropagation: update wins/visits up to the root
-        self._backprop(node, winner)
+        self._backprop(path, winner)
+
+    def _iterate_cpp_batch(self, node: MCTSNode, path: list) -> None:
+        """Run _CPP_BATCH C++ rollouts for a single node and backprop all results."""
+        buf = _encode_state(node.state)
+        seed = _random.getrandbits(64)
+        red, blue, draws = _cpp.run_rollouts(
+            buf, _CPP_BATCH, self.rollout_depth_limit, seed
+        )
+        for _ in range(red):
+            self._backprop(path, Team.RED)
+        for _ in range(blue):
+            self._backprop(path, Team.BLUE)
+        for _ in range(draws):
+            self._backprop(path, None)
 
     def _rollout(self, node: MCTSNode) -> Optional[Team]:
         """
@@ -252,17 +302,17 @@ class MCTS:
         # Depth limit reached — use HP tiebreaker
         return hp_winner(state)
 
-    def _backprop(self, node: MCTSNode, winner: Optional[Team]) -> None:
+    def _backprop(self, path: list, winner: Optional[Team]) -> None:
         """
-        Walk from node to root, incrementing visits and crediting wins.
+        Walk the recorded selection path from leaf to root, incrementing
+        visits and crediting wins.
 
         wins at a node = wins for the player who MOVED TO that node
                        = opponent of node.state.active_player.
         This means UCB1 at a node naturally maximises the active player's
         win rate across its children.
         """
-        cur: Optional[MCTSNode] = node
-        while cur is not None:
+        for cur in reversed(path):
             cur.visits += 1
 
             # Player who made the move to reach cur
@@ -279,5 +329,3 @@ class MCTS:
 
             if self.transposition is not None:
                 self.transposition.update(cur.hash, win_delta)
-
-            cur = cur.parent

@@ -151,9 +151,18 @@ def is_terminal(state: GameState) -> tuple[bool, Optional[Team]]:
     """
     Returns (True, winner) if a king has been eliminated, else (False, None).
     A draw (both kings gone simultaneously) returns (True, None).
+    Kings stored inside safetyballs count as alive (they are healing, not eliminated).
     """
     red_alive  = any(p.is_king for p in state.all_pieces(Team.RED))
     blue_alive = any(p.is_king for p in state.all_pieces(Team.BLUE))
+    if not red_alive or not blue_alive:
+        # A king stored in a safetyball is alive — check stored_piece fields
+        for p in state.all_pieces():
+            if p.stored_piece is not None and p.stored_piece.is_king:
+                if p.stored_piece.team == Team.RED:
+                    red_alive = True
+                else:
+                    blue_alive = True
     if red_alive and blue_alive:
         return False, None
     if not red_alive and not blue_alive:
@@ -274,8 +283,12 @@ def _do_attack(state: GameState, piece: Piece, move: Move) -> None:
         # Masterball: guaranteed capture — both disappear (pawn consumed on use).
         _capture_both(state, piece, move.target_row, move.target_col)
     elif target.piece_type in PAWN_TYPES:
-        # Pokemon walks into a pokeball/masterball — pokemon is caught, both disappear.
-        _capture_both(state, piece, move.target_row, move.target_col)
+        if piece.piece_type in _POKEBALL_IMMUNE and target.piece_type == PieceType.POKEBALL:
+            # Pikachu is immune to regular pokeballs — pokeball is destroyed, Pikachu advances.
+            _capture(state, piece, move.target_row, move.target_col)
+        else:
+            # Pokemon walks into a pokeball/masterball — pokemon is caught, both disappear.
+            _capture_both(state, piece, move.target_row, move.target_col)
     else:
         damage = _calc_damage(piece, target, move.move_slot)
         target.current_hp -= damage

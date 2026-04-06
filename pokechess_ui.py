@@ -14,7 +14,7 @@ import pygame
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from engine.state import GameState, Team, PieceType, Item, PIECE_STATS, PAWN_TYPES
+from engine.state import GameState, Team, PieceType, Item, PIECE_STATS, PAWN_TYPES, KING_TYPES
 from engine.moves import get_legal_moves, Move, ActionType
 from engine.rules import apply_move, is_terminal, hp_winner
 from bot.mcts import MCTS
@@ -23,14 +23,21 @@ from bot.transposition import TranspositionTable
 # ──────────────────────────────────────────────────────────────────────────────
 # Layout
 # ──────────────────────────────────────────────────────────────────────────────
-WIN_W, WIN_H = 1140, 740
+TT_SAVE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'transposition_table.bin')
+
+WIN_W, WIN_H = 1140, 780
 BOARD_X, BOARD_Y = 20, 70
 CELL = 78
 RING_R      = 36   # outer ring radius (fits inside CELL=78 given the 4px cy offset)
 RING_BORDER = 6    # team-colour ring thickness in pixels
 SPRITE_PX   = (RING_R - RING_BORDER) * 2  # sprite fills the inner circle
-PANEL_X = BOARD_X + 8 * CELL + 20   # 658
-PANEL_W = WIN_W - PANEL_X - 10      # ~472
+PANEL_X = BOARD_X + 8 * CELL + 20   # 664
+PANEL_W = WIN_W - PANEL_X - 30      # leaves ~30px right margin to avoid edge clipping
+
+# Captured-pieces chip geometry (drawn below board)
+CHIP_R        = 12
+CHIP_INNER_R  = CHIP_R - 2
+CHIP_SPRITE_PX = CHIP_INNER_R * 2
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Palette
@@ -268,6 +275,7 @@ class ScrollLog:
 class PokeChessApp:
     # ── init ────────────────────────────────────────────────────────────────
     def __init__(self, init_budget: float = 1.0):
+        os.environ.setdefault('SDL_VIDEO_WINDOW_POS', '0,0')
         pygame.init()
         pygame.display.set_caption('PokeChess')
         self.screen = pygame.display.set_mode((WIN_W, WIN_H), pygame.RESIZABLE)
@@ -285,8 +293,12 @@ class PokeChessApp:
         self._sprites: Dict[PieceType, pygame.Surface] = {}
         self._load_sprites()
 
-        # persistent transposition table
+        # persistent transposition table (loaded from disk if available)
         self.shared_tt = GatedTT()
+        self.shared_tt.load(TT_SAVE_PATH)
+
+        # captured pieces: team → list of PieceType lost by that team this game
+        self._captures: dict[Team, list] = {Team.RED: [], Team.BLUE: []}
 
         # game state
         self.state: Optional[GameState]   = None
@@ -299,10 +311,18 @@ class PokeChessApp:
         self.player_color: Team           = Team.RED
 
         # bot state
-        self._bot_thread: Optional[threading.Thread] = None
-        self._bot_result: Optional[Move]  = None
-        self._bot_lock   = threading.Lock()
-        self._bot_running = False
+        self._bot_thread: Optional[threading.Thread]    = None
+        self._bot_result: Optional[Move]                = None
+        self._bot_lock                                  = threading.Lock()
+        self._bot_running                               = False
+        # persistent MCTS instance — tree survives across turns for pondering
+        self._metalic_bot: MCTS = MCTS(
+            time_budget=1.0,
+            transposition=None,   # set to shared_tt after it is created below
+        )
+        # ponder (background think during opponent's turn)
+        self._ponder_thread: Optional[threading.Thread] = None
+        self._ponder_running: bool                      = False
 
         # UI state
         self.status_msg   = ''
@@ -311,48 +331,65 @@ class PokeChessApp:
         self.bot_move_highlight: Optional[Tuple[int,int,int,int]] = None   # (fr,fc,tr,tc)
         self._last_bot_move_time = 0.0
 
+        # game mode: 'bot' = play vs METALIC, 'local' = two players on same screen
+        self.game_mode: str = 'bot'
+        self._local_pass_pending: bool = False   # show "pass screen" between local turns
+        self._pass_screen_on: bool = True        # user toggle: enable/disable pass screen
+
         # ── build UI widgets ─────────────────────────────────────────────────
         px = PANEL_X
 
-        # color toggle
-        self.btn_red  = Button(px, 90,  100, 32, 'Play as RED',
+        # game mode toggle (top of controls)
+        self.btn_vs_metalic = Button(px,       68, 112, 28, 'vs METALIC',
+                                     font=self.f_body, corner_radius=6)
+        self.btn_local_mode = Button(px+120,   68,  84, 28, 'Local',
+                                     font=self.f_body, corner_radius=6)
+        self.btn_vs_metalic.active = True
+
+        # local mode: pass-screen toggle (shown only in local mode)
+        self.btn_pass_toggle = Button(px, 106, PANEL_W - 4, 24, 'Pass screen',
+                                      font=self.f_body, corner_radius=5)
+        self.btn_pass_toggle.active = True   # on by default
+
+        # color toggle (only meaningful in bot mode)
+        self.btn_red  = Button(px,      106, 100, 28, 'Play as RED',
                                font=self.f_body, corner_radius=6)
-        self.btn_blue = Button(px+108, 90, 104, 32, 'Play as BLUE',
+        self.btn_blue = Button(px+108,  106, 104, 28, 'Play as BLUE',
                                font=self.f_body, corner_radius=6)
         self.btn_red.active = True
 
         # bot sliders
         sx = px
-        sw = PANEL_W - 10
-        self.sl_budget = Slider(sx, 160, sw, 0.2, 5.0, init_budget,
+        sw = PANEL_W - 4   # PANEL_W already includes 30px right margin via the constant
+        self.sl_budget = Slider(sx, 200, sw, 0.2, 10.0, init_budget,
                                 label='Bot time budget (s)',
                                 fmt='{:.1f}s',
                                 font=self.f_body, lbl_font=self.f_small)
-        self.sl_tt     = Slider(sx, 215, sw, 0.0, 1.0, 1.0,
+        self.sl_tt     = Slider(sx, 255, sw, 0.0, 1.0, 1.0,
                                 label='TT access  (prior knowledge)',
                                 fmt='{:.0%}',
                                 font=self.f_body, lbl_font=self.f_small)
 
         # game controls
         bw = (PANEL_W - 10) // 2 - 2
-        self.btn_new   = Button(px,       278, bw, 34, 'New Game',
+        self.btn_new   = Button(px,       318, bw, 34, 'New Game',
                                 font=self.f_body, corner_radius=6)
-        self.btn_undo  = Button(px+bw+4,  278, bw, 34, 'Undo',
+        self.btn_undo  = Button(px+bw+4,  318, bw, 34, 'Undo',
                                 font=self.f_body, corner_radius=6)
 
         # history nav
         nw = (PANEL_W - 10) // 4 - 2
-        self.btn_hprev = Button(px,          320, nw,   28, '|< Start',
+        self.btn_hprev = Button(px,          360, nw, 28, '|< Start',
                                 font=self.f_small, corner_radius=5)
-        self.btn_prev  = Button(px+nw+3,     320, nw,   28, '< Prev',
+        self.btn_prev  = Button(px+nw+3,     360, nw, 28, '< Prev',
                                 font=self.f_small, corner_radius=5)
-        self.btn_hnext = Button(px+2*(nw+3), 320, nw,   28, 'Next >',
+        self.btn_hnext = Button(px+2*(nw+3), 360, nw, 28, 'Next >',
                                 font=self.f_small, corner_radius=5)
-        self.btn_live  = Button(px+3*(nw+3), 320, nw,   28, 'Live >|',
+        self.btn_live  = Button(px+3*(nw+3), 360, nw, 28, 'Live >|',
                                 font=self.f_small, corner_radius=5)
 
         # move log
-        self.log_widget = ScrollLog(px, 338, PANEL_W - 10, WIN_H - 338 - 10,
+        self.log_widget = ScrollLog(px, 378, PANEL_W - 10, WIN_H - 378 - 10,
                                     font=self.f_log)
 
         # action buttons (disambiguation) — built dynamically, placed below board
@@ -362,6 +399,7 @@ class PokeChessApp:
 
     # ── sprite loading ───────────────────────────────────────────────────────
     def _load_sprites(self):
+        self._chip_sprites: Dict[PieceType, pygame.Surface] = {}
         for pt, fname in SPRITE_FILES.items():
             path = os.path.join(SPRITE_DIR, fname)
             if os.path.exists(path):
@@ -372,13 +410,20 @@ class PokeChessApp:
                     cropped = pygame.Surface((bb.width, bb.height), pygame.SRCALPHA)
                     cropped.blit(img, (0, 0), bb)
                     img = cropped
-                img = pygame.transform.smoothscale(img, (SPRITE_PX, SPRITE_PX))
-                self._sprites[pt] = img
+                self._sprites[pt] = pygame.transform.smoothscale(img, (SPRITE_PX, SPRITE_PX))
+                self._chip_sprites[pt] = pygame.transform.smoothscale(
+                    img, (CHIP_SPRITE_PX, CHIP_SPRITE_PX))
 
     # ── coordinate helpers ───────────────────────────────────────────────────
+    def _view_team(self) -> Team:
+        """Which team's perspective to use for board orientation."""
+        if self.game_mode == 'local':
+            return self._live_state().active_player
+        return self.player_color
+
     def _board_to_screen(self, row: int, col: int) -> Tuple[int, int]:
         """Top-left pixel of the cell for (row, col)."""
-        if self.player_color == Team.RED:
+        if self._view_team() == Team.RED:
             sr = 7 - row   # row 0 → bottom
             sc = col
         else:
@@ -391,7 +436,7 @@ class PokeChessApp:
         if not (0 <= bx < 8 * CELL and 0 <= by < 8 * CELL):
             return None
         sc, sr = bx // CELL, by // CELL
-        if self.player_color == Team.RED:
+        if self._view_team() == Team.RED:
             return (7 - sr, sc)
         else:
             return (sr, 7 - sc)
@@ -399,8 +444,11 @@ class PokeChessApp:
     # ── game logic ───────────────────────────────────────────────────────────
     def new_game(self):
         """Start a fresh game (keeps the shared TT)."""
-        if self._bot_running:
-            return   # don't restart mid-think
+        # Stop ponder and any in-flight bot thread.
+        self._stop_ponder()
+        with self._bot_lock:
+            self._bot_running = False
+            self._bot_result  = None
         self.state    = GameState.new_game()
         self.history  = [self.state]
         self.move_log = []
@@ -410,6 +458,9 @@ class PokeChessApp:
         self.pending_moves = []
         self.action_btns   = []
         self.bot_move_highlight = None
+        self._local_pass_pending = False
+        self._metalic_bot._root = None   # discard stale tree; TT retains cross-game learning
+        self._captures = {Team.RED: [], Team.BLUE: []}
         self.log_widget.lines.clear()
         self.log_widget.add('─── New game ───', C_YELLOW)
         self.log_widget.add(f'You play as {"RED" if self.player_color == Team.RED else "BLUE"}', C_WHITE)
@@ -443,6 +494,50 @@ class PokeChessApp:
         self.log_widget.add('Undo', C_ORANGE)
         self._update_status()
 
+    # ── HP and capture helpers ────────────────────────────────────────────────
+
+    _PAWN_HP = {
+        PieceType.POKEBALL:          50,
+        PieceType.MASTERBALL:        200,
+        PieceType.SAFETYBALL:        50,
+        PieceType.MASTER_SAFETYBALL: 200,
+    }
+
+    def _team_hp(self, state: GameState, team: Team) -> int:
+        total = 0
+        for p in state.all_pieces(team):
+            total += self._PAWN_HP.get(p.piece_type, p.current_hp)
+            if p.stored_piece is not None:
+                total += p.stored_piece.current_hp
+        return total
+
+    def _record_captures(self, old_state: GameState, new_state: GameState) -> None:
+        """Detect pieces that disappeared between states and record them as captured."""
+        def counts(state):
+            c: dict[tuple, int] = {}
+            for p in state.all_pieces():
+                c[(p.team, p.piece_type)] = c.get((p.team, p.piece_type), 0) + 1
+                if p.stored_piece is not None:
+                    k = (p.stored_piece.team, p.stored_piece.piece_type)
+                    c[k] = c.get(k, 0) + 1
+            return c
+
+        old_c = counts(old_state)
+        new_c = counts(new_state)
+
+        for (team, ptype), old_n in old_c.items():
+            removed = old_n - new_c.get((team, ptype), 0)
+            if removed <= 0:
+                continue
+            # Skip king evolutions: king disappeared but team's king count unchanged
+            if ptype in KING_TYPES:
+                old_kings = sum(v for (t, pt), v in old_c.items() if t == team and pt in KING_TYPES)
+                new_kings = sum(v for (t, pt), v in new_c.items() if t == team and pt in KING_TYPES)
+                if new_kings >= old_kings:
+                    continue
+            for _ in range(removed):
+                self._captures[team].append(ptype)
+
     def _live_state(self) -> GameState:
         return self.history[-1]
 
@@ -452,11 +547,17 @@ class PokeChessApp:
         return self.history[self.hist_idx]
 
     def _is_bot_turn(self) -> bool:
+        if self.game_mode == 'local':
+            return False
         s = self._live_state()
         done, _ = is_terminal(s)
         return (not done) and (s.active_player != self.player_color)
 
     def _is_human_turn(self) -> bool:
+        if self.game_mode == 'local':
+            s = self._live_state()
+            done, _ = is_terminal(s)
+            return not done
         s = self._live_state()
         done, _ = is_terminal(s)
         return (not done) and (s.active_player == self.player_color)
@@ -464,52 +565,99 @@ class PokeChessApp:
     def _update_status(self):
         s  = self._live_state()
         done, winner = is_terminal(s)
+        color_name = 'RED' if s.active_player == Team.RED else 'BLUE'
         if done:
-            if winner == self.player_color:
+            if self.game_mode == 'local':
+                win_name = 'RED' if winner == Team.RED else ('BLUE' if winner else None)
+                if win_name:
+                    self.status_msg   = f'{win_name} wins!'
+                    self.status_color = C_RED if winner == Team.RED else C_BLUE
+                else:
+                    self.status_msg   = 'Draw'
+                    self.status_color = C_YELLOW
+            elif winner == self.player_color:
                 self.status_msg   = 'You win!'
                 self.status_color = C_GREEN
             elif winner is None:
                 self.status_msg   = 'Draw'
                 self.status_color = C_YELLOW
             else:
-                self.status_msg   = 'Bot wins!'
+                self.status_msg   = 'METALIC wins!'
                 self.status_color = C_RED
+        elif self.game_mode == 'local':
+            if self._local_pass_pending:
+                self.status_msg   = f'{color_name} — tap board to reveal'
+                self.status_color = C_DIM
+            else:
+                self.status_msg   = f'{color_name}\'s turn  —  turn {s.turn_number}'
+                self.status_color = C_RED if s.active_player == Team.RED else C_BLUE
         elif self._bot_running:
-            self.status_msg   = f'Bot thinking...  (budget {self.sl_budget.value:.1f}s)'
+            self.status_msg   = f'METALIC thinking...  (budget {self.sl_budget.value:.1f}s)'
             self.status_color = C_CYAN
         elif self.hist_idx != -1:
             n = len(self.history)
             self.status_msg   = f'History view  [{self.hist_idx + 1}/{n}]'
             self.status_color = C_YELLOW
         elif s.active_player == self.player_color:
-            color_name = 'RED' if s.active_player == Team.RED else 'BLUE'
             self.status_msg   = f'Your turn ({color_name})  —  turn {s.turn_number}'
             self.status_color = C_WHITE
         else:
-            color_name = 'RED' if s.active_player == Team.RED else 'BLUE'
-            self.status_msg   = f'Waiting for bot ({color_name})'
+            self.status_msg   = f'Waiting for METALIC ({color_name})'
             self.status_color = C_DIM
 
     # ── bot thread ───────────────────────────────────────────────────────────
+    def _stop_ponder(self) -> None:
+        """Signal the ponder thread to stop and wait briefly for it to exit."""
+        with self._bot_lock:
+            self._ponder_running = False
+        if self._ponder_thread and self._ponder_thread.is_alive():
+            self._ponder_thread.join(timeout=0.2)
+        self._ponder_thread = None
+
+    def _start_ponder(self, state: GameState) -> None:
+        """Begin background pondering on state (opponent's turn)."""
+        self._stop_ponder()   # ensure no leftover thread
+        with self._bot_lock:
+            self._ponder_running = True
+
+        def _run():
+            try:
+                self._metalic_bot.ponder(state, lambda: not self._ponder_running)
+            except Exception:
+                pass
+            with self._bot_lock:
+                self._ponder_running = False
+
+        self._ponder_thread = threading.Thread(target=_run, daemon=True)
+        self._ponder_thread.start()
+
     def _start_bot(self):
         if self._bot_running:
             return
+        # Stop any background pondering first; the root was already advanced
+        # through the human's move in _execute_move before this is called.
+        self._stop_ponder()
+
         self._bot_running = True
         self._bot_result  = None
         self.shared_tt.access_pct = self.sl_tt.value
-        budget = max(0.1, self.sl_budget.value)
-        state  = self._live_state()
+        self._metalic_bot.time_budget    = max(0.1, self.sl_budget.value)
+        self._metalic_bot.transposition  = self.shared_tt
+        state = self._live_state()
 
-        def _think(s, b, tt):
-            bot  = MCTS(time_budget=b, transposition=tt)
-            move = bot.select_move(s)
+        def _think():
+            move = None
+            try:
+                move = self._metalic_bot.select_move(state)
+            except Exception:
+                import traceback
+                traceback.print_exc()
+                self.log_widget.add('Bot error — see terminal', C_ORANGE)
             with self._bot_lock:
                 self._bot_result  = move
                 self._bot_running = False
 
-        t = threading.Thread(target=_think,
-                             args=(state, budget, self.shared_tt),
-                             daemon=True)
+        t = threading.Thread(target=_think, daemon=True)
         t.start()
         self._update_status()
 
@@ -568,10 +716,26 @@ class PokeChessApp:
         self.bot_move_highlight = (pr, pc, tr, tc)
         self._last_bot_move_time = time.monotonic()
 
+        self._record_captures(s, new_state)
         self.history.append(new_state)
         self._update_status()
-        if self._is_bot_turn():
-            self._start_bot()
+
+        done, _ = is_terminal(new_state)
+        if not done:
+            # Advance the persistent bot tree to the chosen move's child so
+            # pondering (or the next select_move) reuses the explored subtree.
+            bot = self._metalic_bot
+            if bot._root is not None:
+                bot._root = next(
+                    (c for c in bot._root.children if c.move == move), None)
+            if self._is_bot_turn():
+                self._start_bot()
+            else:
+                # Human's turn — start pondering in the background
+                self._start_ponder(new_state)
+        else:
+            if self._is_bot_turn():
+                self._start_bot()
 
     # ── move execution (human) ───────────────────────────────────────────────
     def _execute_move(self, move: Move):
@@ -616,15 +780,26 @@ class PokeChessApp:
                   and target.piece_type in PAWN_TYPES):
                 self.log_widget.add(f'  >> {p_name} was caught by {t_name}!', C_ORANGE)
 
+        self._record_captures(s, new_state)
         self.history.append(new_state)
         self.selected = None
         self.legal_for_sel = []
         self.pending_moves = []
         self.action_btns   = []
-        self._update_status()
 
         done, winner = is_terminal(new_state)
+        if self.game_mode == 'local' and not done and self._pass_screen_on:
+            self._local_pass_pending = True
+        self._update_status()
+
         if not done and self._is_bot_turn():
+            # Stop pondering, advance the persistent tree through this human move,
+            # then let select_move reuse whatever the ponder thread explored.
+            self._stop_ponder()
+            bot = self._metalic_bot
+            if bot._root is not None:
+                bot._root = next(
+                    (c for c in bot._root.children if c.move == move), None)
             self._start_bot()
 
     # ── click handling ───────────────────────────────────────────────────────
@@ -640,6 +815,8 @@ class PokeChessApp:
             return
 
         s = self._live_state()
+        # In local mode the "current player" is whoever's turn it is
+        current_player = s.active_player if self.game_mode == 'local' else self.player_color
 
         # If disambiguation buttons are active, ignore board clicks
         if self.pending_moves:
@@ -649,7 +826,7 @@ class PokeChessApp:
 
         if self.selected is None:
             # Select own piece
-            if piece and piece.team == self.player_color:
+            if piece and piece.team == current_player:
                 self.selected = (row, col)
                 all_legal = get_legal_moves(s)
                 self.legal_for_sel = [m for m in all_legal
@@ -674,7 +851,7 @@ class PokeChessApp:
                     self.action_btns   = []
                 return
 
-            if piece and piece.team == self.player_color:
+            if piece and piece.team == current_player:
                 # Check for TRADE moves from selected piece to this ally first
                 trade_moves = [m for m in self.legal_for_sel
                                if m.action_type == ActionType.TRADE
@@ -728,7 +905,7 @@ class PokeChessApp:
         self.action_btns = []
         bx = PANEL_X
         bw = PANEL_W - 10
-        by = 374   # below history nav (ends at y≈348) with room for header
+        by = 414   # below history nav (ends at y≈388) with room for header
         bh = 32
         pad = 4
 
@@ -780,6 +957,8 @@ class PokeChessApp:
             mouse_pos = pygame.mouse.get_pos()
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
+                    self._stop_ponder()
+                    self.shared_tt.save(TT_SAVE_PATH)
                     pygame.quit()
                     return
 
@@ -792,6 +971,35 @@ class PokeChessApp:
 
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     pos = event.pos
+
+                    # Pass screen (local mode): any board click reveals next turn
+                    if self._local_pass_pending:
+                        rc = self._screen_to_board(pos[0], pos[1])
+                        if rc is not None:
+                            self._local_pass_pending = False
+                            self._update_status()
+                        continue
+
+                    # Game mode toggle
+                    if self.btn_vs_metalic.hit(event) and not self._bot_running:
+                        self.game_mode = 'bot'
+                        self.btn_vs_metalic.active = True
+                        self.btn_local_mode.active = False
+                        self.new_game()
+                        continue
+                    if self.btn_local_mode.hit(event) and not self._bot_running:
+                        self.game_mode = 'local'
+                        self.btn_local_mode.active = True
+                        self.btn_vs_metalic.active = False
+                        self.new_game()
+                        continue
+                    if self.btn_pass_toggle.hit(event) and self.game_mode == 'local':
+                        self._pass_screen_on = not self._pass_screen_on
+                        self.btn_pass_toggle.active = self._pass_screen_on
+                        # If screen was just disabled, clear any pending pass
+                        if not self._pass_screen_on:
+                            self._local_pass_pending = False
+                        continue
 
                     # Color buttons
                     if self.btn_red.hit(event) and not self._bot_running:
@@ -891,7 +1099,31 @@ class PokeChessApp:
 
         self._draw_title(surf)
         self._draw_board(surf, mouse_pos)
+        self._draw_captured_chips(surf)
+        if self._local_pass_pending and self._pass_screen_on:
+            self._draw_pass_screen(surf)
         self._draw_panel(surf, mouse_pos)
+
+    def _draw_pass_screen(self, surf) -> None:
+        """Covers the board with a dark overlay between local turns."""
+        s = self._live_state()
+        team = s.active_player
+        color = C_RED if team == Team.RED else C_BLUE
+        name  = 'RED' if team == Team.RED else 'BLUE'
+
+        # Dark overlay over board area
+        overlay = pygame.Surface((8 * CELL, 8 * CELL), pygame.SRCALPHA)
+        overlay.fill((10, 10, 20, 220))
+        surf.blit(overlay, (BOARD_X, BOARD_Y))
+
+        # Centered text
+        bx = BOARD_X + 4 * CELL
+        by = BOARD_Y + 4 * CELL
+
+        heading = self.f_title.render(f"{name}'s turn", True, color)
+        sub     = self.f_body.render('Tap the board to reveal', True, C_DIM)
+        surf.blit(heading, heading.get_rect(center=(bx, by - 18)))
+        surf.blit(sub,     sub.get_rect(center=(bx, by + 14)))
 
     def _draw_title(self, surf):
         # Title bar
@@ -1060,6 +1292,52 @@ class PokeChessApp:
                 f'{hp_str}{item_str}{stored_str}'
             )
 
+    def _draw_chip_ball(self, surf, ptype: PieceType, cx: int, cy: int, r: int) -> None:
+        """Draw a pokeball icon at (cx, cy) with radius r, styled by ptype."""
+        import math
+        is_master = ptype in (PieceType.MASTERBALL, PieceType.MASTER_SAFETYBALL)
+        is_safety = ptype in (PieceType.SAFETYBALL, PieceType.MASTER_SAFETYBALL)
+        top_col = (200, 50, 50) if not is_master else (128, 0, 180)
+        bot_col = (240, 240, 240) if is_safety    else (30,  30,  30)
+        line_col = (20, 20, 20)
+        pygame.draw.circle(surf, bot_col, (cx, cy), r)
+        pts = [(cx, cy)]
+        for deg in range(0, 181, 6):
+            rad = math.radians(deg)
+            pts.append((cx + r * math.cos(rad), cy - r * math.sin(rad)))
+        pygame.draw.polygon(surf, top_col, pts)
+        pygame.draw.circle(surf, line_col, (cx, cy), r, 1)
+        pygame.draw.line(surf, line_col, (cx - r, cy), (cx + r, cy), 1)
+        btn_r = max(2, r // 4)
+        pygame.draw.circle(surf, bot_col,  (cx, cy), btn_r)
+        pygame.draw.circle(surf, line_col, (cx, cy), btn_r, 1)
+
+    def _draw_captured_chips(self, surf) -> None:
+        """Draw two rows of piece chips below the board (one row per team's losses)."""
+        chip_spacing = CHIP_R * 2 + 3
+        label_w      = 24
+        base_y       = BOARD_Y + 8 * CELL + CHIP_R + 8   # first row centre
+
+        for row_idx, (team, color) in enumerate(
+            [(Team.RED, C_RED), (Team.BLUE, C_BLUE)]
+        ):
+            y_center = base_y + row_idx * (CHIP_R * 2 + 6)
+
+            lbl = self.f_small.render('R×' if team == Team.RED else 'B×', True, color)
+            surf.blit(lbl, (BOARD_X, y_center - lbl.get_height() // 2))
+
+            x = BOARD_X + label_w
+            for ptype in self._captures[team]:
+                cx = x + CHIP_R
+                pygame.draw.circle(surf, color, (cx, y_center), CHIP_R)
+                pygame.draw.circle(surf, BG,    (cx, y_center), CHIP_INNER_R)
+                chip_spr = self._chip_sprites.get(ptype)
+                if chip_spr:
+                    surf.blit(chip_spr, chip_spr.get_rect(center=(cx, y_center)))
+                else:
+                    self._draw_chip_ball(surf, ptype, cx, y_center, CHIP_INNER_R)
+                x += chip_spacing
+
     def _draw_ball(self, surf, piece, cx, cy):
         import math
         is_master  = piece.piece_type in (PieceType.MASTERBALL, PieceType.MASTER_SAFETYBALL)
@@ -1098,28 +1376,64 @@ class PokeChessApp:
         pygame.draw.rect(surf, C_DIVIDER, (PANEL_X - 10, 0, 1, WIN_H))
 
         px = PANEL_X
+        bar_w = PANEL_W - 4   # PANEL_W already has 30px right margin baked in
 
-        # ── Section: Color choice ──────────────────────────────────────────
-        lbl = self.f_head.render('You play as:', True, C_DIM)
-        surf.blit(lbl, (px, 68))
-        self.btn_red.draw(surf, mouse_pos)
-        self.btn_blue.draw(surf, mouse_pos)
+        # ── Section: HP balance bar ────────────────────────────────────────
+        state = self._viewing_state()
+        red_hp  = self._team_hp(state, Team.RED)
+        blue_hp = self._team_hp(state, Team.BLUE)
+        total_hp = red_hp + blue_hp
 
-        # ── Section: Bot settings ─────────────────────────────────────────
-        pygame.draw.rect(surf, C_DIVIDER, (px, 138, PANEL_W - 10, 1))
-        bl = self.f_head.render('Bot Settings', True, C_DIM)
-        surf.blit(bl, (px, 144))
-        self.sl_budget.draw(surf)
-        self.sl_tt.draw(surf)
+        hp_lbl = self.f_small.render('Total HP', True, C_DIM)
+        surf.blit(hp_lbl, (px, 4))
 
-        # TT stats — placed BELOW sl_tt track (track is at sl_tt.y+30 = 245, knob r=9 → bottom at 254)
-        tt_entries = len(self.shared_tt)
-        tt_txt = self.f_small.render(
-            f'TT entries: {tt_entries:,}  (grows across games)', True, C_DIM)
-        surf.blit(tt_txt, (px, 258))
+        bar_x, bar_y, bar_h = px, 18, 12
+        pygame.draw.rect(surf, C_DIVIDER, (bar_x, bar_y, bar_w, bar_h), border_radius=4)
+        if total_hp > 0:
+            red_w = int(bar_w * red_hp / total_hp)
+            if red_w > 0:
+                pygame.draw.rect(surf, C_RED,  (bar_x, bar_y, red_w, bar_h),
+                                 border_radius=4)
+            if bar_w - red_w > 0:
+                pygame.draw.rect(surf, C_BLUE, (bar_x + red_w, bar_y, bar_w - red_w, bar_h),
+                                 border_radius=4)
+        red_hp_lbl  = self.f_small.render(f'R {red_hp}', True, C_RED)
+        blue_hp_lbl = self.f_small.render(f'B {blue_hp}', True, C_BLUE)
+        surf.blit(red_hp_lbl,  (bar_x, bar_y + bar_h + 2))
+        surf.blit(blue_hp_lbl, (bar_x + bar_w - blue_hp_lbl.get_width(), bar_y + bar_h + 2))
+
+        pygame.draw.rect(surf, C_DIVIDER, (px, 44, bar_w, 1))
+
+        # ── Section: Game mode ────────────────────────────────────────────
+        ml = self.f_head.render('Game mode:', True, C_DIM)
+        surf.blit(ml, (px, 50))
+        self.btn_vs_metalic.draw(surf, mouse_pos)
+        self.btn_local_mode.draw(surf, mouse_pos)
+
+        # ── Section: Color choice / pass-screen toggle ────────────────────
+        pygame.draw.rect(surf, C_DIVIDER, (px, 100, bar_w, 1))
+        if self.game_mode == 'local':
+            self.btn_pass_toggle.draw(surf, mouse_pos)
+        if self.game_mode == 'bot':
+            lbl = self.f_head.render('You play as:', True, C_DIM)
+            surf.blit(lbl, (px, 104))
+            self.btn_red.draw(surf, mouse_pos)
+            self.btn_blue.draw(surf, mouse_pos)
+
+        # ── Section: Bot settings (bot mode only) ─────────────────────────
+        pygame.draw.rect(surf, C_DIVIDER, (px, 178, PANEL_W - 10, 1))
+        if self.game_mode == 'bot':
+            bl = self.f_head.render('METALIC Settings', True, C_DIM)
+            surf.blit(bl, (px, 184))
+            self.sl_budget.draw(surf)
+            self.sl_tt.draw(surf)
+            tt_entries = len(self.shared_tt)
+            tt_txt = self.f_small.render(
+                f'TT entries: {tt_entries:,}  (grows across games)', True, C_DIM)
+            surf.blit(tt_txt, (px, 298))
 
         # ── Section: Controls ─────────────────────────────────────────────
-        pygame.draw.rect(surf, C_DIVIDER, (px, 270, PANEL_W - 10, 1))
+        pygame.draw.rect(surf, C_DIVIDER, (px, 310, PANEL_W - 10, 1))
         self.btn_new.draw(surf, mouse_pos)
         self.btn_undo.draw(surf, mouse_pos)
 
@@ -1129,24 +1443,24 @@ class PokeChessApp:
         h_lbl = self.f_small.render(
             f'History: [{cur_h + 1}/{n}]',
             True, C_DIM)
-        surf.blit(h_lbl, (px, 318))
+        surf.blit(h_lbl, (px, 358))
         self.btn_hprev.draw(surf, mouse_pos)
         self.btn_prev.draw(surf, mouse_pos)
         self.btn_hnext.draw(surf, mouse_pos)
         self.btn_live.draw(surf, mouse_pos)
 
         # ── Section: Action / disambiguation OR selected info + log ──────
-        pygame.draw.rect(surf, C_DIVIDER, (px, 352, PANEL_W - 10, 1))
+        pygame.draw.rect(surf, C_DIVIDER, (px, 392, PANEL_W - 10, 1))
 
         if self.pending_moves or self.action_btns:
             # Disambiguation panel takes over the lower half — log is hidden
             al = self.f_head.render('Choose action:', True, C_YELLOW)
-            surf.blit(al, (px, 356))
+            surf.blit(al, (px, 396))
             for btn in self.action_btns:
                 btn.draw(surf, mouse_pos)
         else:
             # Selected piece info (if any)
-            info_y = 356
+            info_y = 396
             if self.selected:
                 sr, sc = self.selected
                 s  = self._viewing_state()
