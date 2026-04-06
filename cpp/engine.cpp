@@ -775,6 +775,36 @@ static void advance_turn(State& s) {
     s.turn++;
 }
 
+// Discharge stored Pokémon from any safetyball of the active player that was not
+// moved this turn.  A safetyball must be moved each turn to retain its passenger;
+// if the owner acts elsewhere the stored piece is immediately discharged (same as
+// the auto-release-at-full-HP path: safetyball consumed, piece placed on its square).
+static void discharge_unmoved_safetyballs(State& s, uint8_t moved_type) {
+    if (is_safetyball(moved_type)) return; // player moved a safetyball — no discharge
+    for (int i = 0; i < s.n_pieces; ++i) {
+        Piece& p = s.pieces[i];
+        if (p.type == PT_NONE) continue;
+        if (p.team != s.active) continue;
+        if (!is_safetyball(p.type)) continue;
+        if (p.stored.type == PT_NONE) continue;
+        // Release stored piece at safetyball's position; safetyball consumed
+        int new_idx = alloc_slot(s, i);
+        if (new_idx >= 0) {
+            Piece& np  = s.pieces[new_idx];
+            np.type    = p.stored.type;
+            np.team    = p.stored.team;
+            np.row     = p.row;
+            np.col     = p.col;
+            np.hp      = p.stored.hp;
+            np.item    = p.stored.item;
+            np.stored  = {};
+            s.board[p.row][p.col] = (int8_t)new_idx;
+        }
+        p.stored.type = PT_NONE;
+        p.type        = PT_NONE; // safetyball consumed
+    }
+}
+
 static void apply_move(State& s, const Move& mv, float roll) {
     // Resolve pending foresight, reset foresight-used flag.
     resolve_foresight(s);
@@ -784,6 +814,9 @@ static void apply_move(State& s, const Move& mv, float roll) {
     if (pidx8 < 0) { advance_turn(s); return; }
     int pidx = (int)pidx8;
     Piece& p = s.pieces[pidx];
+    // Save the type of the piece that will act, before any handler may clear it.
+    // Used by discharge_unmoved_safetyballs to determine if a safetyball was moved.
+    const uint8_t moved_type = p.type;
 
     // ── POKEBALL stochastic ──────────────────────────────────────────────────
     if (mv.action == ACT_ATTACK && p.type == PT_POKEBALL) {
@@ -792,12 +825,14 @@ static void apply_move(State& s, const Move& mv, float roll) {
             // Target gone (foresight resolved this turn) — failure
             s.board[mv.pr][mv.pc] = -1; p.type = PT_NONE;
             s.has_traded[ti(s.active)] = 0;
+            discharge_unmoved_safetyballs(s, moved_type);
             advance_turn(s); return;
         }
         Piece& tgt = s.pieces[t8];
         if (is_safetyball(tgt.type) || tgt.type == PT_PIKACHU) {
             // Immune — pokeball survives, just fail
             s.has_traded[ti(s.active)] = 0;
+            discharge_unmoved_safetyballs(s, moved_type);
             advance_turn(s); return;
         }
         if (roll < 0.5f) {
@@ -809,6 +844,7 @@ static void apply_move(State& s, const Move& mv, float roll) {
             s.board[mv.pr][mv.pc] = -1; p.type = PT_NONE;
         }
         s.has_traded[ti(s.active)] = 0;
+        discharge_unmoved_safetyballs(s, moved_type);
         advance_turn(s); return;
     }
 
@@ -827,6 +863,7 @@ static void apply_move(State& s, const Move& mv, float roll) {
                 nb.hp   = std::min((int16_t)(nb.hp + gain), MAX_HP[evo]);
                 nb.item = ITEM_NONE;
                 s.has_traded[ti(s.active)] = 0;
+                discharge_unmoved_safetyballs(s, moved_type);
                 advance_turn(s); return;
             }
         }
@@ -851,6 +888,7 @@ static void apply_move(State& s, const Move& mv, float roll) {
             }
         }
         s.has_traded[ti(s.active)] = 0;
+        discharge_unmoved_safetyballs(s, moved_type);
         advance_turn(s); return;
     }
 
@@ -862,6 +900,7 @@ static void apply_move(State& s, const Move& mv, float roll) {
         fx.damage = dmg;  fx.resolves_on_turn = s.turn + 2;
         s.fs_used[ti(s.active)] = 1;
         s.has_traded[ti(s.active)] = 0;
+        discharge_unmoved_safetyballs(s, moved_type);
         advance_turn(s); return;
     }
 
@@ -881,6 +920,8 @@ static void apply_move(State& s, const Move& mv, float roll) {
             p.type = PT_NONE;
         }
         s.has_traded[ti(s.active)] = 0;
+        // moved_type is PT_SAFETYBALL/PT_MASTER_SAFETYBALL → discharge is a no-op
+        discharge_unmoved_safetyballs(s, moved_type);
         advance_turn(s); return;
     }
 
@@ -903,15 +944,23 @@ static void apply_move(State& s, const Move& mv, float roll) {
             }
         }
         s.has_traded[ti(s.active)] = 0;
+        // If moved_type is safetyball, discharge is a no-op; otherwise discharges others.
+        discharge_unmoved_safetyballs(s, moved_type);
         advance_turn(s); return;
     }
 
     // ── ATTACK ──────────────────────────────────────────────────────────────
     if (mv.action == ACT_ATTACK) {
         int8_t t8 = idx_at(s, mv.tr, mv.tc);
-        if (t8 < 0) { advance_turn(s); return; }
+        if (t8 < 0) {
+            discharge_unmoved_safetyballs(s, moved_type);
+            advance_turn(s); return;
+        }
         Piece& tgt = s.pieces[t8];
-        if (is_safetyball(tgt.type)) { advance_turn(s); return; }
+        if (is_safetyball(tgt.type)) {
+            discharge_unmoved_safetyballs(s, moved_type);
+            advance_turn(s); return;
+        }
 
         if (p.type == PT_MASTERBALL || is_pawn(tgt.type)) {
             // Pikachu is immune to regular pokeballs — pokeball destroyed, Pikachu advances
@@ -934,6 +983,7 @@ static void apply_move(State& s, const Move& mv, float roll) {
             // Non-lethal: attacker stays
         }
         s.has_traded[ti(s.active)] = 0;
+        discharge_unmoved_safetyballs(s, moved_type);
         advance_turn(s); return;
     }
 
@@ -952,11 +1002,13 @@ static void apply_move(State& s, const Move& mv, float roll) {
         // Secondary move (always present for QUICK_ATTACK)
         move_piece(s, pidx, mv.sr, mv.sc);
         s.has_traded[ti(s.active)] = 0;
+        discharge_unmoved_safetyballs(s, moved_type);
         advance_turn(s); return;
     }
 
     // Fallthrough: unknown action, just advance turn
     s.has_traded[ti(s.active)] = 0;
+    discharge_unmoved_safetyballs(s, moved_type);
     advance_turn(s);
 }
 
