@@ -21,7 +21,7 @@
 
 ## Architecture Overview
 
-The app server (FastAPI) is the only process that touches the database. The engine container is internal-only — the app server calls it via HTTP, passes the current game state, and gets back a new state. The frontend never talks to the engine directly.
+The app server (FastAPI) is the only process that touches the database. The engine container is internal-only — the app server calls it via HTTP (PvB only), passes the current game state, and gets back the bot's chosen move. The app applies all moves (human and bot) using the shared `engine/` library directly. The frontend never talks to the engine directly.
 
 ```
 React frontend
@@ -360,57 +360,64 @@ CREATE INDEX idx_games_blue_done   ON games (blue_player_id) WHERE status = 'com
 
 ### `games.state` (JSONB)
 
-Overwritten on every move. This is the complete snapshot the engine needs to resume the game cold. The app server treats this as an opaque blob — it stores it, returns it to the frontend for rendering, and sends it to the engine. The app never parses the internals.
+Overwritten on every move. This is the complete snapshot needed to resume the game cold. It is the direct JSON output of `GameState.to_dict()` and is consumed by `GameState.from_dict()` — both defined in `engine/state.py`. The app deserializes this to a `GameState` object in order to call engine functions (move validation, move application, terminal detection).
 
-**Size:** ~5–6 KB at full board (26–32 pieces + foresight queue). Fixed size per game. Stored inline by Postgres (below TOAST threshold).
+**Size:** ~4–5 KB at full board (on-board pieces only, no captured-piece tracking). Stored inline by Postgres (below TOAST threshold).
 
 ```json
 {
+  "active_player": "RED",
   "turn_number": 6,
-  "whose_turn": "blue",
-  "pieces": [
+  "has_traded": {"RED": false, "BLUE": false},
+  "foresight_used_last_turn": {"RED": false, "BLUE": false},
+  "pending_foresight": {
+    "RED": null,
+    "BLUE": {
+      "target_row": 4,
+      "target_col": 3,
+      "damage": 120,
+      "resolves_on_turn": 8
+    }
+  },
+  "board": [
     {
       "id": "550e8400-e29b-41d4-a716-446655440000",
-      "pokemon": "raichu",
-      "role": "king",
-      "team": "red",
-      "square": "e1",
-      "hp": 220,
-      "max_hp": 250,
-      "held_item": null,
-      "stored_piece_id": null,
-      "on_board": true
+      "piece_type": "RAICHU",
+      "team": "RED",
+      "row": 0,
+      "col": 4,
+      "current_hp": 220,
+      "held_item": "NONE",
+      "stored_piece": null
     },
     {
-      "id": "550e8400-e29b-41d4-a716-446655440001",
-      "pokemon": "safetyball",
-      "role": "pawn",
-      "team": "red",
-      "square": "e4",
-      "hp": null,
-      "max_hp": null,
-      "held_item": null,
-      "stored_piece_id": "550e8400-e29b-41d4-a716-446655440002",
-      "on_board": true
+      "id": null,
+      "piece_type": "SAFETYBALL",
+      "team": "RED",
+      "row": 3,
+      "col": 4,
+      "current_hp": 0,
+      "held_item": "NONE",
+      "stored_piece": {
+        "id": "550e8400-e29b-41d4-a716-446655440001",
+        "piece_type": "CHARMANDER",
+        "team": "RED",
+        "row": 3,
+        "col": 4,
+        "current_hp": 160,
+        "held_item": "FIRESTONE",
+        "stored_piece": null
+      }
     },
     {
       "id": "550e8400-e29b-41d4-a716-446655440002",
-      "pokemon": "charmander",
-      "role": "knight",
-      "team": "red",
-      "square": null,
-      "hp": 160,
-      "max_hp": 200,
-      "held_item": null,
-      "stored_piece_id": null,
-      "on_board": false
-    }
-  ],
-  "foresight_queue": [
-    {
-      "caster_id": "550e8400-e29b-41d4-a716-446655440010",
-      "target_square": "d5",
-      "resolves_on_turn": 7
+      "piece_type": "SQUIRTLE",
+      "team": "BLUE",
+      "row": 5,
+      "col": 2,
+      "current_hp": 200,
+      "held_item": "WATERSTONE",
+      "stored_piece": null
     }
   ]
 }
@@ -420,27 +427,33 @@ Overwritten on every move. This is the complete snapshot the engine needs to res
 
 | Field | Type | Notes |
 |---|---|---|
-| `turn_number` | int | Increments each half-turn |
-| `whose_turn` | string | `'red'` or `'blue'` |
-| `pieces[]` | array | All pieces including captured and stored |
-| `piece.id` | UUID | Same as `pokemon_pieces.id` for named pieces |
-| `piece.square` | string | Algebraic notation (`'e4'`), null if off-board |
-| `piece.hp` | int | null for Pokéballs (no HP) |
-| `piece.stored_piece_id` | UUID | ID of piece stored inside this Safetyball, or null |
-| `piece.on_board` | bool | false = captured or stored |
-| `foresight_queue[]` | array | Pending Foresight attacks, max 2 entries |
+| `active_player` | string | `"RED"` or `"BLUE"` — matches `Team` enum name |
+| `turn_number` | int | Increments each half-move |
+| `has_traded` | `{"RED": bool, "BLUE": bool}` | Free-action trade gate; required for cold resume |
+| `foresight_used_last_turn` | `{"RED": bool, "BLUE": bool}` | Prevents consecutive Foresight; required for cold resume |
+| `pending_foresight` | `{"RED": effect\|null, "BLUE": effect\|null}` | At most one queued Foresight per team |
+| `foresight.target_row/col` | int (0–7) | Target square; row 0 = Red's back rank |
+| `foresight.damage` | int | Pre-calculated at cast time (120 for Mew and Espeon) |
+| `foresight.resolves_on_turn` | int | Absolute turn number when damage lands |
+| `board[]` | array | On-board pieces only; captured pieces are removed and not tracked |
+| `piece.id` | UUID string or null | Same as `pokemon_pieces.id` for named pieces; null for Pokéballs/Safetyballs (ephemeral) |
+| `piece.piece_type` | string | Engine `PieceType` enum name (e.g. `"SQUIRTLE"`, `"RAICHU"`, `"SAFETYBALL"`) |
+| `piece.team` | string | `"RED"` or `"BLUE"` |
+| `piece.row` / `piece.col` | int (0–7) | Board position using engine-native coordinates |
+| `piece.current_hp` | int | 0 for Safetyballs/Pokéballs (no HP stat) |
+| `piece.held_item` | string | Engine `Item` enum name (e.g. `"WATERSTONE"`, `"NONE"`) |
+| `piece.stored_piece` | piece object or null | Inline nested piece stored inside a Safetyball; null otherwise |
 
 ---
 
 ### `games.move_history` (JSONB)
 
-Append-only array. One entry per action. RNG outcomes (Stealball rolls) are recorded here, not in `state`.
+Append-only array. One entry per action (plus one auto-injected entry when Foresight resolves). RNG outcomes (Pokéball rolls) are recorded here, not in `state`. Coordinates use engine-native row/col integers throughout.
 
 **Size estimates:**
-- ~200 bytes per entry (average across action types)
-- 100 moves → ~20 KB raw, ~10 KB compressed
-- 500 moves → ~100 KB raw, ~50 KB compressed
-- 1000 moves → ~200 KB raw, ~100 KB compressed (likely upper bound)
+- ~250 bytes per entry (average across action types)
+- 100 moves → ~25 KB raw, ~12 KB compressed
+- 500 moves → ~125 KB raw, ~60 KB compressed (likely upper bound)
 
 Postgres TOAST handles values above ~8 KB transparently — no configuration needed, no query changes required.
 
@@ -448,21 +461,21 @@ Postgres TOAST handles values above ~8 KB transparently — no configuration nee
 [
   {
     "turn": 1,
-    "player": "red",
+    "player": "RED",
     "action_type": "move",
     "piece_id": "550e8400-e29b-41d4-a716-446655440003",
-    "from": "g1",
-    "to": "f3",
+    "from_row": 1, "from_col": 5,
+    "to_row": 3, "to_col": 5,
     "result": {}
   },
   {
     "turn": 2,
-    "player": "blue",
+    "player": "BLUE",
     "action_type": "attack",
     "piece_id": "550e8400-e29b-41d4-a716-446655440004",
     "target_piece_id": "550e8400-e29b-41d4-a716-446655440003",
-    "from": "d7",
-    "to": "f3",
+    "from_row": 6, "from_col": 3,
+    "to_row": 3, "to_col": 5,
     "result": {
       "damage": 40,
       "type_multiplier": 2.0,
@@ -473,66 +486,113 @@ Postgres TOAST handles values above ~8 KB transparently — no configuration nee
   },
   {
     "turn": 3,
-    "player": "red",
-    "action_type": "stealball_attack",
-    "piece_id": "550e8400-e29b-41d4-a716-446655440005",
+    "player": "RED",
+    "action_type": "pokeball_attack",
+    "piece_id": null,
     "target_piece_id": "550e8400-e29b-41d4-a716-446655440004",
-    "from": "a2",
-    "to": "b3",
+    "from_row": 1, "from_col": 0,
+    "to_row": 2, "to_col": 1,
     "result": {
       "rng_roll": 0.73,
       "captured": false,
-      "stealball_spent": true
+      "pokeball_spent": true
     }
   },
   {
     "turn": 4,
-    "player": "blue",
-    "action_type": "safetyball_store",
-    "piece_id": "550e8400-e29b-41d4-a716-446655440006",
-    "target_piece_id": "550e8400-e29b-41d4-a716-446655440003",
-    "from": "c7",
-    "to": "f3",
+    "player": "BLUE",
+    "action_type": "move",
+    "piece_id": null,
+    "from_row": 6, "from_col": 2,
+    "to_row": 4, "to_col": 2,
     "result": {
+      "stored": true,
+      "stored_piece_id": "550e8400-e29b-41d4-a716-446655440003",
       "stored_hp": 160,
       "stored_max_hp": 200
     }
   },
   {
     "turn": 5,
-    "player": "red",
-    "action_type": "evolve",
-    "piece_id": "550e8400-e29b-41d4-a716-446655440000",
-    "from": "e1",
-    "to": "e1",
+    "player": "RED",
+    "action_type": "quick_attack",
+    "piece_id": "550e8400-e29b-41d4-a716-446655440005",
+    "target_piece_id": "550e8400-e29b-41d4-a716-446655440006",
+    "from_row": 7, "from_col": 4,
+    "attack_to_row": 6, "attack_to_col": 4,
+    "move_to_row": 5, "move_to_col": 4,
     "result": {
-      "from_species": "pikachu",
-      "to_species": "raichu",
-      "hp_restored": 50
+      "damage": 50,
+      "type_multiplier": 1.0,
+      "target_hp_before": 200,
+      "target_hp_after": 150,
+      "captured": false
     }
   },
   {
     "turn": 6,
-    "player": "blue",
+    "player": "BLUE",
     "action_type": "foresight",
-    "piece_id": "550e8400-e29b-41d4-a716-446655440010",
-    "from": "d8",
-    "to": "d8",
+    "piece_id": "550e8400-e29b-41d4-a716-446655440007",
+    "from_row": 7, "from_col": 3,
+    "to_row": 7, "to_col": 3,
     "result": {
-      "target_square": "d5",
-      "resolves_on_turn": 7
+      "target_row": 4, "target_col": 3,
+      "damage": 120,
+      "resolves_on_turn": 8
     }
   },
   {
-    "turn": 7,
-    "player": "red",
-    "action_type": "item_trade",
-    "piece_id": "550e8400-e29b-41d4-a716-446655440010",
-    "target_piece_id": "550e8400-e29b-41d4-a716-446655440007",
-    "from": "d1",
-    "to": "e1",
+    "turn": 8,
+    "player": "BLUE",
+    "action_type": "foresight_resolve",
+    "piece_id": "550e8400-e29b-41d4-a716-446655440007",
     "result": {
-      "item": "thunder_stone"
+      "target_row": 4, "target_col": 3,
+      "damage": 120,
+      "target_piece_id": "550e8400-e29b-41d4-a716-446655440003",
+      "target_hp_before": 160,
+      "target_hp_after": 40,
+      "captured": false
+    }
+  },
+  {
+    "turn": 9,
+    "player": "RED",
+    "action_type": "evolve",
+    "piece_id": "550e8400-e29b-41d4-a716-446655440000",
+    "from_row": 0, "from_col": 4,
+    "to_row": 0, "to_col": 4,
+    "result": {
+      "from_species": "PIKACHU",
+      "to_species": "RAICHU",
+      "hp_restored": 50
+    }
+  },
+  {
+    "turn": 10,
+    "player": "BLUE",
+    "action_type": "trade",
+    "piece_id": "550e8400-e29b-41d4-a716-446655440008",
+    "target_piece_id": "550e8400-e29b-41d4-a716-446655440009",
+    "from_row": 7, "from_col": 3,
+    "to_row": 7, "to_col": 4,
+    "result": {
+      "item_given": "BENTSPOON",
+      "item_received": "THUNDERSTONE",
+      "triggered_evolution": true,
+      "evolved_to": "JOLTEON"
+    }
+  },
+  {
+    "turn": 11,
+    "player": "RED",
+    "action_type": "release",
+    "piece_id": null,
+    "from_row": 3, "from_col": 4,
+    "result": {
+      "released_piece_id": "550e8400-e29b-41d4-a716-446655440001",
+      "released_hp": 200
     }
   }
 ]
@@ -540,17 +600,18 @@ Postgres TOAST handles values above ~8 KB transparently — no configuration nee
 
 **`action_type` values:**
 
-| Value | Description |
-|---|---|
-| `move` | Standard reposition, no combat |
-| `attack` | HP-based combat, target may survive |
-| `stealball_attack` | 50% RNG capture attempt; `rng_roll` recorded |
-| `safetyball_store` | Safetyball moves onto injured ally to store them |
-| `safetyball_release` | Stored Pokémon released manually |
-| `evolve` | King evolution (costs a turn) |
-| `foresight` | Mew/Espeon schedules delayed attack |
-| `foresight_resolve` | Deferred foresight damage lands (auto, start of turn) |
-| `item_trade` | Free action item swap with adjacent teammate |
+| Value | Engine `ActionType` | Description |
+|---|---|---|
+| `move` | `MOVE` | Standard reposition; also covers Safetyball storing an ally — check `result.stored` |
+| `attack` | `ATTACK` (named piece) | Deterministic HP combat |
+| `pokeball_attack` | `ATTACK` (Pokéball piece) | 50% RNG capture; `rng_roll` and `captured` always recorded |
+| `masterball_attack` | `ATTACK` (Masterball piece) | Guaranteed capture; `captured` always true |
+| `quick_attack` | `QUICK_ATTACK` | Eevee: attack then reposition in the same turn |
+| `release` | `RELEASE` | Safetyball releases its stored Pokémon |
+| `evolve` | `EVOLVE` | King evolution (costs the turn) |
+| `foresight` | `FORESIGHT` | Mew/Espeon schedules a delayed attack |
+| `foresight_resolve` | *(auto, turn start)* | App-injected entry when pending Foresight fires; not a player-chosen action |
+| `trade` | `TRADE` | Free item swap with adjacent teammate (may trigger Eevee auto-evolution) |
 
 ---
 
@@ -565,17 +626,20 @@ See the `bots` table section above for the full example and parameter reference.
 ### No DynamoDB
 At 5–20 users, DynamoDB adds operational complexity with zero benefit. PostgreSQL JSONB on RDS handles semi-structured game state natively, with full ACID, foreign keys, and a single system to operate. JSONB is fully supported on all current AWS RDS PostgreSQL versions.
 
-### No FEN/PGN
-Standard chess notation cannot represent HP, stored pieces, held items, foresight queue, or type state. Game state is stored as the engine's native JSON snapshot. A custom PokéChess notation is being designed separately and is a future display/replay feature — not a storage or engine concern.
+### State format is `GameState.to_dict()` / `from_dict()`
+The `games.state` JSONB is the direct output of `GameState.to_dict()` (defined in `engine/state.py`) and is consumed by `GameState.from_dict()`. Field names, types, and structure mirror the engine's dataclasses exactly. A separate human-readable notation (PokeChess-PGN) is designed in `docs/PokeChess Notation Design...pdf` and is a future display/replay feature — not the Postgres storage format.
 
-### `pokemon_pieces.id` === `piece_id` in JSON
-The same UUID is used in the Postgres row, in `state.pieces[]`, and in every `move_history` entry. No translation layer needed for XP attribution. At game creation, when `game_pokemon_map` rows are written, the `pokemon_piece_id` values are also embedded into the initial `state` JSON that gets sent to the engine.
+### Coordinates are row/col integers, not algebraic notation
+All positions in `games.state` and `games.move_history` use `row`/`col` integers (0–7), matching the engine's internal representation. Row 0 is Red's back rank; row 7 is Blue's. The frontend converts to algebraic notation (e.g. `e4`) for display. Keeping storage in engine-native coordinates eliminates a translation layer and avoids a class of off-by-one errors.
+
+### `pokemon_pieces.id` === `piece.id` in state JSON
+The same UUID is used in the Postgres row, in `state.board[]` piece objects, and in every relevant `move_history` entry. No translation layer needed for XP attribution. At game creation the app server injects each named piece's UUID into `Piece.id` before serializing the initial state. Pawns (Pokéballs, Safetyballs) have `id: null` — they are ephemeral and not tracked in `pokemon_pieces`.
 
 ### Earned XP vs applied XP are separate
 `xp_earned` records raw activity, always. `xp_applied` and `xp_skip_reason` record what the business rule decided. Currently: wins apply XP, losses/draws/resigns skip it. This rule can change without touching historical data. The `xp_applied_at` timestamp makes the rollup idempotent — safe to retry.
 
-### State is opaque to the app server
-The app server stores `state`, returns it to the frontend for rendering, and sends it to the engine. It does not parse internals. This means the engine can evolve its internal state format without requiring app server changes, as long as the top-level game row columns (`whose_turn`, `status`, `winner`) remain stable.
+### App server uses engine functions directly for state transitions
+The app server imports `engine/` (the shared game logic package) and calls `GameState.from_dict()`, `get_legal_moves()`, `apply_move()`, and `is_terminal()` directly. It does not delegate move application or validation to the MCTS engine container — only MCTS search is offloaded (PvB only). This keeps the engine container stateless with respect to game logic and eliminates a network round-trip for every human move. The `games.state` JSONB is opaque only to the database — the app always deserializes it before use.
 
 ### Frequently queried fields are real columns
 `status`, `whose_turn`, `winner`, `is_bot_game` live as real columns on the `games` row. Polling `GET /games/{id}` to check whose turn it is does not touch TOAST values. Only reads that need the full board state or history fetch the JSONB columns.
@@ -596,41 +660,75 @@ PostgreSQL automatically compresses and stores out-of-line any JSONB value above
 ```
 1. Frontend sends:
    POST /games/{game_id}/move
-   { "piece_id": "...", "from": "e2", "to": "e4", "action_type": "move" }
+   { "piece_row": 1, "piece_col": 4, "action_type": "MOVE",
+     "target_row": 3, "target_col": 4 }
+
+   Note: the frontend only presents legal moves (pre-fetched via
+   GET /games/{id}/legal_moves), so every submitted move should be legal.
+   The app still validates as a security baseline.
 
 2. App server:
    a. Validates auth, confirms it's the player's turn (games.whose_turn)
-   b. Fetches games.state (current board snapshot)
+   b. Fetches games.state JSONB
+   c. Deserializes: state = GameState.from_dict(games.state)
+   d. Validates submitted move is in get_legal_moves(state)
 
-3. App server calls engine (internal):
+3. App applies the human's move using the shared engine library:
+   outcomes = apply_move(state, move)
+   if len(outcomes) == 2:           # Pokéball — stochastic
+       roll = random.random()
+       new_state = outcomes[0][0] if roll < 0.5 else outcomes[1][0]
+       # record rng_roll in the move_history entry
+   else:
+       new_state = outcomes[0][0]
+
+4. App checks if Foresight resolved this turn (pending_foresight was set
+   in state and is now cleared in new_state). If so, prepend a
+   "foresight_resolve" entry to the history batch before the player's move.
+
+5. App builds the move_history entry from the old vs new state diff,
+   then checks for game end:
+   done, winner = is_terminal(new_state)
+
+6. PvB only, if not done: app calls the MCTS engine for the bot's move
    POST localhost:5001/move
-   { "state": <current state JSON>, "move": <move payload> }
+   { "state": GameState.to_dict(new_state),
+     "time_budget": bot.params.time_budget }
 
-4. Engine returns:
-   { "new_state": <updated state JSON>, "move_result": <result object> }
+7. Engine (internal) returns the bot's chosen move:
+   { "piece_row": 0, "piece_col": 3, "action_type": "ATTACK",
+     "target_row": 1, "target_col": 4, "move_slot": null, ... }
 
-5. App server writes back to Postgres (single UPDATE):
-   - games.state        ← new_state (overwrite)
-   - games.move_history ← append move_result entry
+8. App applies bot move (same as step 3), builds its move_history entry,
+   checks is_terminal(bot_state). Repeat Foresight-resolve check (step 4).
+
+9. App writes back to Postgres (single UPDATE):
+   - games.state        ← GameState.to_dict(final_state)   (overwrite)
+   - games.move_history ← append new entry/entries          (jsonb concatenation)
    - games.whose_turn   ← flipped
    - games.turn_number  ← incremented
    - games.updated_at   ← now()
-   - games.status       ← 'complete' if king eliminated
-   - games.winner       ← set if game over
+   - games.status       ← 'complete' if terminal
+   - games.winner       ← 'red'|'blue'|'draw' if game over
    - games.end_reason   ← set if game over
 
-6. On game completion only — app server also writes:
-   - game_pokemon_map.xp_earned  ← tallied from move_history
-   - game_pokemon_map.xp_applied ← set by win/loss rule
-   - game_pokemon_map.xp_skip_reason ← set if not applied
-   - game_pokemon_map.xp_applied_at  ← now()
-   - pokemon_pieces.xp           ← incremented
-   - pokemon_pieces.evolution_stage  ← updated if threshold crossed
-   - pokemon_pieces.species      ← updated if evolved during game
+10. On game completion only — app server also writes:
+    - game_pokemon_map.xp_earned      ← tallied from move_history
+    - game_pokemon_map.xp_applied     ← set by win/loss rule
+    - game_pokemon_map.xp_skip_reason ← set if not applied
+    - game_pokemon_map.xp_applied_at  ← now()
+    - pokemon_pieces.xp               ← incremented
+    - pokemon_pieces.evolution_stage  ← updated if threshold crossed
+    - pokemon_pieces.species          ← updated if evolved during game
 
-7. Frontend polls GET /games/{game_id}
-   Receives: status, whose_turn, winner (real columns — no TOAST hit)
-   + state JSON for board rendering (TOAST fetch, transparent)
+11. Frontend polls GET /games/{game_id}
+    Receives: status, whose_turn, winner (real columns — no TOAST hit)
+    + state JSON for board rendering (TOAST fetch, transparent)
+
+    For move highlighting:
+    GET /games/{game_id}/legal_moves?piece_row=3&piece_col=4
+    App deserializes state, calls get_legal_moves(state), filters for
+    the requested piece, returns list of {target_row, target_col, action_type}.
 ```
 
 ---
