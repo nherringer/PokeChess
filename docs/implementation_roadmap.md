@@ -172,7 +172,7 @@ See `docs/pokechess_data_model.md` for full JSON examples.
    - Write `games` row + `game_pokemon_map` rows  
 
 6. **Legal moves endpoint** (`GET /games/{id}/legal_moves?piece_row=&piece_col=`)  
-   Deserialize state, call `get_legal_moves()`, filter for the requested piece, return target squares. This is what the frontend polls on piece selection.
+   Deserialize state, call `get_legal_moves()`, filter for the requested piece, return the full Move field set for each legal move: `piece_row`, `piece_col`, `action_type` (engine enum name), `target_row`, `target_col`, `secondary_row`, `secondary_col`, `move_slot`. The frontend uses these objects verbatim as the `POST /move` payload — `secondary_row`/`col` are needed for Quick Attack, `move_slot` for Mew's 3 attack types and Eevee's 5 evolution choices.
 
 7. **Move submission endpoint** (`POST /games/{id}/move`)  
    Full lifecycle: deserialize → validate → apply → detect Foresight resolution → build history entry → check terminal → PvB: call engine → write back. See Move Lifecycle Flow in `pokechess_data_model.md`.
@@ -190,10 +190,10 @@ See `docs/pokechess_data_model.md` for full JSON examples.
    Deserialize the `board[]` array. Each piece has `piece_type`, `team`, `row`, `col`, `current_hp`, `held_item`. Convert `(row, col)` → algebraic notation for display if needed. Render stored pieces with a visual indicator on the Safetyball square (check `stored_piece` field).
 
 2. **Legal move highlighting**  
-   On piece click: call `GET /games/{id}/legal_moves?piece_row=&piece_col=`. Highlight returned target squares. Distinguish `action_type` values (move vs attack vs foresight vs trade, etc.) for different visual treatments if desired.
+   On piece click: call `GET /games/{id}/legal_moves?piece_row=&piece_col=`. Highlight returned target squares by action_type (different visual for move vs attack vs foresight vs trade). Note: for a single target square there may be multiple legal moves with different `move_slot` values (e.g. Mew targeting one square with Fire Blast, Hydro Pump, or Solar Beam). The UI needs to handle this — see open questions.
 
 3. **Move submission**  
-   On square click: `POST /games/{id}/move` with `piece_row`, `piece_col`, `action_type`, `target_row`, `target_col`. Include `secondary_row`/`secondary_col` for Quick Attack; `move_slot` for Mew attacks and Eevee evolution choice.
+   On target selection: `POST /games/{id}/move` with the full Move object received from the legal moves endpoint. The payload is `{piece_row, piece_col, action_type, target_row, target_col, secondary_row, secondary_col, move_slot}`. For most moves most optional fields are null. For Quick Attack, `secondary_row`/`col` are the post-attack destination. For Mew attacks and Eevee evolution, `move_slot` encodes the choice.
 
 4. **Game polling**  
    Poll `GET /games/{id}` on the game view (1–3s interval). Update board when `turn_number` changes or `status` becomes `'complete'`. Fetch the full `state` JSONB for rendering.

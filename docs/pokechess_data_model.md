@@ -728,7 +728,17 @@ PostgreSQL automatically compresses and stores out-of-line any JSONB value above
     For move highlighting:
     GET /games/{game_id}/legal_moves?piece_row=3&piece_col=4
     App deserializes state, calls get_legal_moves(state), filters for
-    the requested piece, returns list of {target_row, target_col, action_type}.
+    the requested piece, returns the full Move field set for each legal move:
+    { piece_row, piece_col, action_type, target_row, target_col,
+      secondary_row, secondary_col, move_slot }
+    action_type uses engine enum names (e.g. "MOVE", "ATTACK", "QUICK_ATTACK").
+    secondary_row/col are non-null only for QUICK_ATTACK moves.
+    move_slot is non-null for Mew attacks (0–2) and Eevee/evolution moves (0–4).
+    The frontend uses the returned Move objects verbatim as the POST /move payload.
+
+    Note: action_type names in the move submission ("ATTACK", "QUICK_ATTACK", etc.)
+    are the engine's ActionType enum names and differ from move_history action_type
+    strings ("attack", "pokeball_attack", etc.). The app server handles the mapping.
 ```
 
 ---
