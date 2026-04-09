@@ -208,6 +208,56 @@ See `docs/pokechess_data_model.md` for full JSON examples.
 
 ---
 
+## App — open questions (product & API)
+
+These decisions block or complicate frontend, backend, or sequencing if left unspecified. Cross-check **`docs/api_spec.md`** first: some former gaps (e.g. `GET /games/{id}` and `POST /games/{id}/move` returning a **GameDetail** envelope with `state` and `move_history`) are already spelled out there; optional extras like `?include=history` remain called out in the spec as open.
+
+### Q1. Mew and multi-option move UI (frontend)
+
+For a single target square, **Mew** can yield up to three distinct legal moves (attack slots / move types). **Eevee evolution** can yield up to five moves when evolving via stone. The legal-moves API can return multiple `Move` objects that share the same target; the UI must disambiguate (modal, picker step, or a different selection flow) before calling `POST /games/{id}/move`.
+
+**Decision:** How should the client present that choice (inline modal vs. two-step flow vs. piece-specific UX)?
+
+### Q2. PvP scope: invites, friends, and roadmap alignment
+
+The data model includes `game_invites`, friends flows, and a pending → active game transition. The **backend checklist** in this doc currently emphasizes **PvB** (`POST /games`) and does not enumerate invite/friends endpoints.
+
+**Decision:** Is **v1 PvB-only** (defer `GET/POST /friends`, `GET/POST/PATCH /game-invites`) or does **v1 ship PvP** with the full invite and friends surface? This significantly changes backend and QA scope.
+
+### Q3. `POST /games/{id}/move` response (polling vs. single payload)
+
+For PvB, the server may apply the human move and then the bot move before responding; latency can approach the engine’s time budget.
+
+**Specified in `docs/api_spec.md`:** response `200` returns a full **GameDetail** (same shape as `GET /games/{id}`) after both plies when applicable.
+
+**Remaining product decision:** Confirm this stays the v1 contract for all clients, or document an alternate thin response + mandatory poll if requirements change.
+
+### Q4. `GET /games/{id}` payload options
+
+**Specified in `docs/api_spec.md`:** GameDetail includes `state`, `move_history`, terminal fields, and metadata.
+
+**Remaining decisions:** Whether to add query flags (e.g. omit `move_history` on hot polls), whether to embed **legal moves** for the active player (to skip a separate `GET /legal_moves` round-trip), and how much summary data **GET /games** should return for list views.
+
+### Q5. XP earning formula
+
+`xp_earned` vs `xp_applied` appears in the data model, but the rule for **what events** (per move, per game, damage-based, etc.) populate `xp_earned` is undefined.
+
+**Decision:** Business rule required before implementing XP attribution at game end.
+
+### Q6. `pokemon_pieces.species` updates for mid-game evolution
+
+If **Eevee** (or similar) evolves during a game, engine state and `move_history` reflect it, but updating **`pokemon_pieces.species` only at game completion** means an abandoned game leaves the roster row out of sync with history.
+
+**Decision:** Update **species** (and related fields) **incrementally after each committed move** vs **only on game completion** (simpler, current plan).
+
+### Minor implementation notes (no separate decision)
+
+- **Pokéball RNG:** Prefer selecting stochastic branches with explicit probabilities (e.g. `random.choices` with weights) rather than assuming ordering of `apply_move` outcome tuples.
+- **`whose_turn` vs state:** DB column is lowercase `red`/`blue`; `games.state.active_player` is uppercase — normalize when writing columns (`docs/api_spec.md`).
+- **App route code:** When building `Move` from JSON, use engine types (`Move`, `ActionType`) and compare against `get_legal_moves()` — see `app/README.md` imports; extend as needed for deserialization helpers.
+
+---
+
 ## Key Constraints & Risks
 
 | Risk | Mitigation |

@@ -1,6 +1,6 @@
 # PokeChess App — API Specification
 
-**Status:** Proposed — see open decisions in `implementation_roadmap.md` before implementing  
+**Status:** Proposed — see open decisions and **App — open questions** in `implementation_roadmap.md` before implementing  
 **Last updated:** April 2026
 
 Cross-reference: `docs/pokechess_data_model.md` for all JSONB shapes, table schemas, and the move lifecycle flow.
@@ -116,7 +116,7 @@ Auth required. Returns the authenticated user's profile and persistent pieces.
   ]
 }
 ```
-`pieces` is the 5 persistent Pokémon from `pokemon_pieces` (king, queen, rook, knight, bishop). Always 5 rows per user after account creation.
+`pieces` is the user’s persistent roster from `pokemon_pieces` (see `pokechess_data_model.md`). The collection can grow over time; array length is not fixed. The example shows one object; responses include every owned piece.
 
 ---
 

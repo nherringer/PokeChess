@@ -2,10 +2,11 @@
 
 This directory contains the app server container (`pokechess-app`). It is the only service that touches Postgres. The MCTS engine container is called only for bot moves in PvB games.
 
-## Before implementing anything, read these two docs
+## Before implementing anything, read these docs
 
 - **[`docs/pokechess_data_model.md`](../docs/pokechess_data_model.md)** — Full Postgres schema, canonical `games.state` and `games.move_history` JSON shapes, and the move lifecycle flow. This is the ground truth for every data structure the app touches.
-- **[`docs/implementation_roadmap.md`](../docs/implementation_roadmap.md)** — Agreed architecture, container responsibilities, engine API contract, and the prioritized next-steps checklist for this service.
+- **[`docs/api_spec.md`](../docs/api_spec.md)** — HTTP contract for the app server: request/response shapes, auth, game/move/friends/invites endpoints, and frontend-facing notes (legal moves, move payloads). Implement routes against this spec and keep it in sync when behavior changes.
+- **[`docs/implementation_roadmap.md`](../docs/implementation_roadmap.md)** — Agreed architecture, container responsibilities, engine API contract, prioritized checklist, and app-side open questions.
 
 ## What goes here
 
