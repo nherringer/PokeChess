@@ -1,0 +1,58 @@
+# Local development: pokechess-app + pokechess-engine + postgres
+# Production uses ECS on EC2 with separate task definitions; this file is dev-only.
+#
+# Usage:
+#   docker compose up --build          # first run
+#   docker compose up                  # subsequent runs
+#   docker compose down -v             # teardown including postgres volume
+
+services:
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: pokechess
+      POSTGRES_PASSWORD: pokechess
+      POSTGRES_DB: pokechess
+    ports:
+      - "5432:5432"          # exposed locally for psql / DB GUI access
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pokechess"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  pokechess-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile.engine
+    ports:
+      - "5001:5001"          # exposed locally for debugging; internal-only in production
+    restart: unless-stopped
+    # No DATABASE_URL — the engine never touches Postgres.
+    # TODO: add S3 env vars for transposition table backup once bot/server.py is implemented:
+    #   AWS_DEFAULT_REGION, S3_TREE_BUCKET
+
+  pokechess-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://pokechess:pokechess@postgres:5432/pokechess"
+      ENGINE_URL: "http://pokechess-engine:5001"
+      # TODO: add before implementing auth:
+      #   SECRET_KEY (JWT signing key)
+      #   ACCESS_TOKEN_EXPIRE_MINUTES
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pokechess-engine:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
