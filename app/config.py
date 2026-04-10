@@ -10,6 +10,8 @@ ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUT
 REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.environ.get("REFRESH_TOKEN_EXPIRE_DAYS", "30"))
 ALGORITHM: str = "HS256"
 ENVIRONMENT: str = os.environ.get("ENVIRONMENT", "development")
+# A single "*" entry means “any origin”; main.py maps that to allow_origin_regex so
+# credentialed requests work (browsers disallow Origin: * with credentials).
 CORS_ORIGINS: list[str] = [
     o.strip()
     for o in os.environ.get("CORS_ORIGINS", "*").split(",")

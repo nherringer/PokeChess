@@ -35,7 +35,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 def create_access_token(user_id: UUID) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=config.ACCESS_TOKEN_EXPIRE_MINUTES)
     return jwt.encode(
-        {"sub": str(user_id), "exp": expire},
+        {"sub": str(user_id), "exp": expire, "type": "access"},
         config.SECRET_KEY,
         algorithm=config.ALGORITHM,
     )
@@ -73,6 +73,8 @@ async def get_current_user(
     db: Annotated[asyncpg.Connection, Depends(get_db)],
 ) -> dict:
     payload = decode_token(credentials.credentials)
+    if payload.get("type") == "refresh":
+        raise AppError(401, "unauthorized", "Use an access token, not a refresh token")
     user_id = payload.get("sub")
     if user_id is None:
         raise AppError(401, "unauthorized", "Invalid token payload")

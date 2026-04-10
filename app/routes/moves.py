@@ -94,9 +94,7 @@ def _moves_equal(a: Move, b: Move) -> bool:
     )
 
 
-def _detect_foresight_resolve(
-    old_state, new_state, id_map: IdMap,
-) -> dict | None:
+def _detect_foresight_resolve(old_state, id_map: IdMap) -> dict | None:
     """If foresight resolved inside apply_move, build the history entry."""
     player = old_state.active_player
     fx = old_state.pending_foresight.get(player)
@@ -104,8 +102,7 @@ def _detect_foresight_resolve(
         return None
     if fx.resolves_on_turn != old_state.turn_number:
         return None
-    # Foresight resolved — build the entry using old_state (pre-resolution)
-    return build_foresight_resolve_entry(old_state, new_state, fx, id_map)
+    return build_foresight_resolve_entry(old_state, fx, id_map)
 
 
 def _apply_and_record(
@@ -119,7 +116,7 @@ def _apply_and_record(
     history_entries = []
 
     # Check for foresight resolution (happens at start of apply_move)
-    fx_entry = _detect_foresight_resolve(old_state, old_state, id_map)
+    fx_entry = _detect_foresight_resolve(old_state, id_map)
     if fx_entry is not None:
         history_entries.append(fx_entry)
 

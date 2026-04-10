@@ -1,0 +1,215 @@
+Status: Approved, pre-implementation
+Authors: nherringer
+Audience: ML bot team + frontend/async team
+
+Overview
+This document covers the design of the HTTP bot API and the serialization layer (PokeChess-FEN and PokeChess-PGN) that underlies it. The API allows the backend/async layer to query the ML bot for a move given the current game state.
+
+For background on why the Zobrist hash is insufficient for state serialization, and the full rationale for the FEN/PGN formats, see docs/PokeChess_Notation_Design.md.
+
+Implementation Order
+FEN serialization (engine/state.py, engine/moves.py) + round-trip tests — prerequisite for everything
+
+Bot API (api/app.py) + endpoint tests
+
+PGN notation (engine/notation.py) — after API is stable
+
+Phase 1 — FEN Serialization
+Files modified
+File
+
+Change
+
+engine/state.py
+
+Add to_dict() / from_dict() to Piece, ForesightEffect, GameState
+
+engine/moves.py
+
+Add to_dict() / from_dict() to Move
+
+tests/test_serialization.py
+
+New — round-trip tests
+
+Piece.to_dict() / Piece.from_dict(d)
+All fields serialize directly; enum values become their .name string
+
+stored_piece serializes recursively (nested dict or null)
+
+ForesightEffect.to_dict() / ForesightEffect.from_dict(d)
+Straightforward — all integer fields, no nesting
+
+GameState.to_dict() / GameState.from_dict(d)
+board → flat list of piece dicts (only occupied squares; row/col encode position)
+
+active_player → team name string ("RED" or "BLUE")
+
+pending_foresight → {"RED": null | <foresight dict>, "BLUE": null | <foresight dict>}
+
+has_traded, foresight_used_last_turn → {"RED": bool, "BLUE": bool}
+
+Move.to_dict() / Move.from_dict(d)
+action_type → ActionType.name string (e.g. "MOVE", "ATTACK")
+
+All optional fields (secondary_row, secondary_col, move_slot) included as null when absent
+
+Example FEN output (abbreviated)
+
+
+{
+  "active_player": "RED",
+  "turn_number": 14,
+  "has_traded": {"RED": false, "BLUE": false},
+  "foresight_used_last_turn": {"RED": false, "BLUE": true},
+  "pending_foresight": {
+    "RED": null,
+    "BLUE": {"target_row": 4, "target_col": 3, "damage": 120, "resolves_on_turn": 15}
+  },
+  "board": [
+    {"piece_type": "SQUIRTLE", "team": "RED", "row": 3, "col": 2,
+     "current_hp": 160, "held_item": "WATERSTONE", "stored_piece": null},
+    {"piece_type": "SAFETYBALL", "team": "BLUE", "row": 5, "col": 4,
+     "current_hp": 0, "held_item": "NONE",
+     "stored_piece": {"piece_type": "EEVEE", "team": "BLUE",
+                      "row": 5, "col": 4, "current_hp": 80,
+                      "held_item": "THUNDERSTONE", "stored_piece": null}}
+  ]
+}
+Example Move dict output
+
+
+{
+  "piece_row": 1,
+  "piece_col": 4,
+  "action_type": "MOVE",
+  "target_row": 3,
+  "target_col": 4,
+  "secondary_row": null,
+  "secondary_col": null,
+  "move_slot": null
+}
+Verification
+Test
+
+Method
+
+FEN round-trip
+
+GameState.from_dict(state.to_dict()) == state for mid-game states with stored pieces, pending Foresight, held items
+
+Move round-trip
+
+Move.from_dict(move.to_dict()) == move for all ActionType values including QUICK_ATTACK
+
+Null field preservation
+
+Optional Move fields round-trip as null correctly
+
+Phase 2 — Bot API
+Stack
+Framework: FastAPI
+
+Server: Uvicorn
+
+New dependencies: fastapi, uvicorn, boto3
+
+Files created
+File
+
+Purpose
+
+api/__init__.py
+
+Package marker
+
+api/app.py
+
+FastAPI app, lifespan, endpoints, session management
+
+tests/test_api.py
+
+Endpoint tests
+
+Session model
+Each active game gets one session, keyed by UUID. Sessions are created at game start and destroyed at game end.
+
+
+
+SessionState:
+  mcts: MCTS                   # warm tree, persists across move requests
+  last_bot_move: Move | None   # stored to call advance() on the next request
+  move_count: int              # incremented each request; triggers TT sync at multiples of 50
+  last_active: float           # Unix timestamp; used for TTL cleanup
+Global process state (created at startup)
+
+
+global_tt: TranspositionTable   # shared across all sessions (inter-game learning)
+sessions: dict[str, SessionState]
+tt_sync_queue: TTSyncQueue      # see TT Sync design doc
+Endpoints
+POST /game
+Creates a new game session.
+
+
+
+Response 200:
+{
+  "session_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+POST /game/{session_id}/move
+Requests the bot's next move. On the first call opp_move should be null (bot is moving first or no prior opponent move exists). On all subsequent calls, opp_move is the move the opponent just played — required for tree pruning via MCTS.advance().
+
+
+
+Request body:
+{
+  "state":    { <FEN dict> },
+  "opp_move": null | { <Move dict> }
+}
+Response 200:
+{
+  "move": { <Move dict> }
+}
+Processing steps:
+
+Deserialize state via GameState.from_dict()
+
+If last_bot_move is set and opp_move is provided: call mcts.advance(last_bot_move, opp_move) to prune the tree
+
+Call mcts.select_move(state) → Move
+
+Store last_bot_move, increment move_count, update last_active
+
+If move_count % 50 == 0: enqueue TT sync (see docs/Transposition_Table_Sync.md)
+
+Return {"move": chosen_move.to_dict()}
+
+POST /game/{session_id}/end
+Signals game over. Triggers a final TT sync and cleans up the session.
+
+
+
+Response 200:
+{ "status": "ok" }
+Startup lifespan
+On startup (FastAPI lifespan event):
+
+Download TT from S3 → load into global_tt (graceful no-op if key doesn't exist — bot starts with an empty TT)
+
+Start background TT sync thread
+
+Session TTL cleanup
+A background asyncio task sweeps sessions periodically and removes entries where last_active is older than 1 hour. Abandoned sessions do not trigger a TT sync.
+
+Open question — opp_move format
+advance(our_move, opp_move) requires the opponent's move as a Move object. This means the frontend must echo back a Move dict in the format returned by the API. Does the frontend have its own move representation, or will it use the Move dict from the API response as-is? If a translation layer is needed at the API boundary, that should be agreed before implementation.
+
+Phase 3 — PGN Notation
+Deferred until Phase 2 is stable. See docs/PokeChess_Notation_Design.md for full spec.
+
+Files to create:
+
+engine/notation.py — move_to_str(), str_to_move(), GameRecord class
+
+tests/test_notation.py — round-trip and stochastic-replay tests

@@ -86,6 +86,26 @@ def _trace_piece_origin(
 ) -> Optional[str]:
     """Determine the UUID of a piece in the new state by tracing where it came from."""
 
+    # TRADE: pieces never swap squares — only items (and Eevee may evolve in place on target).
+    if move.action_type == ActionType.TRADE:
+        if pos == (move.piece_row, move.piece_col):
+            uid = old_pos_ids.get(pos)
+            if uid is not None:
+                return uid
+        if pos == (move.target_row, move.target_col):
+            uid = old_pos_ids.get(pos)
+            if uid is not None:
+                return uid
+
+    # EVOLVE: Pikachu/Eevee evolve in place (source square == destination).
+    if move.action_type == ActionType.EVOLVE:
+        src = (move.piece_row, move.piece_col)
+        tgt = (move.target_row, move.target_col)
+        if pos == src == tgt:
+            uid = old_pos_ids.get(src)
+            if uid is not None:
+                return uid
+
     # Case 1: piece was at the same position in the old state and hasn't moved
     old_piece = old_state.piece_at(pos[0], pos[1])
     if old_piece is not None and _same_piece(old_piece, piece):

@@ -133,15 +133,13 @@ def build_history_entry(
 
 def build_foresight_resolve_entry(
     old_state: GameState,
-    new_state: GameState,
     fx: ForesightEffect,
     id_map: IdMap,
 ) -> Optional[dict]:
     """
     Build a foresight_resolve history entry if foresight resolved this turn.
 
-    Call BEFORE the player's move is applied (since apply_move resolves foresight
-    internally, compare old_state's pending vs new_state's pending to detect it).
+    Call BEFORE the player's move is applied (apply_move resolves foresight internally).
     """
     player = old_state.active_player
 

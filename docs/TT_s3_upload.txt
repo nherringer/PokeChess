@@ -1,0 +1,168 @@
+Status: Approved, pre-implementation
+Authors: nherringer
+Audience: ML bot team
+
+Overview
+The transposition table (TT) maps Zobrist hashes to (wins, visits) statistics accumulated across games. It is the bot's inter-game learning mechanism. This document covers the design for pulling the TT from remote storage on startup and pushing updated stats back at regular intervals and at game end.
+
+Background
+Current state
+bot/transposition.py implements TranspositionTable with save(path) and load(path) methods that read/write a 16-byte-per-entry binary format. These already work correctly for local persistence. The gap is the remote layer.
+
+What we need
+On startup: pull the latest TT from S3; start fresh gracefully if none exists
+
+Periodic sync: push updated stats every 50 moves (25 bot turns + 25 opponent turns) across all active sessions combined
+
+Game-end sync: push once more when a game ends (via POST /game/{session_id}/end)
+
+Concurrency safety: serialize uploads within a process to prevent races
+
+TT Versioning
+The S3 key includes a version integer: tt_v{TT_VERSION}.bin.
+
+TT_VERSION is a module-level constant in bot/tt_store.py. When a rules change invalidates existing stats, bump this constant and redeploy. The old key is left in S3 (cheap storage, useful audit trail) and the bot starts fresh with an empty TT under the new key.
+
+No metadata or header is stored inside the binary file itself — versioning lives entirely in the key name.
+
+Files
+File
+
+Purpose
+
+bot/tt_store.py
+
+S3 client wrapper + background merge queue
+
+tests/test_tt_store.py
+
+Mocked boto3 tests
+
+bot/tt_store.py Design
+TTStore class
+Thin wrapper around boto3 for download and upload.
+
+
+
+TTStore(bucket: str, key: str):
+  download(local_path: str) → bool
+    # Downloads S3 key to local_path.
+    # Returns False (no-op) if the key does not exist — fresh-start case.
+    # Raises on all other S3 errors.
+  upload(local_path: str) → None
+    # Uploads local_path to S3 key.
+TTSyncQueue class
+A background thread that serializes sync operations. The main thread enqueues sync requests; the worker processes them one at a time.
+
+
+
+TTSyncQueue(tt: TranspositionTable, store: TTStore, local_path: str):
+  enqueue() → None
+    # Puts a sync request on the queue (non-blocking).
+    # If a sync is already queued but not yet started, a second enqueue is a no-op
+    # (deduplication) to avoid piling up redundant work.
+  drain() → None
+    # Blocks until the queue is empty and the worker is idle.
+    # Called via atexit on process shutdown to prevent exiting mid-sync.
+  _worker() → None
+    # Background thread body. Loops forever, processing one sync per iteration:
+    #   1. Download current S3 TT to a temp file
+    #   2. Load temp file into a fresh TranspositionTable (TT_s3)
+    #   3. Merge global_tt into TT_s3 additively
+    #   4. Save merged result to local_path
+    #   5. Upload local_path to S3
+Merge semantics
+The TranspositionTable.load() method already merges additively (it sums wins and visits for matching hashes). The sync operation exploits this:
+
+Download TT_s3 into a fresh table
+
+For each entry in the running TT, merge it into TT_s3
+
+Upload the merged result
+
+Within a single process, the queue guarantees uploads are sequential. Across multiple bot instances (horizontal scaling), the last writer wins. Because all updates are additive — no entry is ever decremented — this produces at most mild over-counting of stats shared between instances, not data corruption. Win/visit ratios remain approximately correct.
+
+Known limitation: double-counting under concurrent instances
+If two instances both start from TT_s3_v0 and both sync later, the merged S3 result includes TT_s3_v0 counted twice plus each instance's new stats. For a single running instance (the expected deployment for now) this does not occur. If horizontal scaling becomes necessary, delta tracking (upload only stats accumulated since last sync) can be added without changing the file format.
+
+Integration with the Bot API
+See docs/Bot_API_Design.md for the full API design. TT sync integration points:
+
+Trigger
+
+Action
+
+API startup
+
+Download S3 TT → load into global_tt; start TTSyncQueue worker thread
+
+move_count % 50 == 0 (any session)
+
+sync_queue.enqueue()
+
+POST /game/{session_id}/end
+
+sync_queue.enqueue()
+
+Process shutdown (atexit)
+
+sync_queue.drain()
+
+move_count is per-session and counts all half-moves (bot + opponent). A sync fires when any session crosses a multiple of 50. This is intentionally coarse — exact alignment to game boundaries is not required.
+
+Configuration
+The following should be configurable via environment variables (no hardcoded values in source):
+
+Variable
+
+Purpose
+
+POKECHESS_TT_BUCKET
+
+S3 bucket name
+
+POKECHESS_TT_VERSION
+
+TT version integer (overrides compiled-in default)
+
+AWS_REGION
+
+Standard boto3 env var
+
+AWS_ACCESS_KEY_ID
+
+Standard boto3 env var
+
+AWS_SECRET_ACCESS_KEY
+
+Standard boto3 env var
+
+Verification
+Test
+
+Method
+
+Fresh start
+
+TTStore.download() returns False when S3 key absent; TT remains empty
+
+Round-trip
+
+Save TT locally → upload → download → load → stats match original
+
+Merge correctness
+
+Two TTs with overlapping keys merge additively
+
+Queue deduplication
+
+Enqueueing twice while worker is busy results in one upload, not two
+
+Drain on shutdown
+
+drain() blocks until in-flight sync completes
+
+Version isolation
+
+Changing TT_VERSION targets a different S3 key; old stats not loaded
+

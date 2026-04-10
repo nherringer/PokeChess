@@ -33,13 +33,25 @@ def create_app() -> FastAPI:
     app = FastAPI(title="PokeChess", lifespan=lifespan)
     app.state.engine_url = config.ENGINE_URL
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=config.CORS_ORIGINS,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # Browsers reject Access-Control-Allow-Origin: * together with credentialed requests.
+    # When CORS_ORIGINS is "*", mirror the request Origin via regex instead.
+    cors_origins = config.CORS_ORIGINS
+    if cors_origins == ["*"]:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origin_regex=r".*",
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    else:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=cors_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     @app.exception_handler(AppError)
     async def app_error_handler(_request: Request, exc: AppError) -> JSONResponse:
