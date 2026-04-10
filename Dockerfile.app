@@ -9,16 +9,18 @@ WORKDIR /app
 # Copy only what this container needs
 COPY engine/ ./engine/
 COPY app/     ./app/
+COPY alembic.ini ./alembic.ini
 
 # Runtime deps
-# Expand this list as app/ is implemented.
 RUN pip install --no-cache-dir \
     fastapi \
-    uvicorn[standard] \
+    "uvicorn[standard]" \
     asyncpg \
     alembic \
     "passlib[bcrypt]" \
-    "python-jose[cryptography]"
+    "python-jose[cryptography]" \
+    httpx \
+    sqlalchemy \
+    psycopg2-binary
 
-# TODO (app backend): implement app/main.py
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
