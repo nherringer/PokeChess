@@ -123,10 +123,19 @@ def _apply_and_record(
     # Apply the move
     outcomes = apply_move(old_state, move)
 
-    # Resolve RNG for pokeball
+    piece_moving = old_state.board[move.piece_row][move.piece_col]
+    is_pokeball_attack = (
+        move.action_type == ActionType.ATTACK
+        and piece_moving is not None
+        and piece_moving.piece_type == PieceType.POKEBALL
+    )
+
+    # Resolve RNG for pokeball (engine: stochastic capture is exactly two outcomes)
     rng_roll = None
     captured = None
     if len(outcomes) == 2:
+        if not is_pokeball_attack:
+            raise AppError(500, "internal_error", "Unexpected stochastic outcomes from engine")
         rng_roll = random.random()
         if rng_roll < outcomes[0][1]:
             new_state = outcomes[0][0]
@@ -134,17 +143,13 @@ def _apply_and_record(
         else:
             new_state = outcomes[1][0]
             captured = False
-    else:
+    elif len(outcomes) == 1:
         new_state = outcomes[0][0]
-        # For deterministic pokeball result (immune target)
-        piece = old_state.board[move.piece_row][move.piece_col]
-        if (
-            move.action_type == ActionType.ATTACK
-            and piece is not None
-            and piece.piece_type == PieceType.POKEBALL
-        ):
+        if is_pokeball_attack:
             rng_roll = None
             captured = False
+    else:
+        raise AppError(500, "internal_error", "Invalid outcome list from engine")
 
     # Build the move's history entry (using old_state for damage calc)
     move_entry = build_history_entry(

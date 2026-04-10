@@ -57,6 +57,14 @@ def decode_token(token: str) -> dict:
         raise AppError(401, "unauthorized", "Invalid or expired token")
 
 
+def uuid_from_jwt_sub(sub: str) -> UUID:
+    """Parse JWT `sub` as a user id; malformed values yield 401 (not 500)."""
+    try:
+        return UUID(sub)
+    except ValueError:
+        raise AppError(401, "unauthorized", "Invalid token payload")
+
+
 # ---------------------------------------------------------------------------
 # FastAPI dependencies
 # ---------------------------------------------------------------------------
@@ -75,12 +83,13 @@ async def get_current_user(
     payload = decode_token(credentials.credentials)
     if payload.get("type") == "refresh":
         raise AppError(401, "unauthorized", "Use an access token, not a refresh token")
-    user_id = payload.get("sub")
-    if user_id is None:
+    sub = payload.get("sub")
+    if sub is None:
         raise AppError(401, "unauthorized", "Invalid token payload")
+    user_id = uuid_from_jwt_sub(str(sub))
     row = await db.fetchrow(
         "SELECT id, username, email, created_at FROM users WHERE id = $1",
-        UUID(user_id),
+        user_id,
     )
     if row is None:
         raise AppError(401, "unauthorized", "User not found")

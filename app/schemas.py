@@ -1,9 +1,40 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
+
+# Limits merged JSON patch size for user_settings.extra_settings (abuse / accidental huge payloads).
+_MAX_EXTRA_SETTINGS_BYTES = 16,384
+_MAX_EXTRA_SETTINGS_DEPTH = 8
+
+
+def _extra_settings_depth(obj: object, depth: int) -> None:
+    if depth > _MAX_EXTRA_SETTINGS_DEPTH:
+        raise ValueError(
+            f"extra_settings must not nest deeper than {_MAX_EXTRA_SETTINGS_DEPTH} levels"
+        )
+    if isinstance(obj, dict):
+        for v in obj.values():
+            _extra_settings_depth(v, depth + 1)
+    elif isinstance(obj, list):
+        for v in obj:
+            _extra_settings_depth(v, depth + 1)
+
+
+def _validate_extra_settings_dict(value: dict) -> dict:
+    try:
+        raw = json.dumps(value)
+    except (TypeError, ValueError) as e:
+        raise ValueError("extra_settings must be JSON-serializable") from e
+    if len(raw) > _MAX_EXTRA_SETTINGS_BYTES:
+        raise ValueError(
+            f"extra_settings must be at most {_MAX_EXTRA_SETTINGS_BYTES} bytes when serialized"
+        )
+    _extra_settings_depth(value, 0)
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +86,13 @@ class UserProfile(BaseModel):
 class SettingsUpdate(BaseModel):
     board_theme: str | None = None
     extra_settings: dict | None = None
+
+    @field_validator("extra_settings")
+    @classmethod
+    def _limit_extra_settings(cls, v: dict | None) -> dict | None:
+        if v is None:
+            return v
+        return _validate_extra_settings_dict(v)
 
 
 class SettingsOut(BaseModel):

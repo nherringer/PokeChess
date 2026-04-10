@@ -36,6 +36,11 @@ def create_app() -> FastAPI:
     # Browsers reject Access-Control-Allow-Origin: * together with credentialed requests.
     # When CORS_ORIGINS is "*", mirror the request Origin via regex instead.
     cors_origins = config.CORS_ORIGINS
+    if config.ENVIRONMENT != "development" and cors_origins == ["*"]:
+        raise RuntimeError(
+            "CORS_ORIGINS cannot be '*' in non-development environments. "
+            "Set CORS_ORIGINS to an explicit comma-separated allowlist."
+        )
     if cors_origins == ["*"]:
         app.add_middleware(
             CORSMiddleware,

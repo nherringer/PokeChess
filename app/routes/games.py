@@ -100,32 +100,31 @@ async def get_game(game_id: UUID, user: CurrentUser, db: Db):
 
 @router.post("/{game_id}/resign", response_model=GameDetail)
 async def resign_game(game_id: UUID, user: CurrentUser, db: Db):
-    game = await game_q.get_game(db, game_id)
-    if game is None:
-        raise AppError(404, "not_found", "Game not found")
-    if not _user_is_participant(game, user["id"]):
-        raise AppError(403, "forbidden", "Not a participant in this game")
-    if game["status"] != "active":
-        raise AppError(409, "game_not_active", "Game is not active")
-
-    # The resigning player loses; opponent wins
-    if game["red_player_id"] == user["id"]:
-        winner = "blue"
-    else:
-        winner = "red"
-
-    await game_q.set_game_complete(db, game_id, winner, "resign")
-
-    # Process XP
     from ..game_logic.xp import compute_xp
     from ..db.queries.game_map import update_xp_earned
 
-    history = game.get("move_history") or []
-    if isinstance(history, str):
-        history = json.loads(history)
-    xp_map = compute_xp(history)
-    if xp_map:
-        await update_xp_earned(db, game_id, xp_map, winner, "resign")
+    async with db.transaction():
+        game = await game_q.get_game_for_move(db, game_id)
+        if game is None:
+            raise AppError(404, "not_found", "Game not found")
+        if not _user_is_participant(game, user["id"]):
+            raise AppError(403, "forbidden", "Not a participant in this game")
+        if game["status"] != "active":
+            raise AppError(409, "game_not_active", "Game is not active")
+
+        if game["red_player_id"] == user["id"]:
+            winner = "blue"
+        else:
+            winner = "red"
+
+        await game_q.set_game_complete(db, game_id, winner, "resign")
+
+        history = game.get("move_history") or []
+        if isinstance(history, str):
+            history = json.loads(history)
+        xp_map = compute_xp(history)
+        if xp_map:
+            await update_xp_earned(db, game_id, xp_map, winner, "resign")
 
     updated = await game_q.get_game(db, game_id)
     return _game_detail(updated)

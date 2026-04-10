@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-from uuid import UUID
-
 from fastapi import APIRouter, Request, Response
 from asyncpg import UniqueViolationError
 
 from .. import config
-from ..auth import Db, hash_password, verify_password, create_access_token, create_refresh_token, decode_token
+from ..auth import (
+    Db,
+    hash_password,
+    verify_password,
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    uuid_from_jwt_sub,
+)
 from ..main import AppError
 from ..schemas import RegisterRequest, LoginRequest, TokenResponse, RefreshResponse
 from ..db.queries import users as user_q, settings as settings_q
@@ -67,7 +73,7 @@ async def refresh(request: Request, db: Db):
     user_id = payload.get("sub")
     if user_id is None:
         raise AppError(401, "unauthorized", "Invalid token payload")
-    row = await db.fetchrow("SELECT id FROM users WHERE id = $1", UUID(user_id))
+    row = await db.fetchrow("SELECT id FROM users WHERE id = $1", uuid_from_jwt_sub(str(user_id)))
     if row is None:
         raise AppError(401, "unauthorized", "User not found")
     access = create_access_token(row["id"])
