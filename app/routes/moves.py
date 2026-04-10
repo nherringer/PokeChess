@@ -263,12 +263,33 @@ async def submit_move(
         # PvB: if game is not over and it's now the bot's turn, get and apply bot move
         if not done and game["is_bot_game"] and game["bot_side"] == new_state.active_player.name.lower():
             from ..engine_client import request_bot_move
+            from ..db.queries.bot_activity import count_active_bot_players, upsert_player_activity
+            from .. import config
 
+            bot_id = game["bot_id"]
             bot_params = game.get("bot_params") or {}
-            time_budget = bot_params.get("time_budget", 3.0) if isinstance(bot_params, dict) else 3.0
+            if not isinstance(bot_params, dict):
+                bot_params = {}
+
+            base_time_budget = float(bot_params.get("time_budget", 3.0))
+
+            # Record this player's move before counting so they're included in N.
+            await upsert_player_activity(db, user["id"], bot_id)
+
+            # Load-aware scaling: divide the base budget across all players
+            # concurrently active against this bot personality so no single game
+            # gets an outsized share of MCTS compute.
+            n_active = await count_active_bot_players(
+                db, bot_id, config.BOT_ACTIVE_WINDOW_MINUTES
+            )
+            effective_time_budget = base_time_budget / n_active
+
+            # Build persona_params: start from stored bot config, override
+            # time_budget with the load-adjusted value.
+            persona_params = {**bot_params, "time_budget": effective_time_budget}
 
             bot_state_dict = state_to_dict(new_state, id_map)
-            bot_move_raw = await request_bot_move(request, bot_state_dict, time_budget)
+            bot_move_raw = await request_bot_move(request, bot_state_dict, persona_params)
 
             try:
                 bot_move = Move(

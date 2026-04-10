@@ -1,11 +1,14 @@
-Status: Approved, pre-implementation
+Status: Implemented
 Authors: nherringer
-Audience: ML bot team + frontend/async team
+Audience: ML bot team + app team
 
 Overview
-This document covers the design of the HTTP bot API and the serialization layer (PokeChess-FEN and PokeChess-PGN) that underlies it. The API allows the backend/async layer to query the ML bot for a move given the current game state.
+This document covers the HTTP contract between the app server and the engine
+(ML bot) container, and the serialization layer that underlies it.
 
-For background on why the Zobrist hash is insufficient for state serialization, and the full rationale for the FEN/PGN formats, see docs/PokeChess_Notation_Design.md.
+For deployment topology, S3 persistence, and ops endpoints (backup), see
+docs/app_and_engine_communication.md.  For the full player-facing REST API,
+see docs/api_spec.md.
 
 Implementation Order
 FEN serialization (engine/state.py, engine/moves.py) + round-trip tests — prerequisite for everything
@@ -22,7 +25,7 @@ Change
 
 engine/state.py
 
-Add to_dict() / from_dict() to Piece, ForesightEffect, GameState
+Add to_dict() / from_dict() to Piece, ForesightEffect, GameState; add Piece.id field
 
 engine/moves.py
 
@@ -36,6 +39,9 @@ Piece.to_dict() / Piece.from_dict(d)
 All fields serialize directly; enum values become their .name string
 
 stored_piece serializes recursively (nested dict or null)
+
+id is included as a string UUID or null; the engine treats it as an opaque
+carrier — it is set by the app layer and passed through unchanged.
 
 ForesightEffect.to_dict() / ForesightEffect.from_dict(d)
 Straightforward — all integer fields, no nesting
@@ -67,11 +73,17 @@ Example FEN output (abbreviated)
     "BLUE": {"target_row": 4, "target_col": 3, "damage": 120, "resolves_on_turn": 15}
   },
   "board": [
-    {"piece_type": "SQUIRTLE", "team": "RED", "row": 3, "col": 2,
+    {"id": "550e8400-e29b-41d4-a716-446655440001",
+     "piece_type": "SQUIRTLE", "team": "RED", "row": 3, "col": 2,
      "current_hp": 160, "held_item": "WATERSTONE", "stored_piece": null},
-    {"piece_type": "SAFETYBALL", "team": "BLUE", "row": 5, "col": 4,
+    {"id": null,
+     "piece_type": "POKEBALL", "team": "RED", "row": 1, "col": 0,
+     "current_hp": 0, "held_item": "NONE", "stored_piece": null},
+    {"id": "550e8400-e29b-41d4-a716-446655440002",
+     "piece_type": "SAFETYBALL", "team": "BLUE", "row": 5, "col": 4,
      "current_hp": 0, "held_item": "NONE",
-     "stored_piece": {"piece_type": "EEVEE", "team": "BLUE",
+     "stored_piece": {"id": "550e8400-e29b-41d4-a716-446655440003",
+                      "piece_type": "EEVEE", "team": "BLUE",
                       "row": 5, "col": 4, "current_hp": 80,
                       "held_item": "THUNDERSTONE", "stored_piece": null}}
   ]
@@ -106,15 +118,17 @@ Null field preservation
 
 Optional Move fields round-trip as null correctly
 
+Piece.id round-trip
+
+Piece.id survives serialization and copy(); None for pieces with no id
+
 Phase 2 — Bot API
 Stack
 Framework: FastAPI
 
 Server: Uvicorn
 
-New dependencies: fastapi, uvicorn, boto3
-
-Files created
+Files
 File
 
 Purpose
@@ -125,85 +139,57 @@ Package marker
 
 api/app.py
 
-FastAPI app, lifespan, endpoints, session management
+FastAPI app, lifespan, MCTS session management, /move endpoint
 
 tests/test_api.py
 
 Endpoint tests
 
-Session model
-Each active game gets one session, keyed by UUID. Sessions are created at game start and destroyed at game end.
+Endpoint: POST /move
+This is the only endpoint the app calls in normal game operation.
+(Ops/backup endpoints are separate — see docs/app_and_engine_communication.md.)
 
-
-
-SessionState:
-  mcts: MCTS                   # warm tree, persists across move requests
-  last_bot_move: Move | None   # stored to call advance() on the next request
-  move_count: int              # incremented each request; triggers TT sync at multiples of 50
-  last_active: float           # Unix timestamp; used for TTL cleanup
-Global process state (created at startup)
-
-
-global_tt: TranspositionTable   # shared across all sessions (inter-game learning)
-sessions: dict[str, SessionState]
-tt_sync_queue: TTSyncQueue      # see TT Sync design doc
-Endpoints
-POST /game
-Creates a new game session.
-
-
-
-Response 200:
-{
-  "session_id": "550e8400-e29b-41d4-a716-446655440000"
-}
-POST /game/{session_id}/move
-Requests the bot's next move. On the first call opp_move should be null (bot is moving first or no prior opponent move exists). On all subsequent calls, opp_move is the move the opponent just played — required for tree pruning via MCTS.advance().
-
-
+The app sends the current board state together with a persona_params dict that
+controls MCTS behaviour.  The engine picks the best move and returns it.
 
 Request body:
 {
-  "state":    { <FEN dict> },
-  "opp_move": null | { <Move dict> }
+  "state":         { <FEN dict> },
+  "persona_params": {
+    "time_budget":      <float, seconds — MCTS wall-clock budget>,
+    "exploration_c":    <float, optional — UCB1 exploration constant>,
+    "rollout_depth":    <int,   optional — max rollout depth>
+  }
 }
+
+  - "state"          The full current GameState serialized as a FEN dict (see Phase 1).
+  - "persona_params" A dict of MCTS tuning knobs.  Only "time_budget" is required;
+                     unrecognised keys must be silently ignored so future params can
+                     be added without breaking old engine versions.
+  - "time_budget"    Wall-clock seconds the engine may spend on MCTS search.
+                     The app clamps this to [0.1, 30.0] before sending.
+
 Response 200:
 {
   "move": { <Move dict> }
 }
+
 Processing steps:
+1. Deserialize state via GameState.from_dict()
+2. Read persona_params["time_budget"] (required) and any other recognised knobs
+3. Call mcts.select_move(state) with the given budget → Move
+4. Return {"move": chosen_move.to_dict()}
 
-Deserialize state via GameState.from_dict()
+Note on load-aware budget scaling
+The app server computes an *effective* time_budget before calling this endpoint
+(base_budget / N_active_players).  This is entirely app-side logic — the engine
+simply honours whatever time_budget it receives in persona_params.
+See docs/load_aware_budgeting.md for the full design.
 
-If last_bot_move is set and opp_move is provided: call mcts.advance(last_bot_move, opp_move) to prune the tree
-
-Call mcts.select_move(state) → Move
-
-Store last_bot_move, increment move_count, update last_active
-
-If move_count % 50 == 0: enqueue TT sync (see docs/Transposition_Table_Sync.md)
-
-Return {"move": chosen_move.to_dict()}
-
-POST /game/{session_id}/end
-Signals game over. Triggers a final TT sync and cleans up the session.
-
-
-
-Response 200:
-{ "status": "ok" }
-Startup lifespan
-On startup (FastAPI lifespan event):
-
-Download TT from S3 → load into global_tt (graceful no-op if key doesn't exist — bot starts with an empty TT)
-
-Start background TT sync thread
-
-Session TTL cleanup
-A background asyncio task sweeps sessions periodically and removes entries where last_active is older than 1 hour. Abandoned sessions do not trigger a TT sync.
-
-Open question — opp_move format
-advance(our_move, opp_move) requires the opponent's move as a Move object. This means the frontend must echo back a Move dict in the format returned by the API. Does the frontend have its own move representation, or will it use the Move dict from the API response as-is? If a translation layer is needed at the API boundary, that should be agreed before implementation.
+Note on session / tree reuse
+The engine maintains an in-process MCTS session keyed by game UUID so the search
+tree is reused across turns.  Session management is internal to the engine and
+not part of this contract.
 
 Phase 3 — PGN Notation
 Deferred until Phase 2 is stable. See docs/PokeChess_Notation_Design.md for full spec.
