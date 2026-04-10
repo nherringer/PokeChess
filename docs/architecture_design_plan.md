@@ -4,7 +4,7 @@ Here's the revised v1 plan:
 
 ## Architecture Decision — PokeChess v1
 
-**Repos:** Three repositories — `pokechess-app`, `pokechess-engine`, and `pokechess-terraform` (manages all infrastructure for both services).
+**Repo:** **Single monorepo** — one repository contains `engine/`, `bot/`, `cpp/`, `app/`, `tests/`, `docs/`, and two Dockerfiles (`Dockerfile.app`, `Dockerfile.engine`). CI/CD builds **two container images from this repo** on each merge to main (for example two pipeline jobs or a matrix). This matches [implementation_roadmap.md](implementation_roadmap.md) (“monorepo, two Dockerfiles”). Optional infrastructure-as-code (e.g. Terraform) may live alongside the app in this repo or in a small dedicated infra repository; it provisions **those two images**, not three separate application codebases.
 
 **Compute:** Single EC2 t4g.small (free until Dec 31 2026, ~$12.26/mo after) running two ECS services via ECS on EC2:
 
@@ -18,13 +18,13 @@ Here's the revised v1 plan:
 
 **Engine state:** MCTS search trees held in RAM, keyed by `game_id`. On game completion (or on any schedule/event the app deems appropriate), the app calls `/backup` to serialize tree snapshots to S3. On container startup, the engine loads available snapshots from S3 into RAM before accepting requests. S3 lifecycle rules expire old snapshots automatically.
 
-**Concurrency:** `asyncio` for non-blocking request handling with `ThreadPoolExecutor(max_workers=3–5)` for parallelized MCTS searches. Python's GIL is not a concern — pybind11 releases the GIL on entry to C++ hot loops, enabling genuine parallel CPU execution across concurrent search threads. Multiple simultaneous PvB games intentionally share compute — the engine splits its search capacity across all active games, naturally scaling down per-game strength under load. This is a deliberate design choice: players teaming up against the engine experience a shared challenge where collectively pressuring it degrades its performance across the board.
+**Request queue:** Multiple incoming move requests are handled with a **queue** (e.g. FIFO), not parallel MCTS across many threads. FastAPI/`asyncio` can still accept connections without blocking the event loop, but the engine **drains the queue one search at a time** per instance so two games never compete for CPU inside simultaneous full searches. Under load, backlog shows up as **queue depth and wait time**, not as splitting strength across concurrent searches. See [load_aware_budgeting.md](load_aware_budgeting.md) for time budgets and back-pressure. pybind11 still releases the GIL in C++ hot loops; the architecture choice here is **serialization via a queue**, not `ThreadPoolExecutor` parallelism.
 
 **Storage:** Postgres on EC2 — users, history, ELO, and active game state (JSONB for complex/nested structures like board state, HP, turns). Single database, single connection pool, single backup strategy.
 
-**Frontend:** React/Next.js — S3 + CloudFront
+**Frontend:** React/Next.js — S3 + CloudFront (target; not required for local backend development).
 
-**CI/CD:** Two independent GitHub Actions pipelines (one per app/engine repo) → ECR → ECS service update. `pokechess-terraform` manages shared infra. Engine pipeline owned by ML engineer; decoupled from app deploys.
+**CI/CD:** From the **monorepo**, build and push **two** images (`pokechess-app`, `pokechess-engine`) to ECR, then update the corresponding ECS services. App and engine deploys can stay decoupled (different workflows or manual promotion) while still sourcing from one repository.
 
 **Estimated cost:** ~$3–5/mo until Jan 2027; ~$16–19/mo after (DynamoDB removed from the stack reduces this further — no per-request costs or provisioned capacity to worry about)
 
