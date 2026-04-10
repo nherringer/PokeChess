@@ -28,9 +28,10 @@ upserts a row in `bot_player_activity`:
 
 ```sql
 CREATE TABLE bot_player_activity (
-    player_id     UUID      PRIMARY KEY (player_id, bot_id),
-    bot_id        UUID      NOT NULL,
-    last_moved_at TIMESTAMP NOT NULL DEFAULT now()
+    player_id     UUID      NOT NULL REFERENCES users(id)  ON DELETE CASCADE,
+    bot_id        UUID      NOT NULL REFERENCES bots(id)   ON DELETE CASCADE,
+    last_moved_at TIMESTAMP NOT NULL DEFAULT now(),
+    PRIMARY KEY (player_id, bot_id)
 );
 CREATE INDEX idx_bpa_bot_time ON bot_player_activity (bot_id, last_moved_at);
 ```
@@ -106,4 +107,4 @@ this feature; those remain future work if needed.
 ## Data model reference
 
 See `docs/pokechess_data_model.md` §Schema for table definitions and indexes.
-The `bot_player_activity` table is part of the initial schema (`0001`).
+The `bot_player_activity` table is defined in `app/db/schema.sql` alongside all other tables.  Apply with `psql $DATABASE_URL -f app/db/schema.sql`.

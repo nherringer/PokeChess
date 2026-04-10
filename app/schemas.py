@@ -7,7 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, EmailStr, field_validator
 
 # Limits merged JSON patch size for user_settings.extra_settings (abuse / accidental huge payloads).
-_MAX_EXTRA_SETTINGS_BYTES = 16,384
+_MAX_EXTRA_SETTINGS_BYTES = 16_384
 _MAX_EXTRA_SETTINGS_DEPTH = 8
 
 
