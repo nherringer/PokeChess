@@ -122,6 +122,10 @@ class Piece:
     held_item: Item
     # Safetyball only: the Pokémon currently stored inside (None if empty).
     stored_piece: Optional['Piece'] = None
+    # Stable UUID string assigned by the app layer; None for pieces that don't
+    # have a persistent identity (bot-side copies, rollout simulations, etc.).
+    # The engine never generates or validates this field — it's purely a carrier.
+    id: Optional[str] = None
 
     @classmethod
     def create(cls, piece_type: PieceType, team: Team, row: int, col: int) -> Piece:

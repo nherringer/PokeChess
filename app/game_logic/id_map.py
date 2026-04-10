@@ -1,12 +1,16 @@
 """
 Piece UUID tracking across apply_move() calls.
 
-The engine's Piece dataclass has no `id` field, and apply_move() copies state
-via dataclasses.replace() which would drop any monkey-patched attribute.
-Instead, we maintain piece UUIDs as a parallel dict keyed by board position.
+Piece.id is the canonical per-piece UUID carrier (set when state_from_dict()
+loads a state from the DB).  apply_move() deep-copies the board via
+dataclasses.replace(), so Piece.id survives undisturbed for unchanged pieces.
+For pieces that are newly created by apply_move() (e.g. EVOLVE replaces the
+king type), the new object starts with id=None.
 
-After each apply_move(), remap_ids() updates the map based on what happened:
-which pieces moved, which were captured, which were stored/released, etc.
+remap_ids() handles both duties:
+  1. Returns a fresh IdMap (position → UUID) for callers that still use it.
+  2. Writes the resolved UUID directly onto each piece in new_state so that
+     state_to_dict() can read piece.id without needing the map.
 """
 
 from __future__ import annotations
@@ -71,6 +75,22 @@ def remap_ids(
                 )
                 if stored_uid is not None:
                     new_map[("stored", pos)] = stored_uid
+
+    # Propagate resolved UUIDs directly to piece objects so piece.id stays
+    # authoritative after this move.  Callers that already use the returned
+    # IdMap are unaffected; future callers can rely on piece.id instead.
+    for row_list in new_state.board:
+        for piece in row_list:
+            if piece is None:
+                continue
+            pos = (piece.row, piece.col)
+            uid = new_map.get(pos)
+            if uid is not None:
+                piece.id = uid
+            if piece.stored_piece is not None:
+                stored_uid = new_map.get(("stored", pos))
+                if stored_uid is not None:
+                    piece.stored_piece.id = stored_uid
 
     return new_map
 

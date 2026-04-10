@@ -1,11 +1,13 @@
 """
 App-owned serialization for GameState ↔ JSONB.
 
-This exists because the engine's Piece.id and GameState.to_dict()/from_dict()
-are not yet implemented (ML-engineer blockers #1 and #2 in the roadmap).
 The output JSON matches the games.state spec in pokechess_data_model.md exactly.
 
-When the engine adds these methods, this module can delegate to them or be removed.
+Piece.id is the canonical UUID carrier: after state_from_dict() every Piece has
+its id set directly, and _piece_to_dict() reads it from there.  The id_map
+parameter of state_to_dict() serves as a fallback for pieces that haven't been
+through a round-trip yet (e.g. the freshly built GameState.new_game() before any
+serialization), where ids come from the roster's IdMap built at game creation.
 """
 
 from __future__ import annotations
@@ -31,8 +33,11 @@ IdMap = dict[tuple[int, int], Optional[str]]
 # ---------------------------------------------------------------------------
 
 def _piece_to_dict(piece: Piece, id_map: IdMap) -> dict:
+    # Prefer the id embedded on the piece itself (set by state_from_dict or remap_ids);
+    # fall back to the id_map for pieces that haven't been through a round-trip yet.
+    piece_id = piece.id if piece.id is not None else id_map.get((piece.row, piece.col))
     d = {
-        "id": id_map.get((piece.row, piece.col)),
+        "id": piece_id,
         "piece_type": piece.piece_type.name,
         "team": piece.team.name,
         "row": piece.row,
@@ -95,6 +100,9 @@ def _piece_from_dict(d: dict) -> Piece:
         current_hp=d["current_hp"],
         held_item=Item[d["held_item"]],
     )
+    # Propagate the id directly onto the Piece so it survives copy() and
+    # apply_move() without needing the parallel id_map on every read.
+    piece.id = d.get("id")
     if d.get("stored_piece") is not None:
         piece.stored_piece = _piece_from_dict(d["stored_piece"])
     return piece
