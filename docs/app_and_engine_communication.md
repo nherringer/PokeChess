@@ -21,10 +21,6 @@ Here's the updated plan with DynamoDB removed and Postgres JSONB handling everyt
   keys must be silently ignored.  See `docs/bot_api_design.txt` for the full
   contract.
 
-- `POST /backup` — **ops endpoint** (not part of the bot contract for integrators).
-  Triggers serialization of one or more MCTS tree snapshots to S3.  Can be
-  called by the app on game completion, periodically, or on demand.
-
 The engine never initiates requests to the app and never touches Postgres. All
 game state required for a search is passed directly in the `/move` payload.
 The engine is a pure responder.
