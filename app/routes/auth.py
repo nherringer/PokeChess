@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Request, Response
 from asyncpg import UniqueViolationError
 
+from .. import config
 from ..auth import Db, hash_password, verify_password, create_access_token, create_refresh_token, decode_token
 from ..main import AppError
 from ..schemas import RegisterRequest, LoginRequest, TokenResponse, RefreshResponse
@@ -29,6 +30,7 @@ async def register(body: RegisterRequest, response: Response, db: Db):
         key="refresh_token",
         value=refresh,
         httponly=True,
+        secure=config.ENVIRONMENT != "development",
         samesite="lax",
         max_age=30 * 24 * 3600,
     )
@@ -47,6 +49,7 @@ async def login(body: LoginRequest, response: Response, db: Db):
         key="refresh_token",
         value=refresh,
         httponly=True,
+        secure=config.ENVIRONMENT != "development",
         samesite="lax",
         max_age=30 * 24 * 3600,
     )

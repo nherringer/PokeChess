@@ -71,13 +71,13 @@ async def get_friendship(db: asyncpg.Connection, friendship_id: UUID) -> dict | 
 
 async def update_friendship_status(
     db: asyncpg.Connection, friendship_id: UUID, status: str
-) -> dict:
+) -> dict | None:
     row = await db.fetchrow(
         "UPDATE friendships SET status = $2 WHERE id = $1 RETURNING id, status",
         friendship_id,
         status,
     )
-    return dict(row)
+    return dict(row) if row else None
 
 
 async def are_friends(db: asyncpg.Connection, user1: UUID, user2: UUID) -> bool:

@@ -145,30 +145,31 @@ async def initialize_pvp_game(
     """
     Called when a PvP invite is accepted. Builds initial state, injects piece UUIDs,
     writes state to the games row, creates game_pokemon_map entries.
+
+    Caller must wrap this in a transaction.
     """
-    async with db.transaction():
-        red_roster = await ensure_roster(db, red_player_id, "red")
-        blue_roster = await ensure_roster(db, blue_player_id, "blue")
+    red_roster = await ensure_roster(db, red_player_id, "red")
+    blue_roster = await ensure_roster(db, blue_player_id, "blue")
 
-        state = GameState.new_game()
-        id_map: IdMap = {}
-        id_map.update(build_id_map(red_roster, "red"))
-        id_map.update(build_id_map(blue_roster, "blue"))
+    state = GameState.new_game()
+    id_map: IdMap = {}
+    id_map.update(build_id_map(red_roster, "red"))
+    id_map.update(build_id_map(blue_roster, "blue"))
 
-        state_dict = state_to_dict(state, id_map)
+    state_dict = state_to_dict(state, id_map)
 
-        await db.execute(
-            """
-            UPDATE games SET
-                status = 'active',
-                whose_turn = 'red',
-                turn_number = 1,
-                state = $2::jsonb,
-                updated_at = now()
-            WHERE id = $1
-            """,
-            game_id,
-            json.dumps(state_dict),
-        )
+    await db.execute(
+        """
+        UPDATE games SET
+            status = 'active',
+            whose_turn = 'red',
+            turn_number = 1,
+            state = $2::jsonb,
+            updated_at = now()
+        WHERE id = $1
+        """,
+        game_id,
+        json.dumps(state_dict),
+    )
 
-        await create_game_pokemon_map(db, game_id, id_map)
+    await create_game_pokemon_map(db, game_id, id_map)

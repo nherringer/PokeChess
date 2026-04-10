@@ -56,12 +56,13 @@ async def respond_to_invite(
             invite_id=inv["id"], status="rejected", game_id=inv["game_id"]
         )
 
-    # Accept: initialize the game
-    # Import here to avoid circular imports — game initialization is in Group 4
+    # Accept: update invite + initialize game in one transaction
     from ..game_logic.roster import initialize_pvp_game
 
-    await invite_q.update_invite_status(db, invite_id, "accepted")
-    await initialize_pvp_game(db, inv["game_id"], inv["inviter_id"], inv["invitee_id"])
+    async with db.transaction():
+        await invite_q.update_invite_status(db, invite_id, "accepted")
+        await initialize_pvp_game(db, inv["game_id"], inv["inviter_id"], inv["invitee_id"])
+
     return InviteActionResponse(
         invite_id=inv["id"], status="accepted", game_id=inv["game_id"]
     )

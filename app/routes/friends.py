@@ -58,4 +58,6 @@ async def respond_to_friend_request(
 
     new_status = "accepted" if body.action == "accept" else "rejected"
     result = await friend_q.update_friendship_status(db, friendship_id, new_status)
+    if result is None:
+        raise AppError(404, "not_found", "Friendship not found")
     return FriendActionResponse(**result)

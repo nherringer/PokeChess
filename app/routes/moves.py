@@ -220,103 +220,115 @@ async def submit_move(
     db: Db,
     request: Request,
 ):
-    game = await game_q.get_game_for_move(db, game_id)
-    if game is None:
-        raise AppError(404, "not_found", "Game not found")
+    async with db.transaction():
+        # FOR UPDATE lock prevents concurrent move application
+        game = await game_q.get_game_for_move(db, game_id)
+        if game is None:
+            raise AppError(404, "not_found", "Game not found")
 
-    team = _player_team(game, user["id"])
-    if team is None:
-        raise AppError(403, "forbidden", "Not a participant in this game")
+        team = _player_team(game, user["id"])
+        if team is None:
+            raise AppError(403, "forbidden", "Not a participant in this game")
 
-    if game["status"] != "active":
-        raise AppError(409, "game_not_active", "Game is not active")
+        if game["status"] != "active":
+            raise AppError(409, "game_not_active", "Game is not active")
 
-    if game["whose_turn"] != team.name.lower():
-        raise AppError(409, "not_your_turn", "It is not your turn")
+        if game["whose_turn"] != team.name.lower():
+            raise AppError(409, "not_your_turn", "It is not your turn")
 
-    # Parse the submitted move
-    try:
-        move = _parse_move(body)
-    except KeyError:
-        raise AppError(400, "bad_request", f"Invalid action_type: {body.action_type}")
+        # Parse the submitted move
+        try:
+            move = _parse_move(body)
+        except KeyError:
+            raise AppError(400, "bad_request", f"Invalid action_type: {body.action_type}")
 
-    # Deserialize state
-    state_data = game["state"]
-    if isinstance(state_data, str):
-        state_data = json.loads(state_data)
-    state, id_map = state_from_dict(state_data)
+        # Deserialize state
+        state_data = game["state"]
+        if isinstance(state_data, str):
+            state_data = json.loads(state_data)
+        state, id_map = state_from_dict(state_data)
 
-    # Validate move is legal
-    legal = get_legal_moves(state)
-    if not any(_moves_equal(move, lm) for lm in legal):
-        raise AppError(400, "illegal_move", "Move is not legal in current state")
+        # Validate move is legal
+        legal = get_legal_moves(state)
+        if not any(_moves_equal(move, lm) for lm in legal):
+            raise AppError(400, "illegal_move", "Move is not legal in current state")
 
-    # Apply human move
-    all_history = []
-    new_state, id_map, entries, done, winner_side = _apply_and_record(state, move, id_map)
-    all_history.extend(entries)
+        # Apply human move
+        all_history = []
+        new_state, id_map, entries, done, winner_side = _apply_and_record(state, move, id_map)
+        all_history.extend(entries)
 
-    # PvB: if game is not over and it's now the bot's turn, get and apply bot move
-    if not done and game["is_bot_game"] and game["bot_side"] == new_state.active_player.name.lower():
-        from ..engine_client import request_bot_move
+        # PvB: if game is not over and it's now the bot's turn, get and apply bot move
+        if not done and game["is_bot_game"] and game["bot_side"] == new_state.active_player.name.lower():
+            from ..engine_client import request_bot_move
 
-        bot_params = game.get("bot_params") or {}
-        time_budget = bot_params.get("time_budget", 3.0) if isinstance(bot_params, dict) else 3.0
+            bot_params = game.get("bot_params") or {}
+            time_budget = bot_params.get("time_budget", 3.0) if isinstance(bot_params, dict) else 3.0
 
-        bot_state_dict = state_to_dict(new_state, id_map)
-        bot_move_raw = await request_bot_move(request, bot_state_dict, time_budget)
+            bot_state_dict = state_to_dict(new_state, id_map)
+            bot_move_raw = await request_bot_move(request, bot_state_dict, time_budget)
 
-        bot_move = Move(
-            piece_row=bot_move_raw["piece_row"],
-            piece_col=bot_move_raw["piece_col"],
-            action_type=ActionType[bot_move_raw["action_type"]],
-            target_row=bot_move_raw["target_row"],
-            target_col=bot_move_raw["target_col"],
-            secondary_row=bot_move_raw.get("secondary_row"),
-            secondary_col=bot_move_raw.get("secondary_col"),
-            move_slot=bot_move_raw.get("move_slot"),
-        )
+            try:
+                bot_move = Move(
+                    piece_row=bot_move_raw["piece_row"],
+                    piece_col=bot_move_raw["piece_col"],
+                    action_type=ActionType[bot_move_raw["action_type"]],
+                    target_row=bot_move_raw["target_row"],
+                    target_col=bot_move_raw["target_col"],
+                    secondary_row=bot_move_raw.get("secondary_row"),
+                    secondary_col=bot_move_raw.get("secondary_col"),
+                    move_slot=bot_move_raw.get("move_slot"),
+                )
+            except (KeyError, TypeError):
+                raise AppError(503, "engine_error", "Engine returned an invalid move")
 
-        new_state, id_map, bot_entries, done, winner_side = _apply_and_record(
-            new_state, bot_move, id_map,
-        )
-        all_history.extend(bot_entries)
+            bot_legal = get_legal_moves(new_state)
+            if not any(_moves_equal(bot_move, lm) for lm in bot_legal):
+                raise AppError(503, "engine_error", "Engine returned an illegal move")
 
-    # Determine final game status
-    final_status = "complete" if done else "active"
-    final_whose_turn = new_state.active_player.name.lower()
-    final_turn = new_state.turn_number
-
-    # Serialize final state
-    final_state_dict = state_to_dict(new_state, id_map)
-
-    # Persist to DB
-    await game_q.update_game_state(
-        db,
-        game_id,
-        state_json=json.dumps(final_state_dict),
-        new_history_json=json.dumps(all_history),
-        whose_turn=final_whose_turn,
-        turn_number=final_turn,
-        status=final_status,
-        winner=winner_side if done else None,
-        end_reason="checkmate" if done else None,
-    )
-
-    # On game completion: process XP
-    if done:
-        full_history = game.get("move_history") or []
-        if isinstance(full_history, str):
-            full_history = json.loads(full_history)
-        full_history.extend(all_history)
-        xp_map = compute_xp(full_history)
-        if xp_map:
-            await update_xp_earned(
-                db, game_id, xp_map,
-                winner_side if winner_side != "draw" else None,
-                "checkmate",
+            new_state, id_map, bot_entries, done, winner_side = _apply_and_record(
+                new_state, bot_move, id_map,
             )
+            all_history.extend(bot_entries)
 
-    # Fetch updated game for response
+        # Determine final game status
+        final_status = "complete" if done else "active"
+        final_whose_turn = new_state.active_player.name.lower()
+        final_turn = new_state.turn_number
+        end_reason = None
+        if done:
+            end_reason = "draw" if winner_side == "draw" else "king_eliminated"
+
+        # Serialize final state
+        final_state_dict = state_to_dict(new_state, id_map)
+
+        # Persist state + XP atomically within the same transaction
+        await game_q.update_game_state(
+            db,
+            game_id,
+            state_json=json.dumps(final_state_dict),
+            new_history_json=json.dumps(all_history),
+            whose_turn=final_whose_turn,
+            turn_number=final_turn,
+            status=final_status,
+            winner=winner_side if done and winner_side != "draw" else None,
+            end_reason=end_reason,
+        )
+
+        # On game completion: process XP (inside same transaction)
+        if done:
+            full_history = game.get("move_history") or []
+            if isinstance(full_history, str):
+                full_history = json.loads(full_history)
+            full_history.extend(all_history)
+            xp_map = compute_xp(full_history)
+            if xp_map:
+                await update_xp_earned(
+                    db, game_id, xp_map,
+                    winner_side if winner_side != "draw" else None,
+                    end_reason,
+                )
+
+    # Fetch updated game for response (outside transaction — read committed)
     updated = await game_q.get_game(db, game_id)
     return _game_detail(updated)

@@ -56,7 +56,11 @@ async def get_game(db: asyncpg.Connection, game_id: UUID) -> dict | None:
 
 
 async def get_game_for_move(db: asyncpg.Connection, game_id: UUID) -> dict | None:
-    """Fetch game row with all fields needed for move processing."""
+    """Fetch game row with all fields needed for move processing.
+
+    Uses SELECT ... FOR UPDATE to prevent concurrent move application.
+    Must be called within a transaction.
+    """
     row = await db.fetchrow(
         """
         SELECT g.id, g.status, g.whose_turn, g.turn_number,
@@ -67,6 +71,7 @@ async def get_game_for_move(db: asyncpg.Connection, game_id: UUID) -> dict | Non
         FROM games g
         LEFT JOIN bots b ON b.id = g.bot_id
         WHERE g.id = $1
+        FOR UPDATE OF g
         """,
         game_id,
     )

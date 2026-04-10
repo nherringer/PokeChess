@@ -34,11 +34,7 @@ async def request_bot_move(
         )
         resp.raise_for_status()
         return resp.json()
-    except httpx.HTTPStatusError as exc:
-        raise AppError(
-            503,
-            "engine_error",
-            f"Engine returned {exc.response.status_code}",
-        )
-    except (httpx.RequestError, httpx.TimeoutException) as exc:
-        raise AppError(503, "engine_unavailable", f"Engine unreachable: {exc}")
+    except httpx.HTTPStatusError:
+        raise AppError(503, "engine_error", "Engine returned an error")
+    except (httpx.RequestError, httpx.TimeoutException):
+        raise AppError(503, "engine_unavailable", "Engine is unreachable")
