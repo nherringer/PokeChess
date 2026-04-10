@@ -164,21 +164,30 @@ See `docs/pokechess_data_model.md` for full JSON examples.
 
 4. **Write DB migrations** for the full schema in `pokechess_data_model.md`  
    All tables: `users`, `user_settings`, `friendships`, `bots`, `game_invites`, `games`, `pokemon_pieces`, `game_pokemon_map`.  
-   Seed one default bot row in `bots`.
+   Seed one default bot row in `bots` (name: **Metallic**, representing Team Alpha's artificial intelligence).
 
-5. **Game creation endpoint** (`POST /games`)  
-   - Create `pokemon_pieces` rows if first game (5 per user)  
+5. **Auth endpoints** (`POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`)  
+   JWT access token (short-lived) + httpOnly refresh token cookie. See `docs/api_spec.md`.
+
+6. **Friends endpoints** (`GET /friends`, `POST /friends`, `PUT /friends/{id}`) — **required for v1 (PvP is in scope)**  
+   Friend request flow: send → pending → accept/reject. See `docs/api_spec.md`.
+
+7. **Game invite endpoints** (`GET /game-invites`, `POST /game-invites`, `PUT /game-invites/{id}`) — **required for v1**  
+   Creating an invite also creates a `games` row with `status='pending'`. Accepting transitions game to `status='active'`. See `docs/api_spec.md`.
+
+8. **Game creation endpoint** (`POST /games`) — PvB only (no invite flow)  
+   - Create `pokemon_pieces` rows if this is the user's first game (full roster — one per named piece, not a fixed 5)
    - Serialize `GameState.new_game()` via `to_dict()`, injecting piece UUIDs from `pokemon_pieces`  
    - Write `games` row + `game_pokemon_map` rows  
 
-6. **Legal moves endpoint** (`GET /games/{id}/legal_moves?piece_row=&piece_col=`)  
-   Deserialize state, call `get_legal_moves()`, filter for the requested piece, return the full Move field set for each legal move: `piece_row`, `piece_col`, `action_type` (engine enum name), `target_row`, `target_col`, `secondary_row`, `secondary_col`, `move_slot`. The frontend uses these objects verbatim as the `POST /move` payload — `secondary_row`/`col` are needed for Quick Attack, `move_slot` for Mew's 3 attack types and Eevee's 5 evolution choices.
+9. **Legal moves endpoint** (`GET /games/{id}/legal_moves?piece_row=&piece_col=`)  
+   Deserialize state, call `get_legal_moves()`, filter for the requested piece, return the full Move field set for each legal move: `piece_row`, `piece_col`, `action_type` (engine enum name), `target_row`, `target_col`, `secondary_row`, `secondary_col`, `move_slot`. The frontend uses these objects verbatim as the `POST /move` payload — `secondary_row`/`col` are needed for Quick Attack, `move_slot` for Mew's attack types and Eevee's evolution choices.
 
-7. **Move submission endpoint** (`POST /games/{id}/move`)  
-   Full lifecycle: deserialize → validate → apply → detect Foresight resolution → build history entry → check terminal → PvB: call engine → write back. See Move Lifecycle Flow in `pokechess_data_model.md`.
+10. **Move submission endpoint** (`POST /games/{id}/move`)  
+    Full lifecycle: deserialize → validate → apply → detect Foresight resolution → build history entry → check terminal → PvB: call engine → write back. Returns full GameDetail after both plies (human + bot) for PvB. See Move Lifecycle Flow in `pokechess_data_model.md`.
 
-8. **XP attribution on game completion**  
-   Tally `xp_earned` from `move_history` per piece. Apply win/loss rule. Write `game_pokemon_map` and `pokemon_pieces` rows.
+11. **XP attribution on game completion**  
+    Use the isolated `compute_xp(move_history) → dict[piece_id, int]` helper (XP = damage dealt per piece). Write `game_pokemon_map` and `pokemon_pieces` rows. See Q5 resolved above.
 
 ---
 
@@ -216,21 +225,23 @@ These decisions block or complicate frontend, backend, or sequencing if left uns
 
 For a single target square, **Mew** can yield up to three distinct legal moves (attack slots / move types). **Eevee evolution** can yield up to five moves when evolving via stone. The legal-moves API can return multiple `Move` objects that share the same target; the UI must disambiguate (modal, picker step, or a different selection flow) before calling `POST /games/{id}/move`.
 
-**Decision:** How should the client present that choice (inline modal vs. two-step flow vs. piece-specific UX)?
+**✅ Resolved:** Bottom-sheet picker slides up ~200px from the bottom of the board on ambiguous target selection. Mew shows up to 4 options (3 attack slots + Foresight as a move option). Eevee evolution shows 5 evolution sprites with name + type badge. See `docs/frontend_layout_proposal.md` for full UX detail.
 
 ### Q2. PvP scope: invites, friends, and roadmap alignment
 
-The data model includes `game_invites`, friends flows, and a pending → active game transition. The **backend checklist** in this doc currently emphasizes **PvB** (`POST /games`) and does not enumerate invite/friends endpoints.
+The data model includes `game_invites`, friends flows, and a pending → active game transition. The **backend checklist** in this doc currently emphasized **PvB** (`POST /games`) and did not enumerate invite/friends endpoints.
 
-**Decision:** Is **v1 PvB-only** (defer `GET/POST /friends`, `GET/POST/PATCH /game-invites`) or does **v1 ship PvP** with the full invite and friends surface? This significantly changes backend and QA scope.
+**✅ Resolved — PvP is in scope for v1. Play vs Friend is a hard requirement.**  
+`GET/POST /friends`, `GET/POST/PATCH /game-invites`, and the pending → active game transition must all ship in v1. The app backend checklist below has been updated accordingly. See `docs/api_spec.md` for the full endpoint contracts.
 
 ### Q3. `POST /games/{id}/move` response (polling vs. single payload)
 
-For PvB, the server may apply the human move and then the bot move before responding; latency can approach the engine’s time budget.
+For PvB, the server may apply the human move and then the bot move before responding; latency can approach the engine’s time budget (up to 10s at Master difficulty).
 
 **Specified in `docs/api_spec.md`:** response `200` returns a full **GameDetail** (same shape as `GET /games/{id}`) after both plies when applicable.
 
-**Remaining product decision:** Confirm this stays the v1 contract for all clients, or document an alternate thin response + mandatory poll if requirements change.
+**✅ Resolved — single GameDetail payload is the v1 contract.**  
+The frontend displays a **"Metallic is thinking…"** state (spinning Pokeball, board grayed out) for the duration of the wait. Metallic is the name of the PvB bot, representing Team Alpha’s artificial intelligence. The single-response contract avoids polling complexity while the wait state keeps the UX clear. If latency requirements change in future, the thin-response + poll pattern can be introduced without breaking the frontend contract.
 
 ### Q4. `GET /games/{id}` payload options
 
@@ -242,7 +253,10 @@ For PvB, the server may apply the human move and then the bot move before respon
 
 `xp_earned` vs `xp_applied` appears in the data model, but the rule for **what events** (per move, per game, damage-based, etc.) populate `xp_earned` is undefined.
 
-**Decision:** Business rule required before implementing XP attribution at game end.
+**✅ Resolved (v1) — XP earned = total damage dealt by that piece during the game.**  
+Each attack move in `move_history` that includes a `damage` field contributes that amount to `xp_earned` for the attacking piece. Pokeball captures (no damage field) do not contribute. Foresight damage uses the `damage` field in its `foresight_resolve` entry.
+
+Implementation note: XP attribution should be computed in a single pass over `move_history` at game end. Keep the attribution logic in an isolated helper function (e.g. `compute_xp(move_history) → dict[piece_id, int]`) so the formula can be changed without touching the game flow. The formula is explicitly expected to evolve — do not hardcode it into the game-end handler.
 
 ### Q6. `pokemon_pieces.species` updates for mid-game evolution
 

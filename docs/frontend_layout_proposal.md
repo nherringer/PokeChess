@@ -1,6 +1,7 @@
 # PokeChess — Frontend Layout Proposal
 
 **Audience:** 8–15 year olds  
+**Target platform:** Tablet and phone (portrait and landscape). Desktop will work but is not the primary design target.  
 **Last updated:** April 2026  
 
 ---
@@ -56,8 +57,8 @@
 └─────────────────────────────────────────┘
 ```
 
-- **Play vs Bot** → large primary button (red-team color, since Red moves first against the bot), routes to game creation with `game_type: "PvB"`
-- **Play vs Friend** → secondary button (blue-team), routes to invite flow (v1 can show "coming soon" if PvP is deferred)
+- **Play vs Bot** → large primary button (red-team color, since Red moves first against the bot), routes to difficulty selection → game creation with `game_type: "PvB"`
+- **Play vs Friend** → secondary button (blue-team), routes to the invite/friends flow — **required for v1**
 - **My Pokemon** → small text link to roster page
 - **Settings** → small icon/text link
 - Background: subtle animated particle field or looping sprite drift — not distracting, just alive
@@ -93,11 +94,44 @@
 
 ---
 
-### 3. Game Lobby / Waiting Screen
+### 3. Difficulty Selection (PvB only)
 
-**Purpose:** Shown after "Play vs Bot" while the server creates the game. Also used for PvP invite pending state (future).
+**Purpose:** Shown after tapping "Play vs Bot" before the game is created. Simple one-tap choice.
 
 **Layout:**
+```
+┌──────────────────────────────────────┐
+│  ← Back     Choose Difficulty        │
+├──────────────────────────────────────┤
+│                                      │
+│   [ Easy   ]   Metallic is sleepy    │
+│   [ Medium ]   Metallic woke up      │
+│   [ Hard   ]   Metallic means it     │
+│   [ Expert ]   Metallic is scary     │
+│   [ Master ]   Good luck...          │
+│                                      │
+└──────────────────────────────────────┘
+```
+
+Each option maps to a MCTS time budget sent as `time_budget` in the `POST /move` engine request:
+
+| Difficulty | Time budget | Flavour text |
+|---|---|---|
+| Easy | 0.5s | Metallic is sleepy |
+| Medium | 1.5s | Metallic woke up |
+| Hard | 3.0s | Metallic means it |
+| Expert | 5.0s | Metallic is scary |
+| Master | 10.0s | Good luck... |
+
+Tapping a difficulty immediately creates the game (no extra confirm step). Metallic is the name of the PvB bot — Team Alpha's artificial intelligence.
+
+---
+
+### 4. Game Lobby / Waiting Screen
+
+**Purpose:** Shown while the server creates the game (PvB) or while waiting for a friend to accept an invite (PvP).
+
+**PvB layout:**
 ```
 ┌──────────────────────────────────────┐
 │                                      │
@@ -111,40 +145,77 @@
 └──────────────────────────────────────┘
 ```
 
-For PvP (future): show a shareable code/link with "Waiting for opponent…" state and the opponent's avatar slot pulsing with an empty outline.
+**PvP layout** (waiting for opponent to accept invite):
+```
+┌──────────────────────────────────────┐
+│                                      │
+│   [your avatar]    vs   [? pulsing]  │
+│                                      │
+│   Waiting for Misty to accept...     │
+│                                      │
+│   Share code:  PKC-4729              │
+│   [Copy link]                        │
+│                                      │
+│   [Cancel invite]                    │
+│                                      │
+└──────────────────────────────────────┘
+```
+
+PvP invite screen polls `GET /game-invites` or listens for a push notification until the invitee accepts.
 
 ---
 
-### 4. Gameplay Screen
+### 5. Gameplay Screen
 
 **This is the most complex screen. The layout handles: board, piece info, turn status, HP, special move disambiguation, stored-in-ball display, and Foresight — without overwhelming the player.**
 
-#### Overall Layout (landscape, ~1280×800 target)
+#### Overall Layout (tablet/phone — primary target ~390×844 portrait, ~844×390 landscape)
 
+**Portrait (primary):**
 ```
-┌───────────────────────────────────────────────────────────────┐
-│  [BLUE banner]  Team Blue     HP: ████░░  Turn 14   ⏱ Bot...  │
-├──────────────────────────────┬────────────────────────────────┤
-│                              │ Selected Piece Info             │
-│       8×8 Board              │ ┌──────────────────────────┐   │
-│                              │ │ [sprite]  Squirtle #1    │   │
-│   (dominant center)          │ │ Water  HP: 80/200        │   │
-│                              │ │ ████████░░               │   │
-│                              │ │ Item: Waterstone         │   │
-│                              │ └──────────────────────────┘   │
-│                              │                                 │
-│                              │ Move Legend                     │
-│                              │ 🟡 Move   🟠 Attack             │
-│                              │🔵 Select  🩵 Foresight          │
-│                              │ 🟣 Trade                        │
-│                              │                                 │
-│                              │ Last Move                       │
-│                              │ "Charmander attacked            │
-│                              │  Bulbasaur — 2× damage!"        │
-├──────────────────────────────┴────────────────────────────────┤
-│  [RED banner]   Team Red      HP: ████████   [Your Turn!]     │
-└───────────────────────────────────────────────────────────────┘
+┌─────────────────────────────┐
+│ [BLUE banner]               │
+│ Team Blue  HP:████░  Turn14 │
+├─────────────────────────────┤
+│                             │
+│        8×8 Board            │
+│     (full-width, square)    │
+│                             │
+├─────────────────────────────┤
+│ [contextual bottom drawer]  │
+│ Selected piece / last move  │
+│ Legend  [collapse ▲]        │
+├─────────────────────────────┤
+│ [RED banner]                │
+│ Team Red   HP:████████      │
+│            [Your Turn!]     │
+└─────────────────────────────┘
 ```
+
+**Landscape (secondary):**
+```
+┌──────────────────────────────────────────────────────────┐
+│ [BLUE banner] Team Blue  HP:████░  Turn 14  ⏱ Metallic…  │
+├──────────────────────────────┬───────────────────────────┤
+│                              │ Selected Piece Info        │
+│       8×8 Board              │ ┌─────────────────────┐   │
+│                              │ │[sprite] Squirtle #1 │   │
+│   (dominant center)          │ │Water  HP: 80/200    │   │
+│                              │ │████████░░           │   │
+│                              │ │Item: Waterstone     │   │
+│                              │ └─────────────────────┘   │
+│                              │ Legend                     │
+│                              │ 🟡Move  🟠Attack           │
+│                              │ 🔵Select 🩵Foresight 🟣Trade│
+│                              │ Last Move                  │
+│                              │ "Charmander attacked       │
+│                              │  Bulbasaur — 2× dmg!"      │
+├──────────────────────────────┴───────────────────────────┤
+│ [RED banner]   Team Red      HP: ████████   [Your Turn!] │
+└──────────────────────────────────────────────────────────┘
+```
+
+In portrait, the contextual info (selected piece, legend, last move) lives in a collapsible **bottom drawer** that the player can swipe up. It defaults to a compact 1-line "last move" peek; swipe reveals the full card. This keeps the board as large as possible on small screens.
 
 #### Board (center, dominant)
 
@@ -180,7 +251,7 @@ When a Safetyball has a Pokemon stored inside (`stored_piece` is non-null in gam
 
 - One banner per team, pinned top (Blue) and bottom (Red)
 - Contains: "Team Red" / "Team Blue" label, King's HP bar (wide, prominent), active turn indicator
-- **Bot thinking state:** replace "Your Turn!" with a spinning Pokeball + "Bot thinking…" text; board squares subtly dim (50% opacity overlay) so the player knows not to click
+- **Metallic's turn state (PvB):** replace "Your Turn!" with a spinning Pokeball + "Metallic is thinking…" text; board squares subtly dim (50% opacity overlay) so the player knows not to tap. The wait can be up to 10s at Master difficulty — the animation must feel alive, not frozen.
 
 #### Right Sidebar — Contextual Info
 
@@ -245,7 +316,7 @@ Quick Attack requires selecting an attack target and then a post-attack move des
 
 ---
 
-### 5. Game Over Screen
+### 6. Game Over Screen
 
 **Purpose:** Clear team win/loss result, XP earned per piece, prompt for next action.
 
@@ -272,8 +343,9 @@ Quick Attack requires selecting an attack target and then a post-attack move des
 ```
 
 - Banner reads **"Team Red Wins!"** or **"Team Blue Wins!"** — not the King's name
-- XP section shows each piece that participated, `xp_earned` for this game, and a progress bar reflecting how close they are to the next level/evolution threshold (requires XP formula from Q5 to be defined before implementing)
-- `xp_applied` vs `xp_earned` distinction: if the backend applies XP asynchronously, show a brief loading state ("Applying XP…") before the bars fill
+- XP section shows each piece that participated, `xp_earned` for this game (= total damage dealt by that piece), and a progress bar reflecting how close they are to the next threshold
+- `xp_applied` vs `xp_earned` distinction: show a brief "Applying XP…" loading state before the bars animate filling, so the player sees the reward land visually
+- XP formula is intentionally simple for v1 and expected to evolve — the display layer should read the values from the API and not re-implement the formula
 - Two clear CTAs: rematch or go home
 
 #### Post-Game Evolution Cutscene (Future, not v1)
@@ -323,18 +395,18 @@ Once XP thresholds trigger an evolution, play an interstitial cutscene after the
 
 ---
 
-## Open Questions (Frontend-Relevant)
+## Resolved Decisions
 
-These questions (from `implementation_roadmap.md`) still need product decisions before implementation can be finalized:
+| # | Question | Decision |
+|---|---|---|
+| Q1 | Mew / Eevee multi-option move UI | Bottom-sheet picker. Mew: up to 4 options (3 attacks + Foresight). Eevee: 5 evolution sprites. |
+| Q2 | PvP scope | **PvP is in scope for v1.** Play vs Friend is a hard requirement. Friends + invite endpoints ship in v1. |
+| Q3 | Move response contract | Single GameDetail payload. "Metallic is thinking…" state (spinning Pokeball, dimmed board) covers wait time. |
+| Q5 | XP formula | XP = damage dealt by that piece this game. Display reads values from API — formula lives server-side only. |
+| Orientation | Primary target | Tablet and phone. Portrait is primary; landscape is secondary. Board fills width in portrait; collapsible bottom drawer for contextual info. |
+| Difficulty | Selector levels | Easy (0.5s) / Medium (1.5s) / Hard (3s) / Expert (5s) / Master (10s). Selected before game creation. Flavour text per tier. |
+| Sound | v1 scope | Simple sound effects in v1 (piece tap, move placement, attack hit, Pokeball shake, evolution sting, win/loss). Audio architecture must be extensible (volume controls, mute, easy asset swap) without blocking v1 delivery. Sound is a future-enhancement surface — do not let audio scope creep delay the core gameplay build. |
 
-1. **Q2 — PvP scope:** Is v1 PvB-only? Determines whether the "Play vs Friend" flow and invite screens need to be built for launch.
+### Sound Architecture Note
 
-2. **Q3 — Move response latency:** Confirmed in `api_spec.md` that `POST /games/{id}/move` returns a full GameDetail after both plies. The "Bot thinking…" state covers this wait period on the frontend.
-
-3. **Q5 — XP formula:** Required before the game-over XP breakdown and progress bars can be implemented. Placeholder "Good game!" screen for v1 if undefined.
-
-4. **Orientation target:** Desktop-first layout described above. Mobile layout would require a different information hierarchy (collapsible bottom drawer for piece info instead of a right sidebar).
-
-5. **Difficulty selector:** Should players pick Easy/Medium/Hard (mapping to MCTS time budgets 0.5s / 1.5s / 3s) on the lobby screen, or is difficulty fixed for v1?
-
-6. **Sound:** Even simple effects (piece placement click, attack hit, Pokeball shake, evolution sting) add significant feel for this age group. Worth budgeting in the scope?
+Build with a thin audio manager abstraction from the start (e.g. a single `SoundManager` module with named slots: `play('piece_move')`, `play('attack_hit')`, etc.). v1 populates each slot with a simple sound file. Future versions can swap in richer effects, music, or voice without changing call sites. Keep the asset pipeline simple — a flat directory of `.mp3` / `.ogg` files, no complex audio graph needed for v1.

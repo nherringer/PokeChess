@@ -135,7 +135,7 @@ Auth required.
 
 ---
 
-## Friends (PvP — may be deferred to v2)
+## Friends (PvP — **required for v1**)
 
 ### `GET /friends`
 Auth required. Returns accepted friends and pending requests.
@@ -181,7 +181,7 @@ Auth required. Accept or reject an incoming request.
 
 ---
 
-## Game Invites (PvP — may be deferred to v2)
+## Game Invites (PvP — **required for v1**)
 
 The invite flow: sender creates an invite → a pending `games` row is created simultaneously → recipient accepts → game becomes active.
 
@@ -291,7 +291,7 @@ Auth required. Create a PvB game directly (no invite flow).
 `player_side` is `"red"` or `"blue"`. The bot occupies the other side. **Open decision: should this be randomized if omitted?**
 
 Server:
-1. Creates `pokemon_pieces` rows (5 per user) if this is the user's first game
+1. Creates `pokemon_pieces` rows (one per named piece in the full roster) if this is the user's first game
 2. Builds `GameState.new_game()`, injects piece UUIDs from `pokemon_pieces`
 3. Creates `games` row + `game_pokemon_map` rows
 
