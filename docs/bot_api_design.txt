@@ -1,0 +1,201 @@
+Status: Implemented
+Authors: nherringer
+Audience: ML bot team + app team
+
+Overview
+This document covers the HTTP contract between the app server and the engine
+(ML bot) container, and the serialization layer that underlies it.
+
+For deployment topology, S3 persistence, and ops endpoints (backup), see
+docs/app_and_engine_communication.md.  For the full player-facing REST API,
+see docs/api_spec.md.
+
+Implementation Order
+FEN serialization (engine/state.py, engine/moves.py) + round-trip tests — prerequisite for everything
+
+Bot API (api/app.py) + endpoint tests
+
+PGN notation (engine/notation.py) — after API is stable
+
+Phase 1 — FEN Serialization
+Files modified
+File
+
+Change
+
+engine/state.py
+
+Add to_dict() / from_dict() to Piece, ForesightEffect, GameState; add Piece.id field
+
+engine/moves.py
+
+Add to_dict() / from_dict() to Move
+
+tests/test_serialization.py
+
+New — round-trip tests
+
+Piece.to_dict() / Piece.from_dict(d)
+All fields serialize directly; enum values become their .name string
+
+stored_piece serializes recursively (nested dict or null)
+
+id is included as a string UUID or null; the engine treats it as an opaque
+carrier — it is set by the app layer and passed through unchanged.
+
+ForesightEffect.to_dict() / ForesightEffect.from_dict(d)
+Straightforward — all integer fields, no nesting
+
+GameState.to_dict() / GameState.from_dict(d)
+board → flat list of piece dicts (only occupied squares; row/col encode position)
+
+active_player → team name string ("RED" or "BLUE")
+
+pending_foresight → {"RED": null | <foresight dict>, "BLUE": null | <foresight dict>}
+
+has_traded, foresight_used_last_turn → {"RED": bool, "BLUE": bool}
+
+Move.to_dict() / Move.from_dict(d)
+action_type → ActionType.name string (e.g. "MOVE", "ATTACK")
+
+All optional fields (secondary_row, secondary_col, move_slot) included as null when absent
+
+Example FEN output (abbreviated)
+
+
+{
+  "active_player": "RED",
+  "turn_number": 14,
+  "has_traded": {"RED": false, "BLUE": false},
+  "foresight_used_last_turn": {"RED": false, "BLUE": true},
+  "pending_foresight": {
+    "RED": null,
+    "BLUE": {"target_row": 4, "target_col": 3, "damage": 120, "resolves_on_turn": 15}
+  },
+  "board": [
+    {"id": "550e8400-e29b-41d4-a716-446655440001",
+     "piece_type": "SQUIRTLE", "team": "RED", "row": 3, "col": 2,
+     "current_hp": 160, "held_item": "WATERSTONE", "stored_piece": null},
+    {"id": null,
+     "piece_type": "POKEBALL", "team": "RED", "row": 1, "col": 0,
+     "current_hp": 0, "held_item": "NONE", "stored_piece": null},
+    {"id": "550e8400-e29b-41d4-a716-446655440002",
+     "piece_type": "SAFETYBALL", "team": "BLUE", "row": 5, "col": 4,
+     "current_hp": 0, "held_item": "NONE",
+     "stored_piece": {"id": "550e8400-e29b-41d4-a716-446655440003",
+                      "piece_type": "EEVEE", "team": "BLUE",
+                      "row": 5, "col": 4, "current_hp": 80,
+                      "held_item": "THUNDERSTONE", "stored_piece": null}}
+  ]
+}
+Example Move dict output
+
+
+{
+  "piece_row": 1,
+  "piece_col": 4,
+  "action_type": "MOVE",
+  "target_row": 3,
+  "target_col": 4,
+  "secondary_row": null,
+  "secondary_col": null,
+  "move_slot": null
+}
+Verification
+Test
+
+Method
+
+FEN round-trip
+
+GameState.from_dict(state.to_dict()) == state for mid-game states with stored pieces, pending Foresight, held items
+
+Move round-trip
+
+Move.from_dict(move.to_dict()) == move for all ActionType values including QUICK_ATTACK
+
+Null field preservation
+
+Optional Move fields round-trip as null correctly
+
+Piece.id round-trip
+
+Piece.id survives serialization and copy(); None for pieces with no id
+
+Phase 2 — Bot API
+Stack
+Framework: FastAPI
+
+Server: Uvicorn
+
+Files
+File
+
+Purpose
+
+api/__init__.py
+
+Package marker
+
+api/app.py
+
+FastAPI app, lifespan, MCTS session management, /move endpoint
+
+tests/test_api.py
+
+Endpoint tests
+
+Endpoint: POST /move
+This is the only endpoint the app calls in normal game operation.
+(Ops/backup endpoints are separate — see docs/app_and_engine_communication.md.)
+
+The app sends the current board state together with a persona_params dict that
+controls MCTS behaviour.  The engine picks the best move and returns it.
+
+Request body:
+{
+  "state":         { <FEN dict> },
+  "persona_params": {
+    "time_budget":      <float, seconds — MCTS wall-clock budget>,
+    "exploration_c":    <float, optional — UCB1 exploration constant>,
+    "rollout_depth":    <int,   optional — max rollout depth>
+  }
+}
+
+  - "state"          The full current GameState serialized as a FEN dict (see Phase 1).
+  - "persona_params" A dict of MCTS tuning knobs.  Only "time_budget" is required;
+                     unrecognised keys must be silently ignored so future params can
+                     be added without breaking old engine versions.
+  - "time_budget"    Wall-clock seconds the engine may spend on MCTS search.
+                     The app clamps this to [0.1, 30.0] before sending.
+
+Response 200:
+{
+  "move": { <Move dict> }
+}
+
+Processing steps:
+1. Deserialize state via GameState.from_dict()
+2. Read persona_params["time_budget"] (required) and any other recognised knobs
+3. Call mcts.select_move(state) with the given budget → Move
+4. Return {"move": chosen_move.to_dict()}
+
+Note on load-aware budget scaling
+The app server computes an *effective* time_budget before calling this endpoint
+(base_budget / N_active_players).  This is entirely app-side logic — the engine
+simply honours whatever time_budget it receives in persona_params.
+See docs/load_aware_budgeting.md for the full design.
+
+Note on session / tree reuse
+The engine maintains an in-process MCTS session keyed by game UUID so the search
+tree is reused across turns.  Session management is internal to the engine and
+not part of this contract.
+
+Phase 3 — PGN Notation
+Deferred until Phase 2 is stable. See docs/PokeChess_Notation_Design.md for full spec.
+
+Files to create:
+
+engine/notation.py — move_to_str(), str_to_move(), GameRecord class
+
+tests/test_notation.py — round-trip and stochastic-replay tests

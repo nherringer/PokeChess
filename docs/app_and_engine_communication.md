@@ -6,12 +6,31 @@ Here's the updated plan with DynamoDB removed and Postgres JSONB handling everyt
 
 **Deployment:** `pokechess-app` and `pokechess-engine` run as two independent ECS services on the same EC2 t4g.small, communicating exclusively over `localhost`. The engine port (5001) is not publicly exposed. Each service has its own Docker image, ECR repo, and independent CI/CD pipeline. Infrastructure for both is managed via `pokechess-terraform`.
 
-**Engine API (FastAPI):** The engine exposes a lightweight FastAPI layer with two endpoints:
+**Engine API (FastAPI):** The engine exposes a lightweight FastAPI layer:
 
-- `POST /move` — accepts current game state and time budget from the app; runs MCTS search; returns best move
-- `POST /backup` — triggers serialization of one or more MCTS tree snapshots to S3; can be called by the app on game completion, periodically, or on demand
+- `POST /move` — the **bot contract endpoint**.  Accepts the current game state
+  and a `persona_params` dict; runs MCTS; returns the best move.  Payload shape:
+  ```json
+  {
+    "state":          { "<FEN dict>" },
+    "persona_params": { "time_budget": 1.5, "exploration_c": 1.41 }
+  }
+  ```
+  Response: `{ "move": { "<Move dict>" } }`.
+  Only `time_budget` (float, seconds) is required in `persona_params`; unknown
+  keys must be silently ignored.  See `docs/bot_api_design.txt` for the full
+  contract.
 
-The engine never initiates requests to the app and never touches Postgres. All game state required for a search is passed directly in the `/move` request payload. The engine is a pure responder.
+The engine never initiates requests to the app and never touches Postgres. All
+game state required for a search is passed directly in the `/move` payload.
+The engine is a pure responder.
+
+**Load-aware budget scaling (app-side only):** Before calling `POST /move`, the
+app computes an *effective* `time_budget = base_budget / N`, where N is the
+number of distinct players currently active against the same bot personality.
+The engine receives the already-adjusted value inside `persona_params` and
+behaves identically regardless — no engine changes are required.  See
+`docs/load_aware_budgeting.md` for the full design and configuration.
 
 **S3 — Transposition Table Persistence:**
 

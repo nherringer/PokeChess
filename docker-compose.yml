@@ -44,9 +44,8 @@ services:
     environment:
       DATABASE_URL: "postgresql+asyncpg://pokechess:pokechess@postgres:5432/pokechess"
       ENGINE_URL: "http://pokechess-engine:5001"
-      # TODO: add before implementing auth:
-      #   SECRET_KEY (JWT signing key)
-      #   ACCESS_TOKEN_EXPIRE_MINUTES
+      SECRET_KEY: "dev-secret-change-me-in-production"
+      ACCESS_TOKEN_EXPIRE_MINUTES: "30"
     depends_on:
       postgres:
         condition: service_healthy
