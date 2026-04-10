@@ -343,9 +343,10 @@ Quick Attack requires selecting an attack target and then a post-attack move des
 ```
 
 - Banner reads **"Team Red Wins!"** or **"Team Blue Wins!"** — not the King's name
-- XP section shows each piece that participated, `xp_earned` for this game (= total damage dealt by that piece), and a progress bar reflecting how close they are to the next threshold
+- XP section shows each named piece that participated, `xp_earned` for this game (= total damage dealt), and for non-king pieces a progress bar reflecting how close they are to the next evolution threshold
+- **Kings (Pikachu / Eevee) and the Queen (Mew) show XP earned but no evolution progress bar.** Kings evolve mid-game only (transient); Mew has no evolution at all. Show a small note like "In-game evolution only" or "No evolution" in place of the progress bar so players aren't confused about why these pieces don't level up permanently.
 - `xp_applied` vs `xp_earned` distinction: show a brief "Applying XP…" loading state before the bars animate filling, so the player sees the reward land visually
-- XP formula is intentionally simple for v1 and expected to evolve — the display layer should read the values from the API and not re-implement the formula
+- XP formula is intentionally simple for v1 and expected to evolve — the display layer reads values from the API and does not re-implement the formula
 - Two clear CTAs: rematch or go home
 
 #### Post-Game Evolution Cutscene (Future, not v1)
@@ -402,7 +403,9 @@ Once XP thresholds trigger an evolution, play an interstitial cutscene after the
 | Q1 | Mew / Eevee multi-option move UI | Bottom-sheet picker. Mew: up to 4 options (3 attacks + Foresight). Eevee: 5 evolution sprites. |
 | Q2 | PvP scope | **PvP is in scope for v1.** Play vs Friend is a hard requirement. Friends + invite endpoints ship in v1. |
 | Q3 | Move response contract | Single GameDetail payload. "Metallic is thinking…" state (spinning Pokeball, dimmed board) covers wait time. |
+| Q4 | Legal moves in GameDetail | **Kept separate.** `GET /games/{id}/legal_moves` remains its own endpoint. GameDetail never embeds legal moves. |
 | Q5 | XP formula | XP = damage dealt by that piece this game. Display reads values from API — formula lives server-side only. |
+| Q6 | King/Queen evolution persistence | **Kings and Queen never persistently evolve.** Pikachu/Eevee always start fresh each game (in-game evolution only); Mew has no evolution. XP is tracked for all three but no evolution progress bar is shown. Only rooks, knights, and bishops evolve post-game. |
 | Orientation | Primary target | Tablet and phone. Portrait is primary; landscape is secondary. Board fills width in portrait; collapsible bottom drawer for contextual info. |
 | Difficulty | Selector levels | Easy (0.5s) / Medium (1.5s) / Hard (3s) / Expert (5s) / Master (10s). Selected before game creation. Flavour text per tier. |
 | Sound | v1 scope | Simple sound effects in v1 (piece tap, move placement, attack hit, Pokeball shake, evolution sting, win/loss). Audio architecture must be extensible (volume controls, mute, easy asset swap) without blocking v1 delivery. Sound is a future-enhancement surface — do not let audio scope creep delay the core gameplay build. |

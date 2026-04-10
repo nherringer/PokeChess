@@ -109,9 +109,16 @@ Auth required. Returns the authenticated user's profile and persistent pieces.
     {
       "id": "uuid",
       "role": "king",
-      "species": "pikachu",
+      "species": "pikachu",   // always 'pikachu' or 'eevee' — immutable for kings
       "xp": 0,
-      "evolution_stage": 0
+      "evolution_stage": 0    // always 0 for kings; kings do not evolve persistently
+    },
+    {
+      "id": "uuid",
+      "role": "rook",
+      "species": "squirtle",
+      "xp": 120,
+      "evolution_stage": 1
     }
   ]
 }
@@ -323,7 +330,7 @@ Auth required (must be a participant). Returns full game state for rendering.
 `state` is the full `games.state` JSONB — see `pokechess_data_model.md` for the complete shape.  
 `move_history` is the full `games.move_history` JSONB array — included for animation, last-move highlighting, and Foresight display.
 
-**Open decision:** Should `move_history` be a separate endpoint (`GET /games/{id}/history`) to allow the polling loop to skip it when only checking turn state? At 5–20 users the TOAST overhead is negligible, but a `?include=history` query param is a low-cost future option.
+**Legal moves are always a separate endpoint** (`GET /games/{id}/legal_moves`) — never embedded in this response. See Q4 in `implementation_roadmap.md`.
 
 ---
 

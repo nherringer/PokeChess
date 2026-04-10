@@ -238,30 +238,34 @@ Persistent Pokémon owned by a player. Accumulates XP and evolves across games. 
 
 > **Critical:** `pokemon_pieces.id` is the same UUID used as `piece_id` inside `state.pieces[]` and `move_history` entries. This is the link that makes XP attribution work — no translation layer needed.
 
+> **Kings and Queen never persistently evolve:** Pikachu/Eevee evolve mid-game only (transient engine state, never written back). Mew (Queen) has no evolution at all. All three always start every game with their base species and their `species` field is immutable. `evolution_stage` does not apply to kings or the queen (always 0). They still accumulate `xp_earned` in `game_pokemon_map`, but that XP never triggers a persistent evolution.
+
 ```sql
 CREATE TABLE pokemon_pieces (
     id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_id         UUID        NOT NULL REFERENCES users(id),
     role             VARCHAR     NOT NULL,   -- 'king' | 'queen' | 'rook' | 'bishop' | 'knight'
-    species          VARCHAR     NOT NULL,   -- current species, mutable on evolution
-                                             -- e.g. 'pikachu' → 'raichu', 'eevee' → 'espeon'
+    species          VARCHAR     NOT NULL,   -- immutable for kings ('pikachu'/'eevee') and queen ('mew')
+                                             -- mutable for rooks/knights/bishops on post-game evolution
     xp               INT         NOT NULL DEFAULT 0,
-    evolution_stage  INT         NOT NULL DEFAULT 0,
+    evolution_stage  INT         NOT NULL DEFAULT 0,  -- not used for kings or queen (always 0)
     created_at       TIMESTAMP   NOT NULL DEFAULT now(),
 
     CONSTRAINT piece_role CHECK (role IN ('king', 'queen', 'rook', 'bishop', 'knight'))
 );
 ```
 
-**Each user gets 5 persistent Pokémon at account creation:**
+**Each user's persistent roster (created at first game):**
 
-| Role | Red team (Pikachu side) | Blue team (Eevee side) |
+| Role | Species | Notes |
 |---|---|---|
-| King | Pikachu (→ Raichu) | Eevee (→ Vaporeon/Flareon/Leafeon/Jolteon/Espeon) |
-| Queen | Mew | Mew |
-| Rook | Squirtle | Squirtle |
-| Knight | Charmander | Charmander |
-| Bishop | Bulbasaur | Bulbasaur |
+| King | `pikachu` (Red) / `eevee` (Blue) | Immutable species. Evolves in-game only, never persisted. |
+| Queen | `mew` | Immutable species. Mew has no evolution. |
+| Rook × 2 | `squirtle` | Mutable. Evolves post-game via XP threshold. |
+| Knight × 2 | `charmander` | Mutable. Evolves post-game via XP threshold. |
+| Bishop × 2 | `bulbasaur` | Mutable. Evolves post-game via XP threshold. |
+
+The full roster is created when the user plays their first game. Each role is represented once per team slot (2 rooks, 2 knights, 2 bishops per user).
 
 ---
 
@@ -296,9 +300,11 @@ WHERE xp_applied_at IS NULL;
 UPDATE pokemon_pieces p
 SET
     xp = xp + gpm.xp_applied,
+    -- Kings are excluded from evolution_stage changes (role = 'king' stays at 0)
     evolution_stage = CASE
-        WHEN (xp + gpm.xp_applied) >= 100 THEN 2   -- thresholds TBD
-        WHEN (xp + gpm.xp_applied) >= 30  THEN 1
+        WHEN p.role IN ('king', 'queen')            THEN 0   -- kings and queen never evolve persistently
+        WHEN (xp + gpm.xp_applied) >= 100          THEN 2   -- thresholds TBD
+        WHEN (xp + gpm.xp_applied) >= 30           THEN 1
         ELSE evolution_stage
     END
 FROM game_pokemon_map gpm

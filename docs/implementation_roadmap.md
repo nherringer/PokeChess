@@ -247,7 +247,8 @@ The frontend displays a **"Metallic is thinking…"** state (spinning Pokeball, 
 
 **Specified in `docs/api_spec.md`:** GameDetail includes `state`, `move_history`, terminal fields, and metadata.
 
-**Remaining decisions:** Whether to add query flags (e.g. omit `move_history` on hot polls), whether to embed **legal moves** for the active player (to skip a separate `GET /legal_moves` round-trip), and how much summary data **GET /games** should return for list views.
+**✅ Resolved — legal moves remain a separate endpoint. `GET /games/{id}` never embeds them.**  
+The extra round-trip for `GET /games/{id}/legal_moves` is acceptable; the performance impact at this scale is negligible. A clean separation between game state and move computation is worth more than the saved request. No query flags (e.g. `?include=legal_moves`) will be added. The `GET /games` list endpoint returns GameSummary objects (no JSONB) as already specified.
 
 ### Q5. XP earning formula
 
@@ -262,7 +263,13 @@ Implementation note: XP attribution should be computed in a single pass over `mo
 
 If **Eevee** (or similar) evolves during a game, engine state and `move_history` reflect it, but updating **`pokemon_pieces.species` only at game completion** means an abandoned game leaves the roster row out of sync with history.
 
-**Decision:** Update **species** (and related fields) **incrementally after each committed move** vs **only on game completion** (simpler, current plan).
+**✅ Resolved — Kings (Pikachu and Eevee) are in-game-only evolutions and are never persisted as evolved forms.**
+
+- Every new game always starts with **Pikachu** (Red King) and **Eevee** (Blue King) — never Raichu or any Eevee evolution. Their mid-game evolved forms are transient engine state only.
+- `pokemon_pieces.species` for king and queen pieces is **immutable** — `'pikachu'`, `'eevee'`, or `'mew'`, never updated. Mew has no evolution. King mid-game evolutions are transient engine state only.
+- `pokemon_pieces.evolution_stage` does **not apply** to kings or the queen (always 0). They are exempt from the XP-threshold evolution system.
+- Kings and queen still have `pokemon_pieces` rows and accumulate `xp_earned` in `game_pokemon_map` (XP = damage dealt). This XP is tracked but never triggers persistent evolution.
+- Only rooks, knights, and bishops have mutable `species` and a meaningful `evolution_stage`. Their evolutions happen post-game only, so the Q6 timing problem (abandoned game leaving species out of sync mid-game) does not apply to any piece — no incremental update is needed.
 
 ### Minor implementation notes (no separate decision)
 
