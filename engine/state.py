@@ -195,6 +195,37 @@ class GameState:
     )
 
     @classmethod
+    def from_dict(cls, d: dict) -> GameState:
+        """
+        Deserialize a GameState from the wire-format dict produced by
+        app/game_logic/serialization.py's state_to_dict().
+
+        Extra keys on piece dicts (e.g. "id") are silently ignored.
+        """
+        board: list[list[Optional[Piece]]] = [[None] * 8 for _ in range(8)]
+        for pd in d["board"]:
+            piece = _piece_from_dict(pd)
+            board[piece.row][piece.col] = piece
+
+        return cls(
+            board=board,
+            active_player=Team[d["active_player"]],
+            turn_number=d["turn_number"],
+            pending_foresight={
+                Team.RED: _foresight_from_dict(d["pending_foresight"]["RED"]),
+                Team.BLUE: _foresight_from_dict(d["pending_foresight"]["BLUE"]),
+            },
+            foresight_used_last_turn={
+                Team.RED: d["foresight_used_last_turn"]["RED"],
+                Team.BLUE: d["foresight_used_last_turn"]["BLUE"],
+            },
+            has_traded={
+                Team.RED: d["has_traded"]["RED"],
+                Team.BLUE: d["has_traded"]["BLUE"],
+            },
+        )
+
+    @classmethod
     def new_game(cls) -> GameState:
         board: list[list[Optional[Piece]]] = [[None] * 8 for _ in range(8)]
         _place_starting_pieces(board)
@@ -229,6 +260,34 @@ class GameState:
             foresight_used_last_turn=dict(self.foresight_used_last_turn),
             has_traded=dict(self.has_traded),
         )
+
+
+def _piece_from_dict(d: dict) -> Piece:
+    """Deserialize a Piece from a wire-format dict. Extra keys (e.g. 'id') are ignored."""
+    piece = Piece(
+        piece_type=PieceType[d["piece_type"]],
+        team=Team[d["team"]],
+        row=d["row"],
+        col=d["col"],
+        current_hp=d["current_hp"],
+        held_item=Item[d["held_item"]],
+        id=d.get("id"),
+    )
+    if d.get("stored_piece") is not None:
+        piece.stored_piece = _piece_from_dict(d["stored_piece"])
+    return piece
+
+
+def _foresight_from_dict(d: Optional[dict]) -> Optional[ForesightEffect]:
+    """Deserialize a ForesightEffect from a wire-format dict, or return None."""
+    if d is None:
+        return None
+    return ForesightEffect(
+        target_row=d["target_row"],
+        target_col=d["target_col"],
+        damage=d["damage"],
+        resolves_on_turn=d["resolves_on_turn"],
+    )
 
 
 def _place_starting_pieces(board: list[list[Optional[Piece]]]) -> None:
