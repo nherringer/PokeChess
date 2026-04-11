@@ -27,6 +27,7 @@
 - **Code:** **One monorepo**: `engine/` (pure rules), `app/` (FastAPI + Postgres), `bot/` + `cpp/` (MCTS + optional C++ rollout in the engine image). **Two Docker images** (`Dockerfile.app`, `Dockerfile.engine`) built from the same repo.
 - **Truth for HTTP:** `app/schemas.py` and [pokechess_data_model.md](pokechess_data_model.md). Legacy `docs/api_spec.md` was removed; ignore any stray references to it in older notes.
 - **Local dev:** `docker-compose.yml` + env (`DATABASE_URL`, `ENGINE_URL`, `SECRET_KEY`, etc.). **Target production:** two ECS services on one small EC2 instance ([architecture_design_plan.md](architecture_design_plan.md)).
+- **Engine HTTP container:** The app is ready to call `POST /move`, but **`bot/server.py` is not in the repo yet** and **`Dockerfile.engine`** still expects `uvicorn bot.server:app` — the engine image **does not start** until that module exists ([implementation_roadmap.md](implementation_roadmap.md)). PvB bot moves need a running engine matching `ENGINE_URL`.
 
 ---
 
@@ -180,8 +181,8 @@ flowchart TB
 
 ### 4.4 Polling and payloads
 
-- **`GET /games/{id}`** returns **GameDetail**: metadata plus **`state`** and **`move_history`** JSON for rendering. It does **not** include legal moves (separate endpoint — roadmap Q4).
-- **`GET /games/{id}/legal_moves?piece_row=&piece_col=`** returns the list of legal **Move** shapes for that piece; the client submits one of those verbatim to `POST /move`.
+- **`GET /games/{id}`** returns **GameDetail**: metadata plus **`state`** and **`move_history`** JSON for rendering. It does **not** embed legal moves: use **`GET /games/{id}/legal_moves`** (implemented). Roadmap Q4 only ruled out bundling legal moves into `GET /games/{id}` — not whether the legal-moves route exists.
+- **`GET /games/{id}/legal_moves?piece_row=&piece_col=`** returns the list of legal **Move** shapes for that piece; the client submits one of those verbatim to `POST /games/{id}/move`.
 - **`whose_turn`** in the DB uses lowercase `red` / `blue`; **`games.state.active_player`** uses uppercase `RED` / `BLUE` — normalize when comparing.
 
 ### 4.5 Serialization
@@ -209,8 +210,8 @@ All routes are mounted from `app/main.py`. Prefixes below are **full path prefix
 | `GET` | `/game-invites` | Pending invites |
 | `POST` | `/game-invites` | Create invite + pending game (must be friends) |
 | `PUT` | `/game-invites/{invite_id}` | Accept/reject invite |
-| `GET` | `/games` | Active + completed lists (**GameSummary** — no heavy JSONB) |
-| `POST` | `/games` | Create game (PvP or PvB per body) |
+| `GET` | `/games` | Active + completed lists (**GameSummary** — no heavy JSONB). **Completed** list is capped at **10** rows (most recently updated); active games are not capped (`app/db/queries/games.py`). |
+| `POST` | `/games` | Create **PvB** game only — body requires `bot_id` and `player_side` (`CreateGameRequest`). **PvP** games are created via **`POST /game-invites`** (pending row + invite), then activated on accept — not via this endpoint. |
 | `GET` | `/games/{game_id}` | **GameDetail** — full `state` + `move_history` |
 | `POST` | `/games/{game_id}/resign` | Resign |
 | `GET` | `/games/{game_id}/legal_moves` | Legal moves for one piece |
@@ -351,7 +352,8 @@ Append-only list of turns. **Snake_case `action_type`** strings in history (`att
 ### 9.1 MCTS engine container
 
 - **Bot code:** `bot/mcts.py` etc.; optional **C++** rollout in `cpp/` for speed.
-- **HTTP:** Production needs **`bot/server.py`** exposing at least `POST /move` (and optionally `POST /backup` for transposition table S3 dumps). **Status:** see [implementation_roadmap.md](implementation_roadmap.md) — app already calls the engine via `app/engine_client.py` when the engine is up.
+- **HTTP surface (repo state):** The app’s client (`app/engine_client.py`) and this doc describe **`POST /move`** with `{ "state", "persona_params" }`. **`bot/server.py` does not exist in the tree yet** — there is no FastAPI app under `bot/` to run. **`Dockerfile.engine`** is wired to `uvicorn bot.server:app` (see repo root Dockerfile), so **building and running that image as-is will fail** until `bot/server.py` (or an equivalent module path) is added. [implementation_roadmap.md](implementation_roadmap.md) tracks this as blocking for production PvB. **PvP never needs the engine.**
+- **Optional:** `POST /backup` for transposition table S3 dumps (design-level; same HTTP entry story).
 - **Future:** `engine/notation.py` for PokeChess-PGN replay/analysis (not required for Postgres).
 
 ### 9.2 Load-aware budgeting (implemented in app)
@@ -405,13 +407,13 @@ This is the **intended** production shape, not a guarantee about your current la
 | [CampaignDesign.md](CampaignDesign.md) | **Future** solo campaign — not current build |
 | [task_log.md](task_log.md) | Historical ML task log |
 | [TT_s3_upload.txt](TT_s3_upload.txt) | TT / S3 notes |
-| PDFs in `docs/` | Boards, movement, notation design |
+| PDFs (optional assets) | Some checkouts include boards/movement/notation PDFs under `docs/`; **this tree may have none** — if missing, they are optional reference art, not required to run the app. |
 
 ---
 
 ## 12. Documentation freshness
 
-Backend documentation and schema updates have been driven on branch **`init/app-backend`** (e.g. data model expansions, removal of obsolete `api_spec.md`). When merging or auditing **docs/**, prefer that branch’s history for what changed last.
+Use **git history** on `docs/` (e.g. `git log -- docs/`) to see what changed recently. Doc updates sometimes land on long-lived integration branches first; **there is no single branch name** that applies in every clone—compare your branch to `main` (or your default) when auditing.
 
 ---
 
@@ -425,6 +427,7 @@ Backend documentation and schema updates have been driven on branch **`init/app-
 | **Data model move lifecycle** | One step may mention updating `species` mid-game; Q6 decisions say kings/queen immutable, other pieces post-game — reconcile wording in [pokechess_data_model.md](pokechess_data_model.md) when editing. |
 | **Frontend UX copy** | Occasional “~3s” bot wait vs **10s** Master tier — treat **10s** as worst case for UX. |
 | **Engine doc typos** | “PvP vs engine” should read **PvB** — engine is never used for human-vs-human. |
+| **Engine image won’t start** | **`bot/server.py` missing**; `Dockerfile.engine` expects it — see Section 9.1 and TL;DR. |
 
 ---
 
