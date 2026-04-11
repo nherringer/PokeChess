@@ -11,6 +11,7 @@
 | If you need… | Start here | Then open… |
 |--------------|------------|------------|
 | Big picture + contracts | Sections 2–5 below | Same document (no other file required) |
+| Full HTTP API (methods, status codes, errors, auth) | — | [api_spec.md](api_spec.md), `app/routes/`, `app/schemas.py` |
 | Exact Pydantic/DB shapes | Sections 5.1–5.2 | `app/schemas.py`, [pokechess_data_model.md](pokechess_data_model.md) |
 | DDL and indexes | Section 6 | `app/db/schema.sql`, [pokechess_data_model.md](pokechess_data_model.md) |
 | Chess/Pokémon rules | Section 7 | [Rules.md](Rules.md) |
@@ -25,7 +26,7 @@
 - **Game:** Two-player strategy on an 8×8 board. Chess-like movement, but pieces have **HP**, **Pokémon types**, **items**, and **abilities**. **RED** (Pikachu king) moves first; **BLUE** (Eevee king) second. Win by eliminating the opponent’s king (see [Rules.md](Rules.md)).
 - **Modes:** **PvP** — two human accounts (friends + game invites). **PvB** — one human vs bot personality **Metallic** (MCTS); the app calls a separate **engine** service only for the bot’s move choice.
 - **Code:** **One monorepo**: `engine/` (pure rules), `app/` (FastAPI + Postgres), `bot/` + `cpp/` (MCTS + optional C++ rollout in the engine image). **Two Docker images** (`Dockerfile.app`, `Dockerfile.engine`) built from the same repo.
-- **Truth for HTTP:** `app/schemas.py` and [pokechess_data_model.md](pokechess_data_model.md). Legacy `docs/api_spec.md` was removed; ignore any stray references to it in older notes.
+- **Truth for HTTP:** **[api_spec.md](api_spec.md)** (methods, bodies, status codes, errors); **`app/schemas.py`** (Pydantic field types); **`app/routes/`** (handler behavior); **[pokechess_data_model.md](pokechess_data_model.md)** (`games.state` / `move_history` JSON). At runtime, **`/openapi.json`** and **`/docs`** (Swagger UI).
 - **Local dev:** `docker-compose.yml` + env (`DATABASE_URL`, `ENGINE_URL`, `SECRET_KEY`, etc.). **Target production:** two ECS services on one small EC2 instance ([architecture_design_plan.md](architecture_design_plan.md)).
 - **Engine HTTP container:** The app is ready to call `POST /move`, but **`bot/server.py` is not in the repo yet** and **`Dockerfile.engine`** still expects `uvicorn bot.server:app` — the engine image **does not start** until that module exists ([implementation_roadmap.md](implementation_roadmap.md)). PvB bot moves need a running engine matching `ENGINE_URL`.
 
@@ -195,7 +196,7 @@ Wire format for DB and engine requests is owned by the app: **`app/game_logic/se
 
 ### 5.1 HTTP API surface (implemented routes)
 
-All routes are mounted from `app/main.py`. Prefixes below are **full path prefixes**.
+All routes are mounted from `app/main.py`. Prefixes below are **full path prefixes**. For **request/response contracts, auth, and error codes**, see **[api_spec.md](api_spec.md)**; for **Pydantic types**, see **`app/schemas.py`**; for **handler logic**, see **`app/routes/`**.
 
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -218,7 +219,7 @@ All routes are mounted from `app/main.py`. Prefixes below are **full path prefix
 | `POST` | `/games/{game_id}/move` | Submit move; **GameDetail** response (may include bot ply in PvB) |
 | `GET` | `/health` | Liveness |
 
-**Authoritative types:** `app/schemas.py` (`RegisterRequest`, `GameDetail`, `MovePayload`, `LegalMoveOut`, etc.).
+**Authoritative types:** `app/schemas.py` (`RegisterRequest`, `GameDetail`, `MovePayload`, `LegalMoveOut`, etc.). **Authoritative HTTP contract (status codes + errors):** [api_spec.md](api_spec.md).
 
 ### 5.2 Auth model (summary)
 
@@ -397,6 +398,7 @@ This is the **intended** production shape, not a guarantee about your current la
 | Document | Role |
 |----------|------|
 | [MASTERDOC.md](MASTERDOC.md) | **This file** — unified reference |
+| [api_spec.md](api_spec.md) | **App HTTP API** — methods, bodies, status codes, errors (complements `app/schemas.py` + `app/routes/`) |
 | [implementation_roadmap.md](implementation_roadmap.md) | Monorepo checklist, container duties, state/history tables, Q&A decisions, next steps |
 | [pokechess_data_model.md](pokechess_data_model.md) | Full schema, JSON examples, HTTP model tables, detailed move lifecycle |
 | [architecture_design_plan.md](architecture_design_plan.md) | Target AWS/ECS/EC2/cost/queue narrative |
