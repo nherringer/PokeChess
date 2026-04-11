@@ -90,8 +90,10 @@ window recovers faster but provides less protection during a surge.
 | 5                        | 0.6 s           |
 | 10                       | 0.3 s           |
 
-The effective budget is further clamped to `[0.1, 30.0]` by `engine_client.py`
-as a safety rail against DB misconfiguration.
+The effective budget is further clamped to `[0.1, 10.0]` by `engine_client.py`
+as a safety rail against DB misconfiguration. The upper bound was lowered from
+30.0 to 10.0 to reduce worst-case Postgres lock duration (see known gap in
+MASTERDOC.md §13).
 
 ---
 
