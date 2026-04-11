@@ -55,11 +55,11 @@ The engine container is called **only for PvB games, only to get the bot's move*
 
 ### Engine API contract (`POST localhost:5001/move`)
 
-**Request:**
+**Request** (matches [`app/engine_client.py`](../app/engine_client.py)):
 ```json
 {
   "state": { ...GameState.to_dict() output... },
-  "time_budget": 1.0
+  "persona_params": { "time_budget": 1.0 }
 }
 ```
 
@@ -140,8 +140,7 @@ See `docs/pokechess_data_model.md` for full JSON examples.
 4. ~~**Write `Dockerfile.engine`**~~ ✓ Done — see `Dockerfile.engine` at repo root. Includes optional C++ extension build with pure-Python fallback. **Still not runnable** until `bot/server.py` exists (see below).
 
 5. **Write `bot/server.py`** — FastAPI wrapper around `MCTS.select_move()`  
-   `POST /move`: accept `{state: dict, time_budget: float}`; deserialize with **`state_from_dict()` from `app/game_logic/serialization.py`** (or duplicate minimal codec in engine image — today serialization lives under `app/`). Run MCTS, return the best move as JSON.  
-   `POST /backup`: triggers transposition table serialization to S3.  
+   `POST /move`: accept **`{ "state": dict, "persona_params": { "time_budget": float, ... } }`** (same as [`app/engine_client.py`](../app/engine_client.py)); deserialize with **`state_from_dict()` from `app/game_logic/serialization.py`** (or duplicate minimal codec in engine image — today serialization lives under `app/`). Run MCTS, return the best move as a **flat** JSON move object. **Bot-side** persistence (e.g. transposition tables in **local SQLite**) is handled **inside the engine / bot server** — **not** RDS, **no** app-triggered `POST /backup`.  
    Estimated: 2–3 hours. **Blocks PvB bot moves in production** (app already calls the engine over HTTP via `app/engine_client.py`).
 
 6. **Wire `iteration_budget` into `MCTS.select_move()`** (currently only `time_budget` is implemented)  
@@ -157,7 +156,7 @@ See `docs/pokechess_data_model.md` for full JSON examples.
 
 2. ~~**Write `Dockerfile.app`**~~ ✓ Done — `Dockerfile.app` at repo root.
 
-3. ~~**Write `docker-compose.yml`**~~ ✓ Done — `docker-compose.yml` at repo root. Set `SECRET_KEY`, DB URL, `ENGINE_URL`, and S3-related env vars for production.
+3. ~~**Write `docker-compose.yml`**~~ ✓ Done — `docker-compose.yml` at repo root. Set `SECRET_KEY`, **`DATABASE_URL`** (RDS / Postgres for the app), and **`ENGINE_URL`** for production.
 
 4. ~~**Database schema**~~ ✓ Done — `app/db/schema.sql`: all tables from the data model plus **`bot_player_activity`** (load-aware MCTS budgeting; see `docs/load_aware_budgeting.md`). Seed bot **Metallic** included (`INSERT` at end of file). *Versioned migration tool (e.g. Alembic) is still optional* if you want repeatable upgrades beyond “apply `schema.sql`”.
 

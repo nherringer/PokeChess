@@ -36,6 +36,8 @@ Engine container (MCTS bot)
 
 **One database.** At 5–20 users, DynamoDB adds operational complexity with no benefit. PostgreSQL JSONB handles semi-structured game state natively. JSONB is fully supported on AWS RDS for PostgreSQL (all current versions).
 
+**Engine vs RDS:** The **engine / bot server** does **not** connect to RDS. Bot-only persistence (e.g. transposition tables) uses **local storage inside the engine container** (e.g. SQLite), separate from the app’s schema in this document.
+
 ---
 
 ## Schema

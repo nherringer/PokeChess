@@ -14,18 +14,22 @@ Here's the revised v1 plan:
 **Communication:**
 
 - Browser → app: HTTP polling or SSE (1–3s latency acceptable)
-- App → engine: `POST localhost:5001/move` with full game state and time budget; engine returns best move. `POST localhost:5001/backup` triggers tree serialization to S3. Engine never initiates requests or accesses Postgres.
+- App → engine: With **both ECS tasks on the same EC2 host**, the app reaches the engine at **`http://localhost:5001`** (or whatever `ENGINE_URL` is set to — same idea as `docker-compose.yml`). **Only** `POST /move` is part of the app–engine contract ([`app/engine_client.py`](../app/engine_client.py)). There is **no** app-triggered `POST /backup` and **no** plan for the app to orchestrate engine persistence to external stores.
 
-**Engine state:** MCTS search trees held in RAM, keyed by `game_id`. On game completion (or on any schedule/event the app deems appropriate), the app calls `/backup` to serialize tree snapshots to S3. On container startup, the engine loads available snapshots from S3 into RAM before accepting requests. S3 lifecycle rules expire old snapshots automatically.
+**Engine process:** The **bot server** owns transposition-table and related persistence **inside the engine container** (e.g. **local SQLite** — does **not** use RDS). The app **never** connects to that store; game state for users remains in **RDS** only.
 
-**Request queue:** Multiple incoming move requests are handled with a **queue** (e.g. FIFO), not parallel MCTS across many threads. FastAPI/`asyncio` can still accept connections without blocking the event loop, but the engine **drains the queue one search at a time** per instance so two games never compete for CPU inside simultaneous full searches. Under load, backlog shows up as **queue depth and wait time**, not as splitting strength across concurrent searches. See [load_aware_budgeting.md](load_aware_budgeting.md) for time budgets and back-pressure. pybind11 still releases the GIL in C++ hot loops; the architecture choice here is **serialization via a queue**, not `ThreadPoolExecutor` parallelism.
+**Engine state (in-flight):** MCTS search trees in RAM while searching.
 
-**Storage:** Postgres on EC2 — users, history, ELO, and active game state (JSONB for complex/nested structures like board state, HP, turns). Single database, single connection pool, single backup strategy.
+**Request queue:** A **queue** (or pool drained **one request at a time**): incoming `POST /move` work waits in line; **one MCTS search runs at a time** per engine instance so games do not compete for CPU inside overlapping full searches. Backlog shows up as **wait time / queue depth**. Pair with [load_aware_budgeting.md](load_aware_budgeting.md) for app-side `time_budget` scaling. This replaces any older “parallel ThreadPoolExecutor across many searches” description.
 
-**Frontend:** React/Next.js — S3 + CloudFront (target; not required for local backend development).
+**Storage — app:** **Amazon RDS for PostgreSQL** — all application tables (`users`, `games`, `pokemon_pieces`, etc.). The FastAPI app uses `DATABASE_URL` to RDS only. **Not** “Postgres on the same EC2 box” for production app data in this target.
 
-**CI/CD:** From the **monorepo**, build and push **two** images (`pokechess-app`, `pokechess-engine`) to ECR, then update the corresponding ECS services. App and engine deploys can stay decoupled (different workflows or manual promotion) while still sourcing from one repository.
+**Storage — engine:** Bot-local persistence (e.g. SQLite on disk in the engine container) for MCTS/TT data **only**; **no RDS** access from the engine.
 
-**Estimated cost:** ~$3–5/mo until Jan 2027; ~$16–19/mo after (DynamoDB removed from the stack reduces this further — no per-request costs or provisioned capacity to worry about)
+**Frontend:** React/Next.js — static hosting on S3 + CloudFront (target; not required for local backend development). (Unrelated to engine TT storage.)
+
+**CI/CD:** From the **monorepo**, build and push **two** images (`pokechess-app`, `pokechess-engine`) to ECR, then update the corresponding ECS services. App and engine deploys can stay decoupled (different workflows or manual promotion) while still sourcing from one repository. **Target** pipeline — not necessarily present in-repo yet.
+
+**Estimated cost:** ~$3–5/mo until Jan 2027; ~$16–19/mo after (figures are **approximate**; RDS, EBS, transfer, and region change totals.)
 
 **Deferred to v2:** Split `pokechess-engine` onto dedicated compute-optimized instance, on-demand engine start/stop
