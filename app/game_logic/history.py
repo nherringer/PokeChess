@@ -15,62 +15,21 @@ from engine.state import (
     Piece,
     PieceType,
     Team,
-    MATCHUP,
     PIECE_STATS,
     PAWN_TYPES,
     SAFETYBALL_TYPES,
     ForesightEffect,
 )
 from engine.moves import Move, ActionType
+from engine.rules import calc_damage_with_multiplier
 
 from .serialization import IdMap
 
-
-# ---------------------------------------------------------------------------
-# Damage calculation (mirrors engine/rules.py _calc_damage)
-# ---------------------------------------------------------------------------
-
-_BASE_DAMAGE: dict[PieceType, int] = {
-    PieceType.SQUIRTLE: 100,
-    PieceType.CHARMANDER: 100,
-    PieceType.BULBASAUR: 100,
-    PieceType.PIKACHU: 100,
-    PieceType.RAICHU: 100,
-    PieceType.EEVEE: 50,
-    PieceType.VAPOREON: 100,
-    PieceType.FLAREON: 100,
-    PieceType.LEAFEON: 100,
-    PieceType.JOLTEON: 100,
-    PieceType.ESPEON: 80,
-}
-
-from engine.state import PokemonType
-
-_MEW_SLOT_TYPES: dict[int, PokemonType] = {
-    0: PokemonType.FIRE,
-    1: PokemonType.WATER,
-    2: PokemonType.GRASS,
-}
 
 _FORESIGHT_DAMAGE: dict[PieceType, int] = {
     PieceType.MEW: 120,
     PieceType.ESPEON: 120,
 }
-
-
-def _calc_damage(attacker: Piece, target: Piece, move_slot: Optional[int] = None) -> tuple[int, float]:
-    """Return (damage, type_multiplier)."""
-    if attacker.piece_type == PieceType.MEW:
-        base = 100
-        atk_type = _MEW_SLOT_TYPES.get(move_slot, PokemonType.FIRE)
-    else:
-        base = _BASE_DAMAGE.get(attacker.piece_type, 60)
-        atk_type = attacker.pokemon_type
-
-    type_mult = MATCHUP[atk_type][target.pokemon_type]
-    raw = base * type_mult
-    damage = max(10, int(round(raw / 10)) * 10)
-    return damage, type_mult
 
 
 # ---------------------------------------------------------------------------
@@ -143,15 +102,20 @@ def build_foresight_resolve_entry(
     """
     player = old_state.active_player
 
-    # Find the foresight caster's piece_id
-    # The caster is on the same team as pending_foresight[player]
+    # Resolve caster piece_id using the position stored on ForesightEffect when
+    # the move was originally cast. This is unambiguous even when both MEW and
+    # ESPEON exist on the same team. Fall back to scanning if caster_row is -1
+    # (backward compat: old states serialized before this field was added).
     caster_id = None
-    for pos, uid in id_map.items():
-        if isinstance(pos, tuple) and len(pos) == 2 and isinstance(pos[0], int):
-            p = old_state.board[pos[0]][pos[1]]
-            if p is not None and p.team == player and p.piece_type in (PieceType.MEW, PieceType.ESPEON):
-                caster_id = uid
-                break
+    if fx.caster_row >= 0 and fx.caster_col >= 0:
+        caster_id = id_map.get((fx.caster_row, fx.caster_col))
+    else:
+        for pos, uid in id_map.items():
+            if isinstance(pos, tuple) and len(pos) == 2 and isinstance(pos[0], int):
+                p = old_state.board[pos[0]][pos[1]]
+                if p is not None and p.team == player and p.piece_type in (PieceType.MEW, PieceType.ESPEON):
+                    caster_id = uid
+                    break
 
     target = old_state.board[fx.target_row][fx.target_col]
     target_id = id_map.get((fx.target_row, fx.target_col)) if target is not None else None
@@ -215,7 +179,7 @@ def _build_attack(
 ) -> dict:
     target = old_state.board[move.target_row][move.target_col]
     target_id = id_map.get((move.target_row, move.target_col))
-    damage, type_mult = _calc_damage(piece, target, move.move_slot)
+    damage, type_mult = calc_damage_with_multiplier(piece, target, move.move_slot)
     hp_before = target.current_hp
     hp_after = max(0, hp_before - damage)
     return {
@@ -289,7 +253,7 @@ def _build_quick_attack(
 ) -> dict:
     target = old_state.board[move.target_row][move.target_col]
     target_id = id_map.get((move.target_row, move.target_col))
-    damage, type_mult = _calc_damage(piece, target)
+    damage, type_mult = calc_damage_with_multiplier(piece, target)
     hp_before = target.current_hp
     hp_after = max(0, hp_before - damage)
     return {

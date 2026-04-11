@@ -169,6 +169,11 @@ class ForesightEffect:
     target_col: int
     damage: int
     resolves_on_turn: int
+    # Position of the piece that cast Foresight, stored so history attribution
+    # is unambiguous when both MEW and ESPEON exist on the same team.
+    # -1 means unknown (e.g. deserialized from an old save without this field).
+    caster_row: int = -1
+    caster_col: int = -1
 
 
 @dataclass
@@ -287,6 +292,8 @@ def _foresight_from_dict(d: Optional[dict]) -> Optional[ForesightEffect]:
         target_col=d["target_col"],
         damage=d["damage"],
         resolves_on_turn=d["resolves_on_turn"],
+        caster_row=d.get("caster_row", -1),
+        caster_col=d.get("caster_col", -1),
     )
 
 
