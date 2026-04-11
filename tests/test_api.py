@@ -251,3 +251,50 @@ class TestMalformedState:
         }
         resp = client.post("/move", json=payload)
         assert resp.status_code == 422
+
+
+class TestS3StartupErrorFallback:
+    """Engine must start and serve requests even when S3 is unreachable."""
+
+    def test_s3_error_on_startup_falls_back_to_empty_tt(self):
+        """If S3 download raises during startup, the engine starts with an empty TT."""
+        import os
+
+        for mod_name in list(sys.modules.keys()):
+            if "bot.server" in mod_name:
+                del sys.modules[mod_name]
+
+        mock_mcts_instance = MagicMock()
+        mock_mcts_instance.select_move.return_value = _fake_move()
+        mock_mcts_cls = MagicMock(return_value=mock_mcts_instance)
+        mock_sync_queue = MagicMock()
+        mock_sync_queue_cls = MagicMock(return_value=mock_sync_queue)
+
+        # Simulate an S3 store that raises on download (e.g. wrong bucket/credentials).
+        mock_store_instance = MagicMock()
+        mock_store_instance.download.side_effect = RuntimeError("S3 unreachable")
+        mock_store_cls = MagicMock(return_value=mock_store_instance)
+
+        env_patch = patch.dict(os.environ, {"POKECHESS_TT_BUCKET": "some-bucket"})
+
+        with patch("bot.mcts.MCTS", mock_mcts_cls), \
+             patch("bot.tt_store.TTSyncQueue", mock_sync_queue_cls), \
+             patch("bot.tt_store.TTStore", mock_store_cls), \
+             env_patch:
+            import bot.server as server_mod
+            server_mod.MCTS = mock_mcts_cls
+            server_mod.TTSyncQueue = mock_sync_queue_cls
+            server_mod.TTStore = mock_store_cls
+            server_mod.request_count = 0
+            server_mod.global_tt = server_mod.TranspositionTable()
+            server_mod.sync_queue = mock_sync_queue
+
+            with TestClient(server_mod.app) as client:
+                # Engine must be reachable despite the S3 failure.
+                assert client.get("/health").status_code == 200
+                # And must serve move requests normally.
+                resp = client.post("/move", json={
+                    "state": _new_game_dict(),
+                    "persona_params": {"time_budget": 0.1},
+                })
+                assert resp.status_code == 200

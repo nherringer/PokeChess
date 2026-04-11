@@ -78,7 +78,16 @@ async def lifespan(app: FastAPI):
     elif bucket:
         store = TTStore(bucket, f"tt_v{version}.bin")
         logger.info("Attempting to download TT from S3 bucket=%s key=tt_v%s.bin", bucket, version)
-        downloaded = store.download(local_path)
+        try:
+            downloaded = store.download(local_path)
+        except Exception:
+            # S3 is a warm-start optimisation — a misconfigured bucket or
+            # transient network error must not prevent the engine from serving.
+            logger.exception(
+                "Failed to download TT from S3; starting with empty TT. "
+                "Check POKECHESS_TT_BUCKET, POKECHESS_TT_VERSION, and AWS credentials."
+            )
+            downloaded = False
         if downloaded:
             logger.info("Downloaded TT from S3; loading.")
             global_tt.load(local_path)

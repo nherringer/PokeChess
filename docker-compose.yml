@@ -32,8 +32,13 @@ services:
       - "5001:5001"          # exposed locally for debugging; internal-only in production
     restart: unless-stopped
     # No DATABASE_URL — the engine never touches Postgres.
-    # TODO: add S3 env vars for transposition table backup once bot/server.py is implemented:
-    #   AWS_DEFAULT_REGION, S3_TREE_BUCKET
+    # To enable TT S3 backup, add these env vars to the engine service:
+    #   POKECHESS_TT_BUCKET: <your-s3-bucket-name>
+    #   POKECHESS_TT_VERSION: "1"          # bump when a rules change invalidates TT stats
+    #   POKECHESS_TT_LOCAL_PATH: "transposition_table.bin"   # default; can omit
+    #   AWS_DEFAULT_REGION: <region>
+    #   AWS_ACCESS_KEY_ID: <key>           # not needed if using an ECS task role
+    #   AWS_SECRET_ACCESS_KEY: <secret>    # not needed if using an ECS task role
 
   pokechess-app:
     build:
