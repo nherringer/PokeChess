@@ -2,7 +2,7 @@
 
 **Audience:** 8–15 year olds  
 **Target platform:** Tablet and phone (portrait and landscape). Desktop will work but is not the primary design target.  
-**Last updated:** April 2026  
+**Last updated:** April 2026 (aligned with backend implementation)  
 
 ---
 
@@ -113,17 +113,21 @@
 └──────────────────────────────────────┘
 ```
 
-Each option maps to a MCTS time budget sent as `time_budget` in the `POST /move` engine request:
+Each difficulty corresponds to a **separate bot row** in the `bots` table. The `bots.params` JSONB for each row sets the `time_budget` used by the MCTS engine. The frontend selects the appropriate `bot_id` for the chosen difficulty and sends it in `POST /games`:
 
-| Difficulty | Time budget | Flavour text |
-|---|---|---|
-| Easy | 0.5s | Metallic is sleepy |
-| Medium | 1.5s | Metallic woke up |
-| Hard | 3.0s | Metallic means it |
-| Expert | 5.0s | Metallic is scary |
-| Master | 10.0s | Good luck... |
+```json
+{ "bot_id": "<uuid-for-this-difficulty>", "player_side": "red" }
+```
 
-Tapping a difficulty immediately creates the game (no extra confirm step). Metallic is the name of the PvB bot — Team Alpha's artificial intelligence.
+| Difficulty | Time budget | Flavour text | DB row name |
+|---|---|---|---|
+| Easy | 0.5s | Metallic is sleepy | `Metallic (Easy)` |
+| Medium | 1.5s | Metallic woke up | `Metallic (Medium)` |
+| Hard | 3.0s | Metallic means it | `Metallic (Hard)` |
+| Expert | 5.0s | Metallic is scary | `Metallic (Expert)` |
+| Master | 10.0s | Good luck... | `Metallic (Master)` |
+
+On app startup the client should call `GET /bots` (or equivalent discovery endpoint) to retrieve `bot_id` values per difficulty name. **Until that endpoint is implemented**, bot UUIDs may be hardcoded at build time from the DB seed. Tapping a difficulty immediately creates the game (no extra confirm step). Metallic is the name of the PvB bot — Team Alpha's artificial intelligence.
 
 ---
 
@@ -153,15 +157,12 @@ Tapping a difficulty immediately creates the game (no extra confirm step). Metal
 │                                      │
 │   Waiting for Misty to accept...     │
 │                                      │
-│   Share code:  PKC-4729              │
-│   [Copy link]                        │
-│                                      │
 │   [Cancel invite]                    │
 │                                      │
 └──────────────────────────────────────┘
 ```
 
-PvP invite screen polls `GET /game-invites` or listens for a push notification until the invitee accepts.
+**Invite flow:** To invite a friend, the inviter picks from their friends list (fetched via `GET /friends`) and calls `POST /game-invites` with `{ "invitee_id": "<friend's user_id UUID>" }`. There is no join-by-code mechanic — invites are push-only. The invitee sees the pending invite on their next `GET /game-invites` poll and accepts via `PUT /game-invites/{invite_id}` with `{ "action": "accept" }`. The inviter's lobby screen polls `GET /game-invites` (every 2–3s) to detect acceptance and navigate to the game.
 
 ---
 
@@ -223,12 +224,22 @@ In portrait, the contextual info (selected piece, legend, last move) lives in a 
 - Light squares: warm cream `#EBF0CE`, dark squares: Pokemon-green `#6E8F52`
 - Pieces: circular chip style from the demo — team-color outer ring (6px), dark inner circle, sprite centered
 - HP shown as a thin colored arc on the piece ring (a "health halo"). Full = green, half = yellow, low = blinking red. Keeps the cell clean while giving HP at a glance.
-- **Highlights on click:**
-  - Selected piece: bright blue pulsing ring around the cell
-  - Legal move squares: yellow semi-transparent overlay + small dot in center
-  - Legal attack squares: orange semi-transparent overlay + crosshair dot
-  - Foresight target (Mew attack): cyan glow overlay
-  - Trade squares: purple overlay
+- **Board orientation:** The API uses 0-indexed rows where **row 0 is Red's back rank** and **row 7 is Blue's back rank**. Always render the board so the **local player's pieces are at the bottom** — flip row order for the Blue player so row 7 appears at the bottom of the screen.
+- **Highlights on click** — derived from the `action_type` field of each `LegalMoveOut`:
+
+| `action_type` | Highlight | Color |
+|---|---|---|
+| `MOVE` | Yellow overlay + center dot | `hl-move` `#F5E028` |
+| `ATTACK` | Orange overlay + crosshair dot | `hl-attack` `#F55A19` |
+| `QUICK_ATTACK` | Orange overlay + crosshair dot (same as ATTACK; two-step flow below) | `hl-attack` `#F55A19` |
+| `POKEBALL_ATTACK` | Orange overlay + Pokéball icon | `hl-attack` `#F55A19` |
+| `MASTERBALL_ATTACK` | Deep purple overlay + Masterball icon | `#6B21A8` |
+| `FORESIGHT` | Cyan glow overlay | `hl-foresight` `#32D7FA` |
+| `TRADE` | Purple overlay | `hl-trade` `#A855F7` |
+| `EVOLVE` | Gold pulsing ring on the piece itself | `accent-gold` `#FFD700` |
+| `RELEASE` | Green overlay on target square | `#4CAF50` |
+
+  Selected piece: always shows bright blue pulsing ring (`hl-select` `#64A0FF`) regardless of action type.
 
 #### Stored-in-Ball Display (Safetyball / Master Safetyball)
 
@@ -250,8 +261,10 @@ When a Safetyball has a Pokemon stored inside (`stored_piece` is non-null in gam
 #### Top/Bottom Banners
 
 - One banner per team, pinned top (Blue) and bottom (Red)
-- Contains: "Team Red" / "Team Blue" label, King's HP bar (wide, prominent), active turn indicator
+- Contains: "Team Red" / "Team Blue" label, King's HP bar (wide, prominent), active turn indicator, **[Resign]** button (small, destructive-styled, always visible for the local player's banner)
+- **`whose_turn` field** in `GameDetail` uses lowercase `"red"` / `"blue"`. Compare against the local player's side to determine turn ownership.
 - **Metallic's turn state (PvB):** replace "Your Turn!" with a spinning Pokeball + "Metallic is thinking…" text; board squares subtly dim (50% opacity overlay) so the player knows not to tap. The wait can be up to 10s at Master difficulty — the animation must feel alive, not frozen.
+- Tapping **[Resign]** calls `POST /games/{game_id}/resign` and navigates to the Game Over screen with the opponent as winner.
 
 #### Right Sidebar — Contextual Info
 
@@ -259,9 +272,9 @@ When a Safetyball has a Pokemon stored inside (`stored_piece` is non-null in gam
 - **Move Legend**: always visible, five color swatches with one-word labels. Serves as a permanent reminder for new players.
 - **Last Move log**: single line, human-readable string of the most recent move event. Uses type color in the text ("Super Effective!" in orange, "Not Very Effective" in gray). Not a scrollable history — just the last event.
 
-#### Special Move Disambiguation (Mew and Eevee Evolution)
+#### Special Move Disambiguation (Mew, Pikachu, and Eevee Evolution)
 
-When the API returns multiple moves sharing the same target square, a **bottom-sheet picker** slides up ~200px from the bottom of the board. It never covers the full board.
+When the API returns multiple moves sharing the same `(piece_row, piece_col, target_row, target_col)` tuple — i.e. same piece and same destination but different `move_slot` or `action_type` values — a **bottom-sheet picker** slides up ~200px from the bottom of the board. It never covers the full board.
 
 **Mew attack picker** (up to 3 attack types + Foresight as one of the options):
 ```
@@ -275,7 +288,20 @@ When the API returns multiple moves sharing the same target square, a **bottom-s
 └─────────────────────────────────────┘
 ```
 
-Foresight is listed here as one of Mew's attack options (or Espeon's), not as a separate action type. Its cyan color distinguishes it in the picker. Selecting it works like any other attack — the cyan highlight on the board shows the pending target.
+Foresight is listed here as one of Mew's attack options (or Espeon's). In the legal moves list it appears as a separate `action_type: "FORESIGHT"` move; the picker merges it with the `ATTACK` options since they share the same target square. Its cyan color distinguishes it in the picker. Selecting it works like any other attack — the cyan highlight on the board shows the pending target.
+
+**Pikachu evolution picker** (one option only — triggers EVOLVE action):
+```
+┌─────────────────────────────────────────────┐
+│  Pikachu wants to evolve!                   │
+│                                             │
+│  [Raichu⚡]  (costs your turn)              │
+│                                             │
+│  [Cancel]                                   │
+└─────────────────────────────────────────────┘
+```
+
+Pikachu's `EVOLVE` move has no `move_slot` disambiguation — there is only one option (Raichu). Show this picker only when the player explicitly taps the gold evolution ring on Pikachu's cell. Cancelling returns to normal piece selection. The `EVOLVE` move payload has the piece's square as both source and target.
 
 **Eevee evolution picker** (up to 5 choices):
 ```
@@ -311,7 +337,7 @@ When `pending_foresight` is non-null in the game state for either team:
 Quick Attack requires selecting an attack target and then a post-attack move destination. Two-step flow:
 1. Player clicks the piece → attack squares (orange) and move squares (yellow) both appear
 2. Player clicks an attack target → board dims; only the valid post-attack move squares remain highlighted
-3. Player clicks a movement destination → move submits
+3. Player clicks a movement destination → move submits with `action_type: "QUICK_ATTACK"`, `target_row/col` = attack square, `secondary_row/col` = landing square
 4. A small "Step 1 of 2 — now pick where to move" hint appears in the right sidebar during step 2 so the player is never confused about what to do next
 
 ---
@@ -378,21 +404,46 @@ Once XP thresholds trigger an evolution, play an interstitial cutscene after the
 
 ---
 
+## API Integration Reference
+
+Key conventions for frontend ↔ backend communication:
+
+| Topic | Rule |
+|---|---|
+| **Auth** | Access token in `Authorization: Bearer <token>` header. Refresh token in httpOnly cookie; call `POST /auth/refresh` to rotate. |
+| **`whose_turn`** | Lowercase `"red"` \| `"blue"` in `GameDetail`. Compare to local player's side string to determine turn. |
+| **`active_player` in state** | Uppercase `"RED"` \| `"BLUE"` — same value, different casing. These two fields are in sync but formatted differently. |
+| **Move submission `action_type`** | Send uppercase engine enum names: `"MOVE"`, `"ATTACK"`, `"QUICK_ATTACK"`, `"POKEBALL_ATTACK"`, `"MASTERBALL_ATTACK"`, `"FORESIGHT"`, `"TRADE"`, `"EVOLVE"`, `"RELEASE"`. |
+| **History `action_type`** | Move history entries use lowercase: `"move"`, `"attack"`, `"quick_attack"`, `"pokeball_attack"`, `"masterball_attack"`, `"foresight"`, `"foresight_resolve"`, `"evolve"`, `"trade"`, `"release"`. |
+| **Piece IDs** | Named pieces (rooks, knights, bishops, queen, kings) carry a UUID string `id`. Pawns (Pokéballs, Safetyballs) always have `id: null`. Match pieces to roster entries by UUID. |
+| **Board coordinates** | 0-indexed, integers. Row 0 = Red's back rank. Flip rendering for Blue player so their back rank is at the bottom of the screen. |
+| **Legal moves request** | `GET /games/{id}/legal_moves?piece_row=R&piece_col=C` — pass integers. Returns `list[LegalMoveOut]`. |
+| **Move submission** | Submit one object from the legal moves list verbatim to `POST /games/{id}/move`. Do not modify field values. |
+| **Disambiguation trigger** | Show the bottom-sheet picker when multiple legal moves share the same `(piece_row, piece_col, target_row, target_col)` but differ in `move_slot` or `action_type`. |
+| **Active vs completed games** | `GET /games` returns `active` (no cap) and `completed` (capped at 10 most recently updated). |
+| **Game state board** | `state.board` contains only on-board pieces. Captured pieces are removed from the array — do not attempt to render them. |
+| **Foresight `resolves_on_turn`** | Absolute turn number stored in `pending_foresight[team].resolves_on_turn`. The persistent cyan glow should remain until that turn resolves. |
+| **XP source** | Read `xp_earned` and `xp_applied` from `game_pokemon_map` entries (returned via the completed `GameDetail` or a future `/games/{id}/xp` endpoint). Do not recompute on the client. |
+| **Error format** | All errors: `{ "error": "<code>", "detail": "<message>" }`. Key codes: `not_your_turn` (409), `illegal_move` (400), `game_not_active` (409), `engine_error` (503). |
+
+---
+
 ## UX Principles Applied
 
 | Problem | Solution |
 |---|---|
 | Kids don't know chess notation | No algebraic notation anywhere — everything is visual highlight on the board |
 | Too many possible actions | Right sidebar is fully contextual — only appears on click, shows only relevant info |
-| Bot latency (up to 3s per move) | Explicit "Bot thinking…" spinner + board grayout — no ambiguity about whose turn it is |
+| Bot latency (up to 10s at Master) | Explicit "Bot thinking…" spinner + board grayout — no ambiguity about whose turn it is |
 | Stochastic Pokeball outcome | Brief ball-wiggle animation before result reveal — makes randomness feel exciting |
-| Mew / Eevee multi-option moves | Bottom-sheet picker — preserves board context, minimal taps |
+| Mew / Pikachu / Eevee multi-option moves | Bottom-sheet picker — preserves board context, minimal taps |
 | Foresight is invisible between turns | Persistent cyan glow + eye badge on target square while pending |
 | HP is critical but clutters the board | Thin HP arc on the piece ring (always visible) + full bar in sidebar on selection |
 | Stored Pokemon inside a Safetyball | Small sprite badge on the ball's cell + stacked card in sidebar on hover |
 | Roster has more than 5 Pokemon | Scrollable card list, indexed by species number (#1, #2) |
 | Captured pieces state not in API | Captured pieces panel removed — not shown anywhere |
 | Evolution is a special moment | Flashy bottom-sheet picker for in-game evolution; post-game cutscene for XP-triggered evolution |
+| Player wants to quit mid-game | Resign button in local player's banner; calls `POST /games/{id}/resign` |
 
 ---
 
@@ -400,12 +451,14 @@ Once XP thresholds trigger an evolution, play an interstitial cutscene after the
 
 | # | Question | Decision |
 |---|---|---|
-| Q1 | Mew / Eevee multi-option move UI | Bottom-sheet picker. Mew: up to 4 options (3 attacks + Foresight). Eevee: 5 evolution sprites. |
+| Q1 | Mew / Eevee multi-option move UI | Bottom-sheet picker. Mew: up to 4 options (3 attacks + Foresight). Eevee: 5 evolution sprites. Pikachu: 1 option (Raichu), simple confirm sheet. |
 | Q2 | PvP scope | **PvP is in scope for v1.** Play vs Friend is a hard requirement. Friends + invite endpoints ship in v1. |
 | Q3 | Move response contract | Single GameDetail payload. "Metallic is thinking…" state (spinning Pokeball, dimmed board) covers wait time. |
 | Q4 | Legal moves in GameDetail | **Kept separate.** `GET /games/{id}/legal_moves` remains its own endpoint. GameDetail never embeds legal moves. |
 | Q5 | XP formula | XP = damage dealt by that piece this game. Display reads values from API — formula lives server-side only. |
 | Q6 | King/Queen evolution persistence | **Kings and Queen never persistently evolve.** Pikachu/Eevee always start fresh each game (in-game evolution only); Mew has no evolution. XP is tracked for all three but no evolution progress bar is shown. Only rooks, knights, and bishops evolve post-game. |
+| Q7 | Difficulty → API mapping | Each difficulty level corresponds to a separate bot row in the `bots` table. `POST /games` receives a `bot_id` UUID. No `time_budget` or `difficulty` field in the game creation request — time budget is baked into the bot row's `params` JSONB. |
+| Q8 | PvP invite flow | No join-by-code. Inviter picks from friends list (uses `user_id` UUID as `invitee_id`). Invitee sees invite on `GET /game-invites` poll and accepts via `PUT /game-invites/{id}`. |
 | Orientation | Primary target | Tablet and phone. Portrait is primary; landscape is secondary. Board fills width in portrait; collapsible bottom drawer for contextual info. |
 | Difficulty | Selector levels | Easy (0.5s) / Medium (1.5s) / Hard (3s) / Expert (5s) / Master (10s). Selected before game creation. Flavour text per tier. |
 | Sound | v1 scope | Simple sound effects in v1 (piece tap, move placement, attack hit, Pokeball shake, evolution sting, win/loss). Audio architecture must be extensible (volume controls, mute, easy asset swap) without blocking v1 delivery. Sound is a future-enhancement surface — do not let audio scope creep delay the core gameplay build. |
