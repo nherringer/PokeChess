@@ -31,8 +31,9 @@ app/
 ## Key imports from shared engine
 
 ```python
-from engine import GameState, get_legal_moves, apply_move, is_terminal
-# GameState.from_dict(json) / GameState.to_dict() are the serialization boundary
+from engine.state import GameState
+from engine.moves import get_legal_moves
+from engine.rules import apply_move, is_terminal
 ```
 
 The `engine/` package is copied into this container at build time (see `Dockerfile.app`). Do not add `bot/` or `cpp/` imports here — those are engine-container-only.

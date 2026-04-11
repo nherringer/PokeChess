@@ -22,7 +22,7 @@ from fastapi import Request
 from .main import AppError
 
 # Cap engine HTTP wait so a bad DB bot_params.time_budget cannot hold row locks unbounded.
-_MAX_BOT_TIME_BUDGET = 30.0
+_MAX_BOT_TIME_BUDGET = 10.0
 _MIN_BOT_TIME_BUDGET = 0.1
 
 

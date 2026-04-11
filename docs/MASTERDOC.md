@@ -240,7 +240,7 @@ The app sends (`app/engine_client.py`):
 }
 ```
 
-`time_budget` is **seconds**, possibly **divided by N** active players for load-aware budgeting (Section 9.2). Extra keys in `persona_params` are forwarded for future engine tuning. Values are **clamped** to `[0.1, 30.0]` before the HTTP call.
+`time_budget` is **seconds**, possibly **divided by N** active players for load-aware budgeting (Section 9.2). Extra keys in `persona_params` are forwarded for future engine tuning. Values are **clamped** to `[0.1, 10.0]` before the HTTP call.
 
 The engine must return a **flat** JSON object the app can pass into `Move(...)`:
 
@@ -430,9 +430,22 @@ Use **git history** on `docs/` (e.g. `git log -- docs/`) to see what changed rec
 | **Frontend UX copy** | Occasional “~3s” bot wait vs **10s** Master tier — treat **10s** as worst case for UX. |
 | **Engine doc typos** | “PvP vs engine” should read **PvB** — engine is never used for human-vs-human. |
 | **Engine image won’t start** | **`bot/server.py` missing**; `Dockerfile.engine` expects it — see Section 9.1 and TL;DR. |
+| **`FOR UPDATE` lock held across engine HTTP** | `POST /games/{id}/move` holds a Postgres row lock for the full engine round-trip (up to `time_budget + 5 s`, max 15 s after the cap was lowered to 10 s). Under concurrent PvB load this risks lock contention and connection pool exhaustion. Fix requires splitting into two transactions (read/validate → release lock → call engine → re-acquire → persist); deferred until pre-production load testing. |
 
 ---
 
-## 14. Application README
+## 14. Near-term engineering tasks (pre-production)
+
+Items that are known, scoped, and should be resolved before the service sees real traffic. These are not blockers for local development or PvP, but are important before public launch.
+
+| Priority | Task | Detail |
+|----------|------|---------|
+| **High** | **Add auth rate limiting** | `/auth/login` and `/auth/register` have no rate limiting or lockout. Add `slowapi` middleware or configure reverse-proxy limits before exposing to the public internet. Credential stuffing and registration spam are the primary risks. |
+| **High** | **Resolve `FOR UPDATE` lock across engine HTTP** | See §13. Splitting `POST /games/{id}/move` into two transactions removes the scalability risk. Requires careful re-validation between transactions to handle concurrent resigns. |
+| **Medium** | **Document first-run DB setup** | `docker compose up` does not apply `app/db/schema.sql`. Add an explicit copy-paste `psql` command to `app/README.md` and/or a Compose init container so new contributors aren't blocked. |
+
+---
+
+## 15. Application README
 
 For a short pointer into the `app/` tree and import conventions, see [app/README.md](../app/README.md).
