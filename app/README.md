@@ -5,7 +5,8 @@ This directory contains the app server container (`pokechess-app`). It is the on
 ## Before implementing anything, read these docs
 
 - **[`docs/MASTERDOC.md`](../docs/MASTERDOC.md)** — **Start here:** unified overview of the monorepo, runtime, links to all deep dives, and known doc gaps.
-- **[`docs/pokechess_data_model.md`](../docs/pokechess_data_model.md)** — Full Postgres schema, canonical `games.state` and `games.move_history` JSON shapes, HTTP API models, and the move lifecycle flow. Ground truth for data structures and request/response shapes (replaces the removed `api_spec.md`).
+- **[`docs/api_spec.md`](../docs/api_spec.md)** — **HTTP API contract:** methods, auth, request/response semantics, status codes, and error shapes (use with `app/schemas.py` for field types and `app/routes/` for behavior).
+- **[`docs/pokechess_data_model.md`](../docs/pokechess_data_model.md)** — Full Postgres schema, canonical `games.state` and `games.move_history` JSON shapes, and the move lifecycle flow.
 - **[`docs/implementation_roadmap.md`](../docs/implementation_roadmap.md)** — Agreed architecture, container responsibilities, engine API summary, prioritized checklist, and open questions.
 
 ## What goes here

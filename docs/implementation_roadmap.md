@@ -217,7 +217,7 @@ For a single target square, **Mew** can yield up to three distinct legal moves (
 The data model includes `game_invites`, friends flows, and a pending → active game transition. The **backend checklist** in this doc currently emphasized **PvB** (`POST /games`) and did not enumerate invite/friends endpoints.
 
 **✅ Resolved — PvP is in scope for v1. Play vs Friend is a hard requirement.**  
-`GET/POST /friends`, `GET/POST/PATCH /game-invites`, and the pending → active game transition must all ship in v1. The app backend checklist below has been updated accordingly. See `docs/api_spec.md` for the full endpoint contracts.
+`GET/POST /friends`, `GET/POST/PUT /game-invites`, and the pending → active game transition must all ship in v1. The app backend checklist below has been updated accordingly. See `docs/api_spec.md` for the full endpoint contracts.
 
 ### Q3. `POST /games/{id}/move` response (polling vs. single payload)
 
