@@ -33,7 +33,11 @@ logger = logging.getLogger(__name__)
 # Module-level process state (initialised in lifespan)
 # ---------------------------------------------------------------------------
 
-global_tt: TranspositionTable = TranspositionTable()
+# Read desired slot count from env.  Default 1M (16 MB) is safe for dev/tests.
+# Set POKECHESS_TT_SIZE=67108864 (64M, ~1 GB) in production.
+_tt_size: int = int(os.environ.get("POKECHESS_TT_SIZE", 1 << 20))
+
+global_tt: TranspositionTable = TranspositionTable(size=_tt_size)
 request_count: int = 0
 sync_queue: Optional[TTSyncQueue] = None
 
