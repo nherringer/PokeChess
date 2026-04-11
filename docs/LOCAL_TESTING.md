@@ -2,116 +2,176 @@
 
 Two modes: **Partial** (no bot — PvP only) and **Full** (with bot — PvP + PvB).
 
----
-
-## Prerequisites
-
-- Docker + Docker Compose
-- Python 3.12+ with a venv at `PokeChess/.venv` (or `pip install -r app/requirements.txt`)
-- Node 20+ (for frontend)
-- `psql` CLI
-
-All commands assume your working directory is `PokeChess/` unless noted.
+For automated setup, see [Makefile commands](#makefile-commands) at the bottom.
 
 ---
 
-## 1. Partial Integration Testing (no bot server)
+## Installation (macOS)
 
-Tests: auth, PvP games, friends, invites, roster. PvB game creation will fail at the move submission step (engine unreachable), but everything else works.
+Do this once before anything else.
 
-### Step 1 — Start Postgres
+### 1. Homebrew
+
+The package manager used for everything below.
 
 ```bash
-docker compose up postgres -d
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
 
-Wait a few seconds for it to be healthy (`docker compose ps` should show `healthy`).
+Follow the printed instructions to add `brew` to your PATH (the installer tells you exactly what to run).
 
-### Step 2 — Apply the DB schema
+### 2. Docker Desktop
+
+Manages all containers and includes Docker Compose.
 
 ```bash
-psql postgresql://pokechess:pokechess@localhost:5432/pokechess -f app/db/schema.sql
+brew install --cask docker
 ```
 
-This also seeds the `Metallic` bot row. Run once; re-running against an existing DB will error on duplicate constraints — that's fine, schema is already applied.
-
-### Step 3 — Run the app server
+Then open **Docker Desktop** from Applications and let it finish starting. Verify:
 
 ```bash
-source .venv/bin/activate
-uvicorn app.main:app --reload --port 8000
+docker --version
+docker compose version
 ```
 
-The app starts fine without the engine running. Any request that triggers a bot move will return a `503 engine_unavailable` — all non-PvB routes are unaffected.
+### 3. Make
 
-Verify: `curl http://localhost:8000/health` → `{"status":"ok"}`
-
-### Step 4 — Run the frontend
+Ships with Xcode Command Line Tools (likely already installed). If `make` is not found:
 
 ```bash
-cd frontend
-npm run dev
+xcode-select --install
 ```
 
-Frontend runs at **http://localhost:3000** and talks to the app at `http://localhost:8000` (set in `.env.local`).
+### 4. Python 3.12+
 
-### Teardown
+The project venv uses Python 3.14. Install via Homebrew:
 
 ```bash
-# Stop app (Ctrl+C) and frontend (Ctrl+C), then:
-docker compose down         # stops postgres, keeps volume
-docker compose down -v      # stops postgres AND wipes the DB volume
+brew install python@3.14
+```
+
+> Any 3.12+ will work. Use `python3.14` (or `python3.12`, etc.) explicitly in the venv command below.
+
+### 5. Node 20+
+
+```bash
+brew install node@20
+brew link node@20 --force
+```
+
+Verify: `node --version` should print `v20.x.x` or higher.
+
+### 6. Set up the Python venv
+
+From the `PokeChess/` directory:
+
+```bash
+python3.14 -m venv .venv
+.venv/bin/pip install -r app/requirements.txt
+```
+
+### 7. Install frontend dependencies
+
+```bash
+cd frontend && npm install && cd ..
+```
+
+### Done
+
+Verify everything is in order:
+
+```bash
+docker --version          # Docker version 27+
+make --version            # GNU Make 3.81+
+.venv/bin/python --version  # Python 3.14+
+node --version            # v20+
 ```
 
 ---
 
-## 2. Full Integration Testing (with bot — PvP + PvB)
+## Prerequisites summary
+
+- Docker Desktop running
+- `.venv/` set up with `pip install -r app/requirements.txt`
+- `frontend/node_modules/` populated via `npm install`
+
+No local `psql` required — schema is applied via `docker compose exec`.
+
+---
+
+## Local vs. AWS: secrets and gotchas
+
+| Config | Local (dev) | AWS (prod) |
+|--------|-------------|------------|
+| `DATABASE_URL` | `postgresql+asyncpg://pokechess:pokechess@localhost:5432/pokechess` | RDS endpoint + Secrets Manager credentials |
+| `ENGINE_URL` | `http://localhost:5001` | `http://localhost:5001` — **same**: ECS uses `network_mode=host` |
+| `SECRET_KEY` | dev default (hardcoded, warns on startup) | Secrets Manager injected via ECS task env |
+| `CORS_ORIGINS` | `*` (allowed when `ENVIRONMENT=development`) | Must be explicit domain — app raises `RuntimeError` if `*` and not development |
+| `ENVIRONMENT` | `development` (default) | Must be set to `production` to enforce CORS + `Secure` cookie flag |
+| `S3_TREE_BUCKET` / `AWS_DEFAULT_REGION` | Not needed — engine skips TT backup | Set in ECS task def for the engine container |
+
+**Specific gotchas:**
+
+1. **RDS requires SSL.** `asyncpg_dsn()` in `app/config.py` strips the SQLAlchemy prefix but adds no SSL params. The prod `DATABASE_URL` will need `?ssl=require` appended (or set via asyncpg connection kwargs) — this is not wired up yet.
+
+2. **Refresh token cookie `Secure` flag.** `auth.py` sets `secure=config.ENVIRONMENT != "development"`. Locally this is `False` (works over HTTP). In prod it's `True` (HTTPS only). If you test with `ENVIRONMENT=production` locally over plain HTTP, login/register will silently fail to set the refresh cookie.
+
+3. **`ENGINE_URL` is the same everywhere.** Both local full-stack and prod ECS run the app and engine on the same host (`network_mode=host`), so `http://localhost:5001` works identically. No env var change needed when moving to prod.
+
+4. **DB schema is not auto-applied.** Must be run manually after first `docker compose up`, both locally and on RDS after provisioning.
+
+5. **Bot UUID is random on each schema apply.** `app/db/schema.sql` seeds `Metallic` with `gen_random_uuid()`. The frontend hardcodes bot IDs in `lib/constants.ts` (all empty). Until a `GET /bots` endpoint ships, you must look up the UUID after applying the schema and fill in `BOT_IDS` manually (see `make bot-id`).
+
+---
+
+## 1. Partial Integration Testing (no bot — PvP only)
+
+Tests: auth, PvP games, friends, invites, roster. PvB move submission returns `503 engine_unavailable` — all other routes are unaffected.
+
+**Terminal 1 — postgres + app:**
+```bash
+make partial        # starts postgres, waits for healthy, applies schema
+make app            # starts uvicorn on :8000 (foreground)
+```
+
+**Terminal 2 — frontend:**
+```bash
+make frontend       # starts Next.js on :3000 (foreground)
+```
+
+Verify the app is up: `curl http://localhost:8000/health` → `{"status":"ok"}`
+
+**Teardown:**
+```bash
+make down           # stops postgres, keeps DB volume
+make reset          # stops postgres AND wipes DB volume (full clean slate)
+```
+
+---
+
+## 2. Full Integration Testing (PvP + PvB)
 
 > **Blocked until `bot/server.py` is implemented.** See `docs/implementation_roadmap.md`.
 
-`Dockerfile.engine` runs `uvicorn bot.server:app --host 0.0.0.0 --port 5001`. That module does not yet exist.
+`Dockerfile.engine` runs `uvicorn bot.server:app`. That module does not exist yet — the engine container crashes on start.
 
-### When `bot/server.py` is ready:
+**When `bot/server.py` is ready:**
 
-### Step 1 — Build and start all services
-
+**Terminal 1 — all services:**
 ```bash
-docker compose up --build
+make full           # docker compose up --build (all 3 services), applies schema
 ```
 
-This starts `postgres`, `pokechess-engine` (port 5001), and `pokechess-app` (port 8000) together. The app waits for postgres to be healthy before starting.
-
-### Step 2 — Apply the DB schema
-
+**Terminal 2 — frontend:**
 ```bash
-psql postgresql://pokechess:pokechess@localhost:5432/pokechess -f app/db/schema.sql
+make bot-id         # prints the seeded Metallic UUID — paste into frontend/lib/constants.ts BOT_IDS
+make frontend       # starts Next.js on :3000 (foreground)
 ```
 
-### Step 3 — Wire up the bot ID in the frontend
-
-The `Metallic` bot is seeded with a random UUID on schema apply. The frontend hardcodes bot IDs in `lib/constants.ts` (all empty until filled in). Until a `GET /bots` endpoint ships, you must look up the UUID manually:
-
+**Teardown:**
 ```bash
-psql postgresql://pokechess:pokechess@localhost:5432/pokechess \
-  -c "SELECT id FROM bots WHERE name = 'Metallic';"
-```
-
-Paste that UUID into all five `BOT_IDS` entries in `frontend/lib/constants.ts`.
-
-### Step 4 — Run the frontend
-
-```bash
-cd frontend
-npm run dev
-```
-
-Frontend at **http://localhost:3000**. All game modes (PvP and PvB) should now be testable.
-
-### Teardown
-
-```bash
-docker compose down         # keeps postgres volume
-docker compose down -v      # wipes postgres volume (full reset)
+make down           # or make reset for full wipe
 ```
 
 ---
@@ -119,10 +179,25 @@ docker compose down -v      # wipes postgres volume (full reset)
 ## Unit / pytest tests (no Docker needed)
 
 ```bash
-source .venv/bin/activate
-pytest                          # all tests
-pytest tests/test_moves.py      # single file
-pytest tests/test_moves.py::test_name -v   # single test
+make test           # all tests
+make test-v         # verbose
 ```
 
-The test suite covers engine logic, MCTS, and app game logic. No Postgres or engine server required.
+Covers engine logic, MCTS, and app game logic. No Postgres or engine server required.
+
+---
+
+## Makefile commands
+
+| Command | What it does |
+|---------|-------------|
+| `make partial` | Start postgres, wait for healthy, apply schema |
+| `make full` | `docker compose up --build` all services, apply schema |
+| `make app` | Run uvicorn app server on :8000 (foreground) |
+| `make frontend` | Run Next.js dev server on :3000 (foreground) |
+| `make schema` | Apply `app/db/schema.sql` (re-run safe — errors on existing objects are non-fatal) |
+| `make bot-id` | Print the seeded Metallic bot UUID from the DB |
+| `make test` | Run pytest |
+| `make test-v` | Run pytest verbose |
+| `make down` | `docker compose down` (keeps volume) |
+| `make reset` | `docker compose down -v` (wipes DB volume) |
