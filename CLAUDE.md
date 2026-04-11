@@ -68,7 +68,7 @@ docs/       Game design PDFs (rules, piece movement diagrams, board sheets)
 
 ## Game Rules Summary
 
-See `docs/Rules.pdf` and `docs/PieceMovement.pdf` for full rules. Key points:
+See `docs/Rules.md` and `docs/PieceMovement.pdf` for full rules. Key points:
 - Standard chess rules apply except no en passant, no castling
 - Red (Pikachu) moves first. Blue (Eevee) moves second.
 - Pieces have HP and typed moves. Attacker stays put unless it KOs the target.

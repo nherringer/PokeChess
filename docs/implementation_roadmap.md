@@ -1,6 +1,6 @@
 # PokeChess — Architecture & Implementation Roadmap
 
-**Status:** App backend implemented and runnable; engine container still needs `bot/server.py` (HTTP API).  
+**Status:** Fully implemented — app backend and engine container (`bot/server.py`) both complete and runnable.  
 **Last updated:** April 2026
 
 ---
@@ -48,7 +48,7 @@ The dependency arrow is one-way: `bot/` and `app/` both import `engine/`; `engin
 | Terminal detection | `pokechess-app` | `is_terminal(state)` from `engine/` |
 | Legal move serving (frontend) | `pokechess-app` | `get_legal_moves()`, filtered by piece |
 | MCTS bot move selection | `pokechess-engine` | `MCTS.select_move(state)` via `POST /move` |
-| State persistence | `pokechess-app` | Postgres JSONB via `GameState.to_dict()` / `from_dict()` |
+| State persistence | `pokechess-app` | Postgres JSONB via `app/game_logic/serialization.state_to_dict()` / `state_from_dict()` |
 | XP attribution | `pokechess-app` | Reads `move_history`, writes `game_pokemon_map` + `pokemon_pieces` |
 
 The engine container is called **only for PvB games, only to get the bot's move**. It is stateless with respect to game logic. The app applies every move (human and bot) itself.

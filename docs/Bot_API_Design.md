@@ -1,6 +1,6 @@
 # Bot API Design
 
-**Status:** Approved, pre-implementation  
+**Status:** Implemented (Phases 1–2 complete; Phase 3 / PGN notation deferred)  
 **Authors:** nherringer  
 **Audience:** ML bot team + frontend/async team
 

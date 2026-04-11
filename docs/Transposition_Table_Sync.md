@@ -172,9 +172,9 @@ The external interface (`get()`, `update()`, `save()`, `load()`, `__len__()`) is
 
 ## TT Versioning
 
-The S3 key includes a version integer: `tt_v{TT_VERSION}.bin`.
+The S3 key includes a version integer: `tt_v{version}.bin`, where `version` is read from the `POKECHESS_TT_VERSION` environment variable (default: `"1"`).
 
-`TT_VERSION` is a module-level constant in `bot/tt_store.py`. When a rules change invalidates existing stats, bump this constant and redeploy. The old key is left in S3 (cheap storage, useful audit trail) and the bot starts fresh with an empty TT under the new key.
+To invalidate existing stats after a rules change, set `POKECHESS_TT_VERSION` to a new integer in the task/container environment and redeploy. The old key is left in S3 (cheap storage, useful audit trail) and the bot starts fresh with an empty TT under the new key.
 
 No metadata or header is stored inside the binary file itself — versioning lives entirely in the key name.
 
@@ -243,7 +243,7 @@ On process startup, the bot resolves its initial TT state using the following pr
       YES → load into global_tt, done.
        NO → continue
 
-2. S3 key tt_v{TT_VERSION}.bin exists in POKECHESS_TT_BUCKET?
+2. S3 key tt_v{POKECHESS_TT_VERSION}.bin exists in POKECHESS_TT_BUCKET?
       YES → download to POKECHESS_TT_LOCAL_PATH, load into global_tt, done.
        NO → continue
 
@@ -289,7 +289,7 @@ The app **does not** trigger TT backups and has no visibility into the TT. All p
 
 **Production uses an ECS task role. `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are never set in the production engine task.**
 
-How it works: an IAM role is attached to the `pokechess-engine` ECS task definition. The role's policy grants `s3:GetObject`, `s3:PutObject`, and `s3:HeadObject` on the TT bucket. When the engine container starts on the EC2 instance, boto3 automatically fetches short-lived temporary credentials from the EC2 instance metadata service (IMDSv2) — no secrets to manage, no rotation needed, no credentials in environment variables or config files.
+How it works: an IAM role is attached to the `pokechess-engine` ECS task definition. The role's policy grants `s3:GetObject`, `s3:PutObject`, and `s3:HeadObject` on the TT bucket. boto3 resolves credentials automatically via the default credential chain — on ECS on EC2 this is the EC2 instance metadata service (IMDSv2); on ECS Fargate this is the ECS task metadata endpoint. Either way, no secrets to manage, no rotation needed, and no credentials in environment variables or config files.
 
 Steps to wire up at deploy time:
 1. Create an IAM role (e.g. `pokechess-engine-task-role`) with a trust policy allowing `ecs-tasks.amazonaws.com`.
@@ -312,7 +312,7 @@ Steps to wire up at deploy time:
 | Backup round-trip | Save TT → upload → download → load → stats match original | Implemented |
 | Queue deduplication | Enqueueing twice while worker is busy results in one upload, not two | Implemented |
 | Drain on shutdown | `drain()` blocks until in-flight backup completes | Implemented |
-| Version isolation | Changing `TT_VERSION` targets a different S3 key; old stats not loaded | Implemented |
+| Version isolation | Changing `POKECHESS_TT_VERSION` targets a different S3 key; old stats not loaded | Implemented |
 | Array round-trip | Fixed-size array TT: save (sparse) → load → stats match for populated entries | Pending (array TT refactor) |
 | Threshold protection | Entry with ≥ `EVICT_THRESHOLD` visits is not displaced by a colliding hash | Pending |
 | Below-threshold eviction | Entry with < `EVICT_THRESHOLD` visits is displaced; new entry is stored correctly | Pending |

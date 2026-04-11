@@ -1,4 +1,4 @@
-Here's the revised v1 plan:
+# PokeChess — Architecture Decision (v1)
 
 ---
 
