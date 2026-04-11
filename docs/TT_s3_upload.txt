@@ -1,6 +1,10 @@
-Status: Approved, pre-implementation
+Status: SUPERSEDED — see docs/Transposition_Table_Sync.md for the current design.
+        Key differences from this doc: (1) the worker does a simple save+upload
+        rather than a download-merge cycle; (2) there is no game-end sync trigger
+        (backups fire every 50 POST /move requests); (3) TT_VERSION is not a
+        module constant — it is read from the POKECHESS_TT_VERSION env var.
 Authors: nherringer
-Audience: ML bot team
+Audience: ML bot team (historical reference only)
 
 Overview
 The transposition table (TT) maps Zobrist hashes to (wins, visits) statistics accumulated across games. It is the bot's inter-game learning mechanism. This document covers the design for pulling the TT from remote storage on startup and pushing updated stats back at regular intervals and at game end.
@@ -21,7 +25,7 @@ Concurrency safety: serialize uploads within a process to prevent races
 TT Versioning
 The S3 key includes a version integer: tt_v{TT_VERSION}.bin.
 
-TT_VERSION is a module-level constant in bot/tt_store.py. When a rules change invalidates existing stats, bump this constant and redeploy. The old key is left in S3 (cheap storage, useful audit trail) and the bot starts fresh with an empty TT under the new key.
+TT_VERSION was originally planned as a module-level constant in bot/tt_store.py, but the implementation uses the POKECHESS_TT_VERSION environment variable instead. When a rules change invalidates existing stats, update this env var and redeploy. The old key is left in S3 (cheap storage, useful audit trail) and the bot starts fresh with an empty TT under the new key.
 
 No metadata or header is stored inside the binary file itself — versioning lives entirely in the key name.
 

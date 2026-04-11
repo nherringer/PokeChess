@@ -47,6 +47,19 @@ class Move:
     # Which move slot Mew is using (0-3), None for all others
     move_slot: Optional[int] = None
 
+    def to_dict(self) -> dict:
+        """Serialize this Move to a flat wire-format dict. Optional fields are null when absent."""
+        return {
+            "piece_row": self.piece_row,
+            "piece_col": self.piece_col,
+            "action_type": self.action_type.name,
+            "target_row": self.target_row,
+            "target_col": self.target_col,
+            "secondary_row": self.secondary_row,
+            "secondary_col": self.secondary_col,
+            "move_slot": self.move_slot,
+        }
+
 
 # --- movement geometry ---
 

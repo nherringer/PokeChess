@@ -28,7 +28,7 @@
 - **Code:** **One monorepo**: `engine/` (pure rules), `app/` (FastAPI + Postgres), `bot/` + `cpp/` (MCTS + optional C++ rollout in the engine image). **Two Docker images** (`Dockerfile.app`, `Dockerfile.engine`) built from the same repo.
 - **Truth for HTTP:** **[api_spec.md](api_spec.md)** (methods, bodies, status codes, errors); **`app/schemas.py`** (Pydantic field types); **`app/routes/`** (handler behavior); **[pokechess_data_model.md](pokechess_data_model.md)** (`games.state` / `move_history` JSON). At runtime, **`/openapi.json`** and **`/docs`** (Swagger UI).
 - **Local dev:** `docker-compose.yml` + env (`DATABASE_URL`, `ENGINE_URL`, `SECRET_KEY`, etc.). **Target production:** two ECS services on one small EC2 instance ([architecture_design_plan.md](architecture_design_plan.md)).
-- **Engine HTTP container:** The app is ready to call `POST /move`, but **`bot/server.py` is not in the repo yet** and **`Dockerfile.engine`** still expects `uvicorn bot.server:app` — the engine image **does not start** until that module exists ([implementation_roadmap.md](implementation_roadmap.md)). PvB bot moves need a running engine matching `ENGINE_URL`.
+- **Engine HTTP container:** `bot/server.py` exists and is functional. `Dockerfile.engine` wires to `uvicorn bot.server:app`. The engine image builds and runs. PvB bot moves are unblocked end-to-end — see [implementation_roadmap.md](implementation_roadmap.md) for remaining polish items.
 
 ---
 
@@ -352,9 +352,9 @@ Append-only list of turns. **Snake_case `action_type`** strings in history (`att
 
 ### 9.1 MCTS engine container
 
-- **Bot code:** `bot/mcts.py` etc.; optional **C++** rollout in `cpp/` for speed.
-- **HTTP surface (repo state):** The app’s client (`app/engine_client.py`) describes **`POST /move`** with `{ "state", "persona_params" }`. **`bot/server.py` does not exist in the tree yet** — there is no FastAPI app under `bot/` to run. **`Dockerfile.engine`** is wired to `uvicorn bot.server:app` (see repo root Dockerfile), so **building and running that image as-is will fail** until `bot/server.py` (or an equivalent module path) is added. [implementation_roadmap.md](implementation_roadmap.md) tracks this as blocking for production PvB. **PvP never needs the engine.**
-- **Persistence:** There is **no** app-triggered **`POST /backup`** or app-orchestrated engine backup. Transposition tables and other bot-side state are **owned by the bot server** inside the engine container (e.g. **local SQLite**), not RDS — see [architecture_design_plan.md](architecture_design_plan.md) and [app_and_engine_communication.md](app_and_engine_communication.md).
+- **Bot code:** `bot/mcts.py`, `bot/server.py` (FastAPI), `bot/transposition.py` (fixed-size array TT), `bot/tt_store.py` (S3 backup); optional **C++** rollout in `cpp/` for speed.
+- **HTTP surface (repo state):** `bot/server.py` implements `POST /move` and `GET /health`. The engine image builds and runs. App calls it via `app/engine_client.py`.
+- **Persistence:** There is **no** app-triggered **`POST /backup`** or app-orchestrated engine backup. The transposition table is stored as a local `.bin` file inside the engine container and optionally backed up to S3 (`POKECHESS_TT_BUCKET`). The app has no visibility into TT state — see [Transposition_Table_Sync.md](Transposition_Table_Sync.md).
 - **Future:** `engine/notation.py` for PokeChess-PGN replay/analysis (not required for Postgres).
 
 ### 9.2 Load-aware budgeting (implemented in app)
@@ -384,7 +384,7 @@ This is the **intended** production shape, not a guarantee about your current la
 - **Repo:** Monorepo builds **two** images → push to **ECR** → **ECS** on a single **EC2 t4g.small** (cost estimates in [architecture_design_plan.md](architecture_design_plan.md)).
 - **Services:** `pokechess-app` (public HTTP, port 8000), `pokechess-engine` (internal, port 5001, not exposed publicly). On the **same EC2 host**, the app calls the engine at **`ENGINE_URL`** (typically **`http://localhost:5001`**, matching [`app/engine_client.py`](../app/engine_client.py) and compose).
 - **Browser → app:** HTTP polling (or SSE later); latency on the order of seconds is acceptable.
-- **App → engine:** **`POST /move` only** — payload `{ "state", "persona_params" }` per `engine_client.py`. **No** app-triggered backup endpoint; bot-side persistence (e.g. TT in **local SQLite**) stays inside the engine process.
+- **App → engine:** **`POST /move` only** — payload `{ "state", "persona_params" }` per `engine_client.py`. **No** app-triggered backup endpoint; bot-side TT persistence (in-memory array + local `.bin` + optional S3) stays inside the engine process — see `docs/Transposition_Table_Sync.md`.
 - **DB:** **Amazon RDS (PostgreSQL)** for **all** app tables — the FastAPI app is the only service using `DATABASE_URL` / RDS. The engine **does not** connect to RDS.
 - **Frontend assets:** React/Next on S3 + CloudFront when a client exists (static assets only; unrelated to engine TT storage).
 - **Concurrency / queue:** The engine target is a **queue**: **one MCTS search at a time** per instance, with requests waiting when busy — [architecture_design_plan.md](architecture_design_plan.md). Pair with load-aware **`time_budget`** scaling in the app ([load_aware_budgeting.md](load_aware_budgeting.md)).
@@ -429,7 +429,7 @@ Use **git history** on `docs/` (e.g. `git log -- docs/`) to see what changed rec
 | **Data model move lifecycle** | One step may mention updating `species` mid-game; Q6 decisions say kings/queen immutable, other pieces post-game — reconcile wording in [pokechess_data_model.md](pokechess_data_model.md) when editing. |
 | **Frontend UX copy** | Occasional “~3s” bot wait vs **10s** Master tier — treat **10s** as worst case for UX. |
 | **Engine doc typos** | “PvP vs engine” should read **PvB** — engine is never used for human-vs-human. |
-| **Engine image won’t start** | **`bot/server.py` missing**; `Dockerfile.engine` expects it — see Section 9.1 and TL;DR. |
+| **Engine image ready** | `bot/server.py` implemented; `Dockerfile.engine` builds and runs. |
 | **`FOR UPDATE` lock held across engine HTTP** | `POST /games/{id}/move` holds a Postgres row lock for the full engine round-trip (up to `time_budget + 5 s`, max 15 s after the cap was lowered to 10 s). Under concurrent PvB load this risks lock contention and connection pool exhaustion. Fix requires splitting into two transactions (read/validate → release lock → call engine → re-acquire → persist); deferred until pre-production load testing. |
 
 ---

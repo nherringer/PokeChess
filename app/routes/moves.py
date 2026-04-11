@@ -223,7 +223,15 @@ async def submit_move(
     request: Request,
 ):
     async with db.transaction():
-        # FOR UPDATE lock prevents concurrent move application
+        # FOR UPDATE lock on the game row is held for the full duration of this
+        # transaction, including the async bot HTTP call (up to engine_timeout +
+        # MCTS time_budget, potentially ~10s at max difficulty). This is
+        # intentional: it guarantees that state reads, move application, and the
+        # final write are atomic and that no two moves can be applied to the same
+        # game concurrently. At current scale (single EC2 box, one game per
+        # user) the tail-latency impact is acceptable. If concurrent PvP volume
+        # grows, consider splitting into two transactions with an optimistic
+        # re-check before the bot call.
         game = await game_q.get_game_for_move(db, game_id)
         if game is None:
             raise AppError(404, "not_found", "Game not found")
