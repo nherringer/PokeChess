@@ -30,7 +30,7 @@ pokechess/                      ← single repo (rename from PokeChess-engine �
     db/                         ← ✓ schema.sql + query modules
   tests/                        ← ✓ exists (engine, bot, app game logic / serialization)
   docs/                         ← ✓ exists
-  Dockerfile.engine             ← ✓ created (still blocked on `bot/server.py` — CMD references `uvicorn bot.server:app`)
+  Dockerfile.engine             ← ✓ created and runnable (CMD `uvicorn bot.server:app` — `bot/server.py` implemented)
   Dockerfile.app                ← ✓ created (`app/main.py` runnable)
   docker-compose.yml            ← ✓ created
 ```
@@ -137,11 +137,10 @@ See `docs/pokechess_data_model.md` for full JSON examples.
 
 **Engine container:**
 
-4. ~~**Write `Dockerfile.engine`**~~ ✓ Done — see `Dockerfile.engine` at repo root. Includes optional C++ extension build with pure-Python fallback. **Still not runnable** until `bot/server.py` exists (see below).
+4. ~~**Write `Dockerfile.engine`**~~ ✓ Done — see `Dockerfile.engine` at repo root. Includes optional C++ extension build with pure-Python fallback. Runnable now that `bot/server.py` exists.
 
-5. **Write `bot/server.py`** — FastAPI wrapper around `MCTS.select_move()`  
-   `POST /move`: accept **`{ "state": dict, "persona_params": { "time_budget": float, ... } }`** (same as [`app/engine_client.py`](../app/engine_client.py)); deserialize with **`state_from_dict()` from `app/game_logic/serialization.py`** (or duplicate minimal codec in engine image — today serialization lives under `app/`). Run MCTS, return the best move as a **flat** JSON move object. **Bot-side** persistence (e.g. transposition tables in **local SQLite**) is handled **inside the engine / bot server** — **not** RDS, **no** app-triggered `POST /backup`.  
-   Estimated: 2–3 hours. **Blocks PvB bot moves in production** (app already calls the engine over HTTP via `app/engine_client.py`).
+5. ~~**Write `bot/server.py`**~~ ✓ Done — FastAPI app: `POST /move` (deserialize state via `GameState.from_dict()`, run MCTS, return flat move dict), `GET /health`. Global TT loaded from local file or S3 on startup; backed up to S3 every 50 requests via `TTSyncQueue`. See `docs/Transposition_Table_Sync.md`.  
+   Also done: `bot/tt_store.py` (TTStore S3 wrapper + TTSyncQueue background thread), `engine/state.py` (`GameState.from_dict()`), `engine/moves.py` (`Move.to_dict()`), full test coverage in `tests/test_api.py`, `tests/test_tt_store.py`, `tests/test_serialization.py`.
 
 6. **Wire `iteration_budget` into `MCTS.select_move()`** (currently only `time_budget` is implemented)  
    Optional for v1 but listed in `bots.params` spec.

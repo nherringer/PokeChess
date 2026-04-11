@@ -36,6 +36,7 @@ services:
     #   POKECHESS_TT_BUCKET: <your-s3-bucket-name>
     #   POKECHESS_TT_VERSION: "1"          # bump when a rules change invalidates TT stats
     #   POKECHESS_TT_LOCAL_PATH: "transposition_table.bin"   # default; can omit
+    #   POKECHESS_TT_SIZE: "67108864"      # 64M slots = ~1 GB RAM; default 1M (16 MB) for dev
     #   AWS_DEFAULT_REGION: <region>
     #   AWS_ACCESS_KEY_ID: <key>           # not needed if using an ECS task role
     #   AWS_SECRET_ACCESS_KEY: <secret>    # not needed if using an ECS task role

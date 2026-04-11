@@ -16,7 +16,7 @@ Here's the revised v1 plan:
 - Browser → app: HTTP polling or SSE (1–3s latency acceptable)
 - App → engine: With **both ECS tasks on the same EC2 host**, the app reaches the engine at **`http://localhost:5001`** (or whatever `ENGINE_URL` is set to — same idea as `docker-compose.yml`). **Only** `POST /move` is part of the app–engine contract ([`app/engine_client.py`](../app/engine_client.py)). There is **no** app-triggered `POST /backup` and **no** plan for the app to orchestrate engine persistence to external stores.
 
-**Engine process:** The **bot server** owns transposition-table and related persistence **inside the engine container** (e.g. **local SQLite** — does **not** use RDS). The app **never** connects to that store; game state for users remains in **RDS** only.
+**Engine process:** The **bot server** owns transposition-table persistence **inside the engine container** — an in-memory fixed-size array backed by a local `.bin` file, with optional periodic backup to S3 (`POKECHESS_TT_BUCKET`). Does **not** use RDS. The app **never** connects to that store; game state for users remains in **RDS** only. See `docs/Transposition_Table_Sync.md`.
 
 **Engine state (in-flight):** MCTS search trees in RAM while searching.
 
@@ -24,7 +24,7 @@ Here's the revised v1 plan:
 
 **Storage — app:** **Amazon RDS for PostgreSQL** — all application tables (`users`, `games`, `pokemon_pieces`, etc.). The FastAPI app uses `DATABASE_URL` to RDS only. **Not** “Postgres on the same EC2 box” for production app data in this target.
 
-**Storage — engine:** Bot-local persistence (e.g. SQLite on disk in the engine container) for MCTS/TT data **only**; **no RDS** access from the engine.
+**Storage — engine:** Bot-local persistence (in-memory TT array + local `.bin` file, optional S3 backup) for TT data **only**; **no RDS** access from the engine. See `docs/Transposition_Table_Sync.md`.
 
 **Frontend:** React/Next.js — static hosting on S3 + CloudFront (target; not required for local backend development). (Unrelated to engine TT storage.)
 

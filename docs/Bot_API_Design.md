@@ -127,6 +127,8 @@ tt_sync_queue: TTSyncQueue      # see docs/Transposition_Table_Sync.md
 
 No per-request or per-game state is retained between calls. The global TT accumulates statistics across all requests for the lifetime of the process.
 
+> **TT memory budget:** The TT grows to millions of entries quickly (empirically ~5M after the first 5–10 games). The in-memory representation is being refactored from a Python dict (~156 bytes/entry) to a fixed-size `array.array` (16 bytes/entry, pre-allocated at startup). See `docs/Transposition_Table_Sync.md` — "TT Implementation Design" — for the full rationale, failure mode, and eviction policy.
+
 ### Playstyle parameters
 
 Each request includes a `persona_params` object that controls MCTS behavior for that move. Known keys map directly to `MCTS` constructor parameters; unknown keys are forwarded and ignored by the engine so future tuning params require no app-side code change.
