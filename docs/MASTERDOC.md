@@ -10,13 +10,13 @@
 
 | If you need… | Start here | Then open… |
 |--------------|------------|------------|
-| Big picture + contracts | §2–5 | — |
-| Exact Pydantic/DB shapes | §5.1–5.2 | `app/schemas.py`, [pokechess_data_model.md](pokechess_data_model.md) |
-| DDL and indexes | §6 | `app/db/schema.sql`, [pokechess_data_model.md](pokechess_data_model.md) |
-| Chess/Pokémon rules | §7 | [Rules.md](Rules.md) |
-| UI/UX for a future client | §8 | [frontend_layout_proposal.md](frontend_layout_proposal.md) |
-| AWS/ECS target | §10 | [architecture_design_plan.md](architecture_design_plan.md) |
-| ML bot / roadmap tasks | §9 | [implementation_roadmap.md](implementation_roadmap.md) |
+| Big picture + contracts | Sections 2–5 below | Same document (no other file required) |
+| Exact Pydantic/DB shapes | Sections 5.1–5.2 | `app/schemas.py`, [pokechess_data_model.md](pokechess_data_model.md) |
+| DDL and indexes | Section 6 | `app/db/schema.sql`, [pokechess_data_model.md](pokechess_data_model.md) |
+| Chess/Pokémon rules | Section 7 | [Rules.md](Rules.md) |
+| UI/UX for a future client | Section 8 | [frontend_layout_proposal.md](frontend_layout_proposal.md) |
+| AWS/ECS target | Section 10 | [architecture_design_plan.md](architecture_design_plan.md) |
+| ML bot / roadmap tasks | Section 9 | [implementation_roadmap.md](implementation_roadmap.md) |
 
 ---
 
@@ -106,7 +106,7 @@ The **engine container is stateless for game rules**: it receives a state dict, 
 
 ### 3.3 Persistent roster (“My Pokémon”)
 
-Each user owns **named** pieces (king, queen, rooks, knights, bishops) stored in `pokemon_pieces`. **Pawns** (Stealballs, Safetyballs, Pokéballs) are **not** roster rows — they are ephemeral on the board. XP and evolution rules interact with **rook/knight/bishop** pieces post-game; kings and Mew have special rules (§6.4).
+Each user owns **named** pieces (king, queen, rooks, knights, bishops) stored in `pokemon_pieces`. **Pawns** (Stealballs, Safetyballs, Pokéballs) are **not** roster rows — they are ephemeral on the board. XP and evolution rules interact with **rook/knight/bishop** pieces post-game; kings and Mew have special rules (Section 6.4).
 
 ### 3.4 Client application
 
@@ -120,30 +120,55 @@ There is **no shipped production frontend** yet. [frontend_layout_proposal.md](f
 
 ## 4. Runtime architecture
 
-### 4.1 Diagram
+### 4.1 Core services diagram
 
 ```mermaid
 flowchart LR
-  subgraph client [Client]
+  subgraph clients [Clients]
     Browser[Browser]
   end
-  subgraph appLayer [pokechess_app]
-    FastAPI[FastAPI]
-    EngineLib[engine_library]
+  subgraph app [pokechess_app]
+    Core["FastAPI + shared<br/>engine library"]
   end
-  subgraph data [Data]
-    PG[(PostgreSQL)]
-  end
+  DB[(PostgreSQL)]
   subgraph engineSvc [pokechess_engine]
-    MCTS[MCTS_bot]
+    Bot[MCTS bot]
   end
-  Browser -->|REST_polling| FastAPI
-  FastAPI --> PG
-  FastAPI --> EngineLib
-  FastAPI -->|POST_move_PvB_only| MCTS
+  Browser -->|REST polling| Core
+  Core --> DB
+  Core -->|POST /move PvB only| Bot
 ```
 
-### 4.2 Human move path (simplified)
+### 4.2 Load-aware PvB: many humans, one bot personality
+
+When several people play **PvB** against the **same** bot row (e.g. Metallic) at once, the app **does not** give every game the full `time_budget` from `bots.params`. It records each human’s last move in **`bot_player_activity`**, counts how many distinct players are **active** in a sliding time window (`BOT_ACTIVE_WINDOW_MINUTES`), sets **effective_time_budget = base_time_budget / N**, and passes that value in **`persona_params.time_budget`** to the engine. Details: Section 9.2 and [load_aware_budgeting.md](load_aware_budgeting.md).
+
+The diagram is intentionally **linear top-to-bottom**: each step follows the previous; only the **bottom** node is the outbound call to the engine.
+
+```mermaid
+flowchart TB
+  subgraph concurrent [Concurrent PvB games same bot_id]
+    G1[Human player A]
+    G2[Human player B]
+    G3[Human player C]
+  end
+  App[FastAPI app]
+  Upsert[Upsert last_moved_at]
+  BPA[(bot_player_activity)]
+  CountN[COUNT gives N in window]
+  Budget[persona_params time_budget = base / N]
+  Eng[Engine POST /move]
+  G1 -->|submit move| App
+  G2 -->|submit move| App
+  G3 -->|submit move| App
+  App --> Upsert
+  Upsert --> BPA
+  BPA --> CountN
+  CountN --> Budget
+  Budget --> Eng
+```
+
+### 4.3 Human move path (simplified)
 
 1. Client sends `POST /games/{game_id}/move` with a move matching a legal move from `GET /games/{game_id}/legal_moves`.
 2. App loads the row from `games`, checks auth and `whose_turn`, deserializes `state` to `GameState`.
@@ -153,13 +178,13 @@ flowchart LR
 6. If PvB and bot’s turn next: app calls **engine** `POST /move` with serialized state and `persona_params` (including load-adjusted `time_budget`), parses flat move JSON, validates against legal moves, applies bot move.
 7. App writes updated `state`, appended `move_history`, `whose_turn`, `turn_number`, `status`, `winner`, `end_reason` as appropriate; on terminal, runs XP logic.
 
-### 4.3 Polling and payloads
+### 4.4 Polling and payloads
 
 - **`GET /games/{id}`** returns **GameDetail**: metadata plus **`state`** and **`move_history`** JSON for rendering. It does **not** include legal moves (separate endpoint — roadmap Q4).
 - **`GET /games/{id}/legal_moves?piece_row=&piece_col=`** returns the list of legal **Move** shapes for that piece; the client submits one of those verbatim to `POST /move`.
 - **`whose_turn`** in the DB uses lowercase `red` / `blue`; **`games.state.active_player`** uses uppercase `RED` / `BLUE` — normalize when comparing.
 
-### 4.4 Serialization
+### 4.5 Serialization
 
 Wire format for DB and engine requests is owned by the app: **`app/game_logic/serialization.py`** (`state_to_dict` / `state_from_dict` or equivalent) aligned with [pokechess_data_model.md](pokechess_data_model.md). Engine **dataclasses** in `engine/state.py` stay free of JSON methods; the app is the codec boundary.
 
@@ -213,7 +238,7 @@ The app sends (`app/engine_client.py`):
 }
 ```
 
-`time_budget` is **seconds**, possibly **divided by N** active players for load-aware budgeting (§9.2). Extra keys in `persona_params` are forwarded for future engine tuning. Values are **clamped** to `[0.1, 30.0]` before the HTTP call.
+`time_budget` is **seconds**, possibly **divided by N** active players for load-aware budgeting (Section 9.2). Extra keys in `persona_params` are forwarded for future engine tuning. Values are **clamped** to `[0.1, 30.0]` before the HTTP call.
 
 The engine must return a **flat** JSON object the app can pass into `Move(...)`:
 
@@ -330,6 +355,8 @@ Append-only list of turns. **Snake_case `action_type`** strings in history (`att
 - **Future:** `engine/notation.py` for PokeChess-PGN replay/analysis (not required for Postgres).
 
 ### 9.2 Load-aware budgeting (implemented in app)
+
+See **Section 4.2** for a diagram of multiple PvB players sharing one bot personality.
 
 Problem: many humans vs the same bot concurrently would each get the full `time_budget` → too much total search time.
 
