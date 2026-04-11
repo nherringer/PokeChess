@@ -149,7 +149,7 @@ async def get_move(body: MoveRequest):
     # 1. Deserialize state
     try:
         state = GameState.from_dict(body.state)
-    except (KeyError, ValueError, TypeError) as exc:
+    except (KeyError, ValueError, TypeError, IndexError) as exc:
         raise HTTPException(status_code=422, detail=f"Invalid state: {exc}") from exc
 
     # 2. Extract and clamp time_budget

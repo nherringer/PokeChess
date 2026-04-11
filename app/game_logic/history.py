@@ -102,14 +102,17 @@ def build_foresight_resolve_entry(
     """
     player = old_state.active_player
 
-    # Resolve caster piece_id using the position stored on ForesightEffect when
-    # the move was originally cast. This is unambiguous even when both MEW and
-    # ESPEON exist on the same team. Fall back to scanning if caster_row is -1
-    # (backward compat: old states serialized before this field was added).
+    # Resolve caster piece_id.
+    # Primary: use the cast-time position stored on ForesightEffect.  Under
+    # current rules the caster cannot move between casting (turn N) and
+    # resolution (turn N+2) — only the opponent moves in between — so the
+    # position is always valid unless the caster was captured by the opponent.
+    # Fallback: scan the board for MEW/ESPEON on this team.  Runs whenever the
+    # position lookup misses (captured caster, or old state with caster_row=-1).
     caster_id = None
     if fx.caster_row >= 0 and fx.caster_col >= 0:
         caster_id = id_map.get((fx.caster_row, fx.caster_col))
-    else:
+    if caster_id is None:
         for pos, uid in id_map.items():
             if isinstance(pos, tuple) and len(pos) == 2 and isinstance(pos[0], int):
                 p = old_state.board[pos[0]][pos[1]]

@@ -170,6 +170,48 @@ class TestFenRoundTrip:
         assert blue_fx.damage == 80
         assert blue_fx.resolves_on_turn == 6
 
+    def test_pending_foresight_with_caster_fields(self):
+        """Foresight dict that includes caster_row/caster_col deserializes them correctly."""
+        pieces = [_piece_dict("MEW", "RED", 0, 3, 250), _piece_dict("EEVEE", "BLUE", 7, 4, 120)]
+        fx = {
+            "target_row": 4,
+            "target_col": 4,
+            "damage": 120,
+            "resolves_on_turn": 7,
+            "caster_row": 0,
+            "caster_col": 3,
+        }
+        d = _minimal_state_dict(
+            pieces,
+            pending_foresight={"RED": fx, "BLUE": None},
+            foresight_used_last_turn={"RED": True, "BLUE": False},
+        )
+        state = GameState.from_dict(d)
+
+        red_fx = state.pending_foresight[Team.RED]
+        assert isinstance(red_fx, ForesightEffect)
+        assert red_fx.caster_row == 0
+        assert red_fx.caster_col == 3
+        assert red_fx.target_row == 4
+        assert red_fx.target_col == 4
+        assert red_fx.damage == 120
+        assert red_fx.resolves_on_turn == 7
+
+    def test_pending_foresight_without_caster_fields_defaults_to_minus_one(self):
+        """Old-format foresight dict (no caster_row/col) defaults to -1 for compat."""
+        pieces = [_piece_dict("MEW", "RED", 0, 3, 250), _piece_dict("EEVEE", "BLUE", 7, 4, 120)]
+        fx = _foresight_dict(4, 4, 120, 7)  # no caster fields
+        d = _minimal_state_dict(
+            pieces,
+            pending_foresight={"RED": fx, "BLUE": None},
+        )
+        state = GameState.from_dict(d)
+
+        red_fx = state.pending_foresight[Team.RED]
+        assert isinstance(red_fx, ForesightEffect)
+        assert red_fx.caster_row == -1
+        assert red_fx.caster_col == -1
+
     def test_stored_piece_in_safetyball(self):
         """Safetyball with a stored piece deserializes the nested piece correctly."""
         stored = _piece_dict("BULBASAUR", "RED", 2, 3, 80, "LEAFSTONE")

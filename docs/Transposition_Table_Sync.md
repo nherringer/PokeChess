@@ -1,6 +1,6 @@
 # Transposition Table Sync Design
 
-**Status:** Implemented (phases 1–3 complete); fixed-size array TT refactor pending  
+**Status:** Fully implemented (phases 1–3 + fixed-size array TT refactor)  
 **Authors:** nherringer  
 **Audience:** ML bot team
 
@@ -184,7 +184,7 @@ No metadata or header is stored inside the binary file itself — versioning liv
 
 | File | Purpose |
 |---|---|
-| `bot/transposition.py` | In-memory TT; to be refactored to fixed-size array (see above) |
+| `bot/transposition.py` | In-memory TT; fixed-size `array.array` with threshold-based eviction |
 | `bot/tt_store.py` | S3 client wrapper (`TTStore`) + background backup thread (`TTSyncQueue`) |
 | `bot/server.py` | FastAPI server; wires TT startup, sync queue, and periodic enqueue |
 | `tests/test_tt_store.py` | Mocked S3 tests for `TTStore` and `TTSyncQueue` |
@@ -313,6 +313,6 @@ Steps to wire up at deploy time:
 | Queue deduplication | Enqueueing twice while worker is busy results in one upload, not two | Implemented |
 | Drain on shutdown | `drain()` blocks until in-flight backup completes | Implemented |
 | Version isolation | Changing `POKECHESS_TT_VERSION` targets a different S3 key; old stats not loaded | Implemented |
-| Array round-trip | Fixed-size array TT: save (sparse) → load → stats match for populated entries | Pending (array TT refactor) |
-| Threshold protection | Entry with ≥ `EVICT_THRESHOLD` visits is not displaced by a colliding hash | Pending |
-| Below-threshold eviction | Entry with < `EVICT_THRESHOLD` visits is displaced; new entry is stored correctly | Pending |
+| Array round-trip | Fixed-size array TT: save (sparse) → load → stats match for populated entries | Implemented (`tests/test_mcts.py`) |
+| Threshold protection | Entry with ≥ `EVICT_THRESHOLD` visits is not displaced by a colliding hash | Implemented |
+| Below-threshold eviction | Entry with < `EVICT_THRESHOLD` visits is displaced; new entry is stored correctly | Implemented |

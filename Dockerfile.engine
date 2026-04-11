@@ -22,15 +22,12 @@ COPY setup.py ./
 RUN pip install --no-cache-dir \
     fastapi \
     uvicorn[standard] \
-    pybind11
+    pybind11 \
+    boto3
 
 # Build C++ extension. Falls back to pure Python automatically if this fails
 # (see bot/mcts.py: `try: import pokechess_cpp`).
 RUN python setup.py build_ext --inplace || \
     echo "WARNING: C++ build failed — engine will use pure Python rollouts"
 
-# TODO (ML engineer): implement bot/server.py
-# Required exports:
-#   POST /move   — accepts {state: dict, time_budget: float}, returns Move as JSON
-#   POST /backup — triggers transposition table serialization to S3
 CMD ["uvicorn", "bot.server:app", "--host", "0.0.0.0", "--port", "5001"]

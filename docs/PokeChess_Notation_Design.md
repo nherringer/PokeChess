@@ -59,11 +59,12 @@ For reference, here is every field that a complete position snapshot must captur
 | `has_traded` | dict[Team → bool] | Free-action gate for item trades |
 
 ### ForesightEffect
-| Field | Type |
-|---|---|
-| `target_row`, `target_col` | 0–7 |
-| `damage` | int (always 120 for Mew/Espeon) |
-| `resolves_on_turn` | absolute turn number |
+| Field | Type | Notes |
+|---|---|---|
+| `target_row`, `target_col` | 0–7 | Square the effect will hit |
+| `damage` | int | Always 120 for Mew/Espeon |
+| `resolves_on_turn` | int | Absolute turn number |
+| `caster_row`, `caster_col` | 0–7 or -1 | Cast-time position of the caster; -1 if absent (old format) |
 
 ---
 

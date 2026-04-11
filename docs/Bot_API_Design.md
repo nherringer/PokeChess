@@ -63,7 +63,7 @@ For background on why the Zobrist hash is insufficient for state serialization, 
   "foresight_used_last_turn": {"RED": false, "BLUE": true},
   "pending_foresight": {
     "RED": null,
-    "BLUE": {"target_row": 4, "target_col": 3, "damage": 120, "resolves_on_turn": 15}
+    "BLUE": {"target_row": 4, "target_col": 3, "damage": 120, "resolves_on_turn": 15, "caster_row": 7, "caster_col": 3}
   },
   "board": [
     {"piece_type": "SQUIRTLE", "team": "RED", "row": 3, "col": 2,
@@ -127,7 +127,7 @@ tt_sync_queue: TTSyncQueue      # see docs/Transposition_Table_Sync.md
 
 No per-request or per-game state is retained between calls. The global TT accumulates statistics across all requests for the lifetime of the process.
 
-> **TT memory budget:** The TT grows to millions of entries quickly (empirically ~5M after the first 5–10 games). The in-memory representation is being refactored from a Python dict (~156 bytes/entry) to a fixed-size `array.array` (16 bytes/entry, pre-allocated at startup). See `docs/Transposition_Table_Sync.md` — "TT Implementation Design" — for the full rationale, failure mode, and eviction policy.
+> **TT memory budget:** The TT grows to millions of entries quickly (empirically ~5M after the first 5–10 games). The in-memory representation is a fixed-size `array.array` (16 bytes/slot, pre-allocated at startup) with threshold-based eviction — not a Python dict (~156 bytes/entry, unbounded). See `docs/Transposition_Table_Sync.md` — "TT Implementation Design" — for the full rationale, failure mode, and eviction policy.
 
 ### Playstyle parameters
 
