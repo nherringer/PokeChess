@@ -1,50 +1,59 @@
-Here's the updated plan with DynamoDB removed and Postgres JSONB handling everything:
+# App and engine communication
+
+**Status:** Aligned with [`app/engine_client.py`](../app/engine_client.py) and [architecture_design_plan.md](architecture_design_plan.md). **Code wins** if anything drifts.
+
+**Last updated:** April 2026
 
 ---
 
-## Architecture Decision — pokechess-engine / Backend Integration
+## Deployment
 
-**Deployment:** `pokechess-app` and `pokechess-engine` run as two independent ECS services on the same EC2 t4g.small, communicating exclusively over `localhost`. The engine port (5001) is not publicly exposed. Each service has its own Docker image, ECR repo, and independent CI/CD pipeline. Infrastructure for both is managed via `pokechess-terraform`.
+`pokechess-app` and `pokechess-engine` run as **two ECS tasks on the same EC2 instance**. They communicate over **`localhost`** (port **5001** for the engine), matching `ENGINE_URL` defaults (e.g. `http://localhost:5001` in [`docker-compose.yml`](../docker-compose.yml)). The engine port is **not** exposed to the public internet.
 
-**Engine API (FastAPI):** The engine exposes a lightweight FastAPI layer:
+Infrastructure-as-code may live in this repo or elsewhere; there is no requirement that a `terraform/` tree exist in every checkout.
 
-- `POST /move` — the **bot contract endpoint**.  Accepts the current game state
-  and a `persona_params` dict; runs MCTS; returns the best move.  Payload shape:
-  ```json
-  {
-    "state":          { "<FEN dict>" },
-    "persona_params": { "time_budget": 1.5, "exploration_c": 1.41 }
+---
+
+## Engine HTTP contract (authoritative)
+
+The app calls **`POST /move`** only. Payload shape matches `request_bot_move()`:
+
+```json
+{
+  "state": { "...": "wire GameState dict" },
+  "persona_params": {
+    "time_budget": 1.5
   }
-  ```
-  Response: `{ "move": { "<Move dict>" } }`.
-  Only `time_budget` (float, seconds) is required in `persona_params`; unknown
-  keys must be silently ignored.  See `docs/bot_api_design.txt` for the full
-  contract.
+}
+```
 
-The engine never initiates requests to the app and never touches Postgres. All
-game state required for a search is passed directly in the `/move` payload.
-The engine is a pure responder.
+- **`time_budget`** (seconds) is required inside `persona_params` for MCTS. The app may **adjust** it for load-aware budgeting ([load_aware_budgeting.md](load_aware_budgeting.md)).
+- Other keys in `persona_params` are forwarded for future tuning; unknown keys should be ignored by the engine.
 
-**Load-aware budget scaling (app-side only):** Before calling `POST /move`, the
-app computes an *effective* `time_budget = base_budget / N`, where N is the
-number of distinct players currently active against the same bot personality.
-The engine receives the already-adjusted value inside `persona_params` and
-behaves identically regardless — no engine changes are required.  See
-`docs/load_aware_budgeting.md` for the full design and configuration.
+**Response:** A **flat** JSON object the app maps into `Move` (e.g. `piece_row`, `piece_col`, `action_type`, `target_row`, `target_col`, optional `secondary_row` / `secondary_col`, `move_slot`). **Not** wrapped as `{ "move": { ... } }` unless the implementation changes and the app is updated.
 
-**S3 — Transposition Table Persistence:**
+The engine **never** calls the app, **never** uses **RDS**, and **never** receives game persistence work from the app beyond the state blob in each `/move` request.
 
-- On container startup, the engine loads any available tree snapshots from S3 into RAM before accepting requests
-- `POST /backup` writes current tree snapshots to `s3://pokechess-trees/backup` (or similar) — triggered by the app on game completion, or on any other schedule/event the app deems appropriate
-- S3 lifecycle rules expire old snapshots automatically
+---
 
-**Concurrency:** The engine uses `asyncio` for non-blocking request handling alongside a `ThreadPoolExecutor (max_workers=3–5)` for parallelized MCTS searches. Python's GIL is not a concern — pybind11 releases the GIL on entry to C++ hot loops, enabling genuine parallel CPU execution across concurrent search threads. Multiple simultaneous PvB games intentionally share compute — the engine splits its search capacity across all active games, naturally scaling down per-game strength under load. This is a deliberate design choice: players teaming up in PvP against the engine experience a shared challenge where collectively pressuring it degrades its performance across the board.
+## Persistence boundaries
 
-**Data ownership:**
+| Concern | Where it lives |
+|--------|----------------|
+| Users, games, `games.state`, `move_history`, roster, bots, etc. | **Amazon RDS (PostgreSQL)** — accessed **only** by `pokechess-app` |
+| In-flight MCTS trees | Engine process RAM |
+| Bot-only persistence (e.g. transposition tables) | **Engine / bot server** — e.g. **local SQLite** inside the engine container; **not** RDS |
 
-| Concern | Owner |
-|---|---|
-| Game state (board, HP, turns) | `pokechess-app` → Postgres (JSONB) |
-| MCTS search trees (in-flight) | `pokechess-engine` → RAM |
-| MCTS tree snapshots (persistent) | `pokechess-engine` → S3 |
-| User data, history, ELO | `pokechess-app` → Postgres |
+There is **no** `POST /backup` from the app and **no** app-orchestrated S3 backup for the engine. Persistence beyond `/move` is **the bot server’s responsibility** inside the engine container.
+
+---
+
+## Concurrency
+
+The engine processes **`POST /move`** through a **queue-style model**: work is handled **one search at a time** per instance (requests **wait** when busy). That matches sharing CPU fairly under load and complements app-side **load-aware `time_budget`** scaling.
+
+---
+
+## Load-aware budget scaling (app-side)
+
+Before `POST /move`, the app may set `persona_params["time_budget"]` to `base_budget / N` for concurrent human players against the same bot. See [load_aware_budgeting.md](load_aware_budgeting.md).

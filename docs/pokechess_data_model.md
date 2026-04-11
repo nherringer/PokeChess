@@ -1,6 +1,6 @@
 # PokéChess — Data Model Reference
 
-**Status:** Design complete, ready for implementation  
+**Status:** Canonical DB DDL lives in `app/db/schema.sql`; HTTP request/response shapes in `app/schemas.py`.  
 **Database:** PostgreSQL on AWS RDS (single database, no DynamoDB)  
 **Backend:** FastAPI (app server) + separate engine container (MCTS bot)  
 **Last updated:** April 2026
@@ -11,11 +11,12 @@
 
 1. [Architecture overview](#architecture-overview)
 2. [Schema — all tables](#schema)
-3. [Constraints & indexes](#constraints--indexes)
-4. [JSON column shapes](#json-column-shapes)
-5. [Key design decisions](#key-design-decisions)
-6. [Move lifecycle flow](#move-lifecycle-flow)
-7. [Future extensibility notes](#future-extensibility-notes)
+3. [HTTP API models](#http-api-models)
+4. [Constraints & indexes](#constraints--indexes)
+5. [JSON column shapes](#json-column-shapes)
+6. [Key design decisions](#key-design-decisions)
+7. [Move lifecycle flow](#move-lifecycle-flow)
+8. [Future extensibility notes](#future-extensibility-notes)
 
 ---
 
@@ -34,6 +35,8 @@ Engine container (MCTS bot)
 **Polling, not WebSockets.** Games are async; a 1–3 second delay is acceptable. The frontend polls `GET /games/{id}` on the game view. SSE is a future upgrade path if needed.
 
 **One database.** At 5–20 users, DynamoDB adds operational complexity with no benefit. PostgreSQL JSONB handles semi-structured game state natively. JSONB is fully supported on AWS RDS for PostgreSQL (all current versions).
+
+**Engine vs RDS:** The **engine / bot server** does **not** connect to RDS. Bot-only persistence (e.g. transposition tables) uses **local storage inside the engine container** (e.g. SQLite), separate from the app’s schema in this document.
 
 ---
 
@@ -104,7 +107,7 @@ CREATE INDEX idx_friendships_b ON friendships (user_b_id);
 
 ### `bots`
 
-One row per bot personality. v1 has a single row. Adding a new difficulty = new row, no schema change. `params` is JSONB because bot tuning values will evolve as the engine is tuned — the shape is genuinely fluid. The app server reads the whole `params` blob and passes it directly to the engine.
+One row per bot personality. The shipped DDL seeds one row (`Metallic`); adding a new difficulty = new row, no schema change. `params` is JSONB because bot tuning values will evolve as the engine is tuned — the shape is genuinely fluid. The app server reads the whole `params` blob and passes it directly to the engine.
 
 ```sql
 CREATE TABLE bots (
@@ -315,6 +318,87 @@ WHERE gpm.game_id = $1
 
 ---
 
+### `bot_player_activity`
+
+Tracks the last time each **human** player completed a move against each **bot personality**. Not used for PvP. Rows are upserted from the move handler when a human acts in a PvB game.
+
+Used to estimate how many players are “active” against the same bot within a sliding time window, which feeds **load-aware MCTS budget scaling** (effective `time_budget` is divided by concurrent active players for that bot). See `docs/load_aware_budgeting.md` and `app/db/queries/bot_activity.py`.
+
+```sql
+CREATE TABLE bot_player_activity (
+    player_id     UUID      NOT NULL REFERENCES users(id)  ON DELETE CASCADE,
+    bot_id        UUID      NOT NULL REFERENCES bots(id)   ON DELETE CASCADE,
+    last_moved_at TIMESTAMP NOT NULL DEFAULT now(),
+    PRIMARY KEY (player_id, bot_id)
+);
+
+CREATE INDEX idx_bpa_bot_time ON bot_player_activity (bot_id, last_moved_at);
+```
+
+---
+
+## HTTP API models
+
+Defined in `app/schemas.py`. Pydantic models for FastAPI request bodies and responses. They are **not** database tables; they mirror or subset columns where noted. Enum-like string fields use the same literals as the DB or engine as documented elsewhere in this file.
+
+### Auth
+
+| Model | Purpose |
+|---|---|
+| `RegisterRequest` | `username`, `email`, `password` |
+| `LoginRequest` | `email`, `password` |
+| `TokenResponse` | `access_token`, `token_type` (default `bearer`), `user_id` |
+| `RefreshResponse` | `access_token`, `token_type` (default `bearer`) |
+
+### Users & settings
+
+| Model | Purpose |
+|---|---|
+| `PieceOut` | `id`, `role`, `species`, `xp`, `evolution_stage` — aligns with `pokemon_pieces` |
+| `UserProfile` | `id`, `username`, `email`, `created_at`, `pieces: list[PieceOut]` |
+| `SettingsUpdate` | PATCH body: optional `board_theme`, optional `extra_settings` (`dict`) |
+| `SettingsOut` | `board_theme`, `extra_settings`, `updated_at` — aligns with `user_settings` |
+
+**`SettingsUpdate.extra_settings` validation** (API layer, stricter than raw JSONB): must be JSON-serializable, at most **16 KiB** when serialized, and JSON nesting depth at most **8** levels. Invalid payloads are rejected before touching `user_settings`.
+
+### Friends
+
+| Model | Purpose |
+|---|---|
+| `FriendUser` | `user_id`, `username` |
+| `FriendRequest` | `id`, optional `from_user_id` / `to_user_id`, `username` (direction depends on list) |
+| `FriendsResponse` | `friends`, `incoming`, `outgoing` (each list typed as above) |
+| `SendFriendRequest` | `username` |
+| `FriendActionRequest` | `action` — `"accept"` or `"reject"` |
+| `FriendActionResponse` | `id`, `status` |
+
+### Game invites
+
+| Model | Purpose |
+|---|---|
+| `SendInviteRequest` | `invitee_id` |
+| `InviteOut` | `id`, `from_user_id`, `from_username`, `game_id`, `created_at` |
+| `InviteActionRequest` | `action` — `"accept"` or `"reject"` |
+| `InviteActionResponse` | `invite_id`, `status`, `game_id` |
+
+### Games
+
+| Model | Purpose |
+|---|---|
+| `CreateGameRequest` | PvB create: `bot_id`, `player_side` (`"red"` or `"blue"`) |
+| `GameSummary` | List card: `id`, `status`, `whose_turn`, `turn_number`, `is_bot_game`, `bot_side`, `red_player_id`, `blue_player_id`, `winner`, `updated_at` |
+| `GameDetail` | Full poll payload: same as summary plus `end_reason`, `state`, `move_history` (list of dicts) |
+| `GamesListResponse` | `active`, `completed` — each `list[GameSummary]` |
+
+### Moves
+
+| Model | Purpose |
+|---|---|
+| `MovePayload` | POST `/games/{id}/move`: `piece_row`, `piece_col`, `action_type`, `target_row`, `target_col`, optional `secondary_row` / `secondary_col`, optional `move_slot` |
+| `LegalMoveOut` | One legal move from `GET .../legal_moves`: same coordinate fields as `MovePayload` |
+
+---
+
 ## Constraints & Indexes
 
 ### Friendships
@@ -359,6 +443,16 @@ CREATE INDEX idx_games_blue_active ON games (blue_player_id) WHERE status = 'act
 CREATE INDEX idx_games_red_done    ON games (red_player_id)  WHERE status = 'complete';
 CREATE INDEX idx_games_blue_done   ON games (blue_player_id) WHERE status = 'complete';
 ```
+
+### `bot_player_activity`
+
+Composite primary key on `(player_id, bot_id)`. Index for time-window queries per bot:
+
+```sql
+CREATE INDEX idx_bpa_bot_time ON bot_player_activity (bot_id, last_moved_at);
+```
+
+Supports counting recent activity per bot for load-aware budgeting (`COUNT(*)` with `bot_id` and `last_moved_at` in a window).
 
 ---
 
@@ -651,10 +745,13 @@ The app server imports `engine/` (the shared game logic package) and calls `Game
 `status`, `whose_turn`, `winner`, `is_bot_game` live as real columns on the `games` row. Polling `GET /games/{id}` to check whose turn it is does not touch TOAST values. Only reads that need the full board state or history fetch the JSONB columns.
 
 ### Bots are separate from users
-Bots have their own table with a JSONB `params` column for engine tuning. v1 ships with one bot row. Adding difficulty variants = new rows, no schema change. The `bot_side` column on `games` is stored for rendering convenience; it's also implicit (whichever player slot is null is the bot's side).
+Bots have their own table with a JSONB `params` column for engine tuning. The DDL seeds one row (`Metallic`). Adding difficulty variants = new rows, no schema change. The `bot_side` column on `games` is stored for rendering convenience; it's also implicit (whichever player slot is null is the bot's side).
 
 ### `user_settings` is a proper table, not JSONB
-Known settings (e.g. `board_theme`) get explicit columns with types and defaults. `extra_settings JSONB` is a catch-all for evolving/experimental settings. When a setting stabilizes, promote it to a column with a single migration. Migration cost from pure JSONB to a table would also be trivial at this scale.
+Known settings (e.g. `board_theme`) get explicit columns with types and defaults. `extra_settings JSONB` is a catch-all for evolving/experimental settings. When a setting stabilizes, promote it to a column with a single migration. Migration cost from pure JSONB to a table would also be trivial at this scale. **API writes** (`SettingsUpdate` in `app/schemas.py`) additionally cap serialized `extra_settings` size and nesting depth — see [HTTP API models](#http-api-models).
+
+### `bot_player_activity` supports load-aware bot budgeting
+Rows are upserted when a human moves in PvB. The app queries by `bot_id` and `last_moved_at` to scale MCTS `time_budget` under load. Not part of game persistence semantics — safe to truncate or age out in the future if needed.
 
 ### TOAST is transparent
 PostgreSQL automatically compresses and stores out-of-line any JSONB value above ~2 KB. `move_history` will cross this threshold after ~40 moves. No configuration required; RDS autovacuum handles maintenance. Reads that don't need the JSONB columns (metadata queries) don't pay the TOAST I/O cost.
