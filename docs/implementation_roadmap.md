@@ -1,6 +1,6 @@
 # PokeChess — Architecture & Implementation Roadmap
 
-**Status:** Scaffolding complete, implementation in progress  
+**Status:** App backend implemented and runnable; engine container still needs `bot/server.py` (HTTP API).  
 **Last updated:** April 2026
 
 ---
@@ -23,15 +23,15 @@ pokechess/                      ← single repo (rename from PokeChess-engine �
   cpp/                          ← C++ rollout extension; engine container only  ✓ exists
     engine.cpp
     state_codec.py              ← binary wire format for C++ bridge
-  app/                          ← FastAPI app server; app container only  ✓ scaffolded
+  app/                          ← FastAPI app server; app container only  ✓ implemented
     README.md                   ← pointer to data model + roadmap docs
-    main.py                     ← TODO
-    routes/                     ← TODO
-    db/                         ← TODO
-  tests/                        ← ✓ exists (engine/bot tests only so far)
+    main.py                     ← ✓ FastAPI app + lifespan (DB pool, engine HTTP client)
+    routes/                     ← ✓ auth, users, friends, invites, games, moves
+    db/                         ← ✓ schema.sql + query modules
+  tests/                        ← ✓ exists (engine, bot, app game logic / serialization)
   docs/                         ← ✓ exists
-  Dockerfile.engine             ← ✓ created (needs bot/server.py to be runnable)
-  Dockerfile.app                ← ✓ created (needs app/main.py to be runnable)
+  Dockerfile.engine             ← ✓ created (still blocked on `bot/server.py` — CMD references `uvicorn bot.server:app`)
+  Dockerfile.app                ← ✓ created (`app/main.py` runnable)
   docker-compose.yml            ← ✓ created
 ```
 
@@ -55,11 +55,11 @@ The engine container is called **only for PvB games, only to get the bot's move*
 
 ### Engine API contract (`POST localhost:5001/move`)
 
-**Request:**
+**Request** (matches [`app/engine_client.py`](../app/engine_client.py)):
 ```json
 {
   "state": { ...GameState.to_dict() output... },
-  "time_budget": 1.0
+  "persona_params": { "time_budget": 1.0 }
 }
 ```
 
@@ -127,25 +127,21 @@ See `docs/pokechess_data_model.md` for full JSON examples.
 
 **Blocking (unblocks everything else):**
 
-1. **Add `id: Optional[str] = None` to `Piece` dataclass** (`engine/state.py:116`)  
-   One line. The engine never reads it; it is carried opaquely through `copy()` and `apply_move()`. Named pieces get UUIDs injected by the app server at game creation.
+1. ~~**Add `id: Optional[str] = None` to `Piece` dataclass**~~ ✓ Done — `engine/state.py` (`Piece.id`).
 
-2. **Add `to_dict()` / `from_dict()` to `Piece`, `ForesightEffect`, and `GameState`** (`engine/state.py`)  
-   Implement the JSON codec described in `docs/PokeChess Notation Design...pdf` (Primitive 1). The output shape must match the `games.state` spec in `pokechess_data_model.md`. Include `has_traded`, `foresight_used_last_turn`, and `damage` in the foresight effect.  
-   Estimated: 2–3 hours. Add round-trip tests in `tests/test_state.py`.
+2. ~~**Wire-format serialization for `Piece`, `ForesightEffect`, and `GameState`**~~ ✓ Done in the app layer — `app/game_logic/serialization.py` (`state_to_dict`, `state_from_dict`). Matches the `games.state` spec (`has_traded`, `foresight_used_last_turn`, foresight `damage`, flat `board[]`). The engine types stay free of JSON methods; the app owns DB/wire codec. Round-trip coverage: `tests/test_load_aware_budget.py`, `tests/test_app_game_logic.py`.
 
 3. **Write `engine/notation.py`** (PokeChess-PGN, Primitive 2 from the notation PDF)  
-   `move_to_str()`, `str_to_move()`, `GameRecord` class. Used for replay/analysis; not needed for Postgres storage. Can be done in parallel with app work once FEN is done.  
+   `move_to_str()`, `str_to_move()`, `GameRecord` class. Used for replay/analysis; not needed for Postgres storage. Can be done in parallel with frontend.  
    Estimated: 4–6 hours.
 
 **Engine container:**
 
-4. ~~**Write `Dockerfile.engine`**~~ ✓ Done — see `Dockerfile.engine` at repo root. Includes optional C++ extension build with pure-Python fallback. Blocked on `bot/server.py`.
+4. ~~**Write `Dockerfile.engine`**~~ ✓ Done — see `Dockerfile.engine` at repo root. Includes optional C++ extension build with pure-Python fallback. **Still not runnable** until `bot/server.py` exists (see below).
 
 5. **Write `bot/server.py`** — FastAPI wrapper around `MCTS.select_move()`  
-   `POST /move`: deserializes state via `GameState.from_dict()`, runs MCTS, returns the best move as JSON.  
-   `POST /backup`: triggers transposition table serialization to S3.  
-   Estimated: 2–3 hours.
+   `POST /move`: accept **`{ "state": dict, "persona_params": { "time_budget": float, ... } }`** (same as [`app/engine_client.py`](../app/engine_client.py)); deserialize with **`state_from_dict()` from `app/game_logic/serialization.py`** (or duplicate minimal codec in engine image — today serialization lives under `app/`). Run MCTS, return the best move as a **flat** JSON move object. **Bot-side** persistence (e.g. transposition tables in **local SQLite**) is handled **inside the engine / bot server** — **not** RDS, **no** app-triggered `POST /backup`.  
+   Estimated: 2–3 hours. **Blocks PvB bot moves in production** (app already calls the engine over HTTP via `app/engine_client.py`).
 
 6. **Wire `iteration_budget` into `MCTS.select_move()`** (currently only `time_budget` is implemented)  
    Optional for v1 but listed in `bots.params` spec.
@@ -154,37 +150,35 @@ See `docs/pokechess_data_model.md` for full JSON examples.
 
 ### App Backend Engineer
 
-*Depends on: ML engineer completing items 1 and 2 above.*
+*Prerequisites for the shipped backend: ML items 1–2 (piece `id` + wire serialization) are implemented.*
 
-1. ~~**Create `app/` directory structure**~~ ✓ Done — `app/` scaffolded with `README.md`. See `app/README.md` for the intended layout and key import patterns.
+1. ~~**Create `app/` directory structure**~~ ✓ Done — see `app/README.md`.
 
-2. ~~**Write `Dockerfile.app`**~~ ✓ Done — see `Dockerfile.app` at repo root.
+2. ~~**Write `Dockerfile.app`**~~ ✓ Done — `Dockerfile.app` at repo root.
 
-3. ~~**Write `docker-compose.yml`**~~ ✓ Done — see `docker-compose.yml` at repo root. Add `SECRET_KEY` and S3 env vars before first run with real data.
+3. ~~**Write `docker-compose.yml`**~~ ✓ Done — `docker-compose.yml` at repo root. Set `SECRET_KEY`, **`DATABASE_URL`** (RDS / Postgres for the app), and **`ENGINE_URL`** for production.
 
-4. **Write DB migrations** for the full schema in `pokechess_data_model.md`  
-   All tables: `users`, `user_settings`, `friendships`, `bots`, `game_invites`, `games`, `pokemon_pieces`, `game_pokemon_map`.  
-   Seed one default bot row in `bots`.
+4. ~~**Database schema**~~ ✓ Done — `app/db/schema.sql`: all tables from the data model plus **`bot_player_activity`** (load-aware MCTS budgeting; see `docs/load_aware_budgeting.md`). Seed bot **Metallic** included (`INSERT` at end of file). *Versioned migration tool (e.g. Alembic) is still optional* if you want repeatable upgrades beyond “apply `schema.sql`”.
 
-5. **Game creation endpoint** (`POST /games`)  
-   - Create `pokemon_pieces` rows if first game (5 per user)  
-   - Serialize `GameState.new_game()` via `to_dict()`, injecting piece UUIDs from `pokemon_pieces`  
-   - Write `games` row + `game_pokemon_map` rows  
+5. ~~**Auth endpoints**~~ ✓ Done — `app/routes/auth.py`: `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`. See `docs/api_spec.md`.
 
-6. **Legal moves endpoint** (`GET /games/{id}/legal_moves?piece_row=&piece_col=`)  
-   Deserialize state, call `get_legal_moves()`, filter for the requested piece, return the full Move field set for each legal move: `piece_row`, `piece_col`, `action_type` (engine enum name), `target_row`, `target_col`, `secondary_row`, `secondary_col`, `move_slot`. The frontend uses these objects verbatim as the `POST /move` payload — `secondary_row`/`col` are needed for Quick Attack, `move_slot` for Mew's 3 attack types and Eevee's 5 evolution choices.
+6. ~~**Friends endpoints**~~ ✓ Done — `app/routes/friends.py`: `GET/POST /friends`, `PUT /friends/{friendship_id}`.
 
-7. **Move submission endpoint** (`POST /games/{id}/move`)  
-   Full lifecycle: deserialize → validate → apply → detect Foresight resolution → build history entry → check terminal → PvB: call engine → write back. See Move Lifecycle Flow in `pokechess_data_model.md`.
+7. ~~**Game invite endpoints**~~ ✓ Done — `app/routes/invites.py`: `GET/POST /game-invites`, `PUT /game-invites/{invite_id}` (prefix `/game-invites` on router).
 
-8. **XP attribution on game completion**  
-   Tally `xp_earned` from `move_history` per piece. Apply win/loss rule. Write `game_pokemon_map` and `pokemon_pieces` rows.
+8. ~~**Game creation** (`POST /games`)~~ ✓ Done — `app/routes/games.py` + `app/game_logic/roster.py` (roster + `game_pokemon_map`). Additional routes: `GET /games`, `GET /games/{id}`, `POST /games/{id}/resign`.
+
+9. ~~**Legal moves** (`GET /games/{id}/legal_moves?piece_row=&piece_col=`)~~ ✓ Done — `app/routes/moves.py`.
+
+10. ~~**Move submission** (`POST /games/{id}/move`)~~ ✓ Done — `app/routes/moves.py` (validate, apply, history, terminal, PvB engine call via `app/engine_client.py`, foresight resolve). Returns `GameDetail`.
+
+11. ~~**XP attribution on game completion**~~ ✓ Done — `app/game_logic/xp.py` (`compute_xp`); persistence via `app/db/queries/game_map.py` (`update_xp_earned`).
 
 ---
 
 ### App Frontend Engineer
 
-*Depends on: app backend completing items 3–5 above.*
+*Depends on: v1 HTTP API (auth, friends, invites, games, moves) — implemented in `app/routes/`.*
 
 1. **Board rendering from `games.state`**  
    Deserialize the `board[]` array. Each piece has `piece_type`, `team`, `row`, `col`, `current_hp`, `held_item`. Convert `(row, col)` → algebraic notation for display if needed. Render stored pieces with a visual indicator on the Safetyball square (check `stored_piece` field).
@@ -216,39 +210,51 @@ These decisions block or complicate frontend, backend, or sequencing if left uns
 
 For a single target square, **Mew** can yield up to three distinct legal moves (attack slots / move types). **Eevee evolution** can yield up to five moves when evolving via stone. The legal-moves API can return multiple `Move` objects that share the same target; the UI must disambiguate (modal, picker step, or a different selection flow) before calling `POST /games/{id}/move`.
 
-**Decision:** How should the client present that choice (inline modal vs. two-step flow vs. piece-specific UX)?
+**✅ Resolved:** Bottom-sheet picker slides up ~200px from the bottom of the board on ambiguous target selection. Mew shows up to 4 options (3 attack slots + Foresight as a move option). Eevee evolution shows 5 evolution sprites with name + type badge. See `docs/frontend_layout_proposal.md` for full UX detail.
 
 ### Q2. PvP scope: invites, friends, and roadmap alignment
 
-The data model includes `game_invites`, friends flows, and a pending → active game transition. The **backend checklist** in this doc currently emphasizes **PvB** (`POST /games`) and does not enumerate invite/friends endpoints.
+The data model includes `game_invites`, friends flows, and a pending → active game transition. The **backend checklist** in this doc currently emphasized **PvB** (`POST /games`) and did not enumerate invite/friends endpoints.
 
-**Decision:** Is **v1 PvB-only** (defer `GET/POST /friends`, `GET/POST/PATCH /game-invites`) or does **v1 ship PvP** with the full invite and friends surface? This significantly changes backend and QA scope.
+**✅ Resolved — PvP is in scope for v1. Play vs Friend is a hard requirement.**  
+`GET/POST /friends`, `GET/POST/PUT /game-invites`, and the pending → active game transition must all ship in v1. The app backend checklist below has been updated accordingly. See `docs/api_spec.md` for the full endpoint contracts.
 
 ### Q3. `POST /games/{id}/move` response (polling vs. single payload)
 
-For PvB, the server may apply the human move and then the bot move before responding; latency can approach the engine’s time budget.
+For PvB, the server may apply the human move and then the bot move before responding; latency can approach the engine’s time budget (up to 10s at Master difficulty).
 
 **Specified in `docs/api_spec.md`:** response `200` returns a full **GameDetail** (same shape as `GET /games/{id}`) after both plies when applicable.
 
-**Remaining product decision:** Confirm this stays the v1 contract for all clients, or document an alternate thin response + mandatory poll if requirements change.
+**✅ Resolved — single GameDetail payload is the v1 contract.**  
+The frontend displays a **"Metallic is thinking…"** state (spinning Pokeball, board grayed out) for the duration of the wait. Metallic is the name of the PvB bot, representing Team Alpha’s artificial intelligence. The single-response contract avoids polling complexity while the wait state keeps the UX clear. If latency requirements change in future, the thin-response + poll pattern can be introduced without breaking the frontend contract.
 
 ### Q4. `GET /games/{id}` payload options
 
 **Specified in `docs/api_spec.md`:** GameDetail includes `state`, `move_history`, terminal fields, and metadata.
 
-**Remaining decisions:** Whether to add query flags (e.g. omit `move_history` on hot polls), whether to embed **legal moves** for the active player (to skip a separate `GET /legal_moves` round-trip), and how much summary data **GET /games** should return for list views.
+**✅ Resolved — legal moves remain a separate endpoint. `GET /games/{id}` never embeds them.**  
+The extra round-trip for `GET /games/{id}/legal_moves` is acceptable; the performance impact at this scale is negligible. A clean separation between game state and move computation is worth more than the saved request. No query flags (e.g. `?include=legal_moves`) will be added. The `GET /games` list endpoint returns GameSummary objects (no JSONB) as already specified.
 
 ### Q5. XP earning formula
 
 `xp_earned` vs `xp_applied` appears in the data model, but the rule for **what events** (per move, per game, damage-based, etc.) populate `xp_earned` is undefined.
 
-**Decision:** Business rule required before implementing XP attribution at game end.
+**✅ Resolved (v1) — XP earned = total damage dealt by that piece during the game.**  
+Each attack move in `move_history` that includes a `damage` field contributes that amount to `xp_earned` for the attacking piece. Pokeball captures (no damage field) do not contribute. Foresight damage uses the `damage` field in its `foresight_resolve` entry.
+
+Implementation note: XP attribution should be computed in a single pass over `move_history` at game end. Keep the attribution logic in an isolated helper function (e.g. `compute_xp(move_history) → dict[piece_id, int]`) so the formula can be changed without touching the game flow. The formula is explicitly expected to evolve — do not hardcode it into the game-end handler.
 
 ### Q6. `pokemon_pieces.species` updates for mid-game evolution
 
 If **Eevee** (or similar) evolves during a game, engine state and `move_history` reflect it, but updating **`pokemon_pieces.species` only at game completion** means an abandoned game leaves the roster row out of sync with history.
 
-**Decision:** Update **species** (and related fields) **incrementally after each committed move** vs **only on game completion** (simpler, current plan).
+**✅ Resolved — Kings (Pikachu and Eevee) are in-game-only evolutions and are never persisted as evolved forms.**
+
+- Every new game always starts with **Pikachu** (Red King) and **Eevee** (Blue King) — never Raichu or any Eevee evolution. Their mid-game evolved forms are transient engine state only.
+- `pokemon_pieces.species` for king and queen pieces is **immutable** — `'pikachu'`, `'eevee'`, or `'mew'`, never updated. Mew has no evolution. King mid-game evolutions are transient engine state only.
+- `pokemon_pieces.evolution_stage` does **not apply** to kings or the queen (always 0). They are exempt from the XP-threshold evolution system.
+- Kings and queen still have `pokemon_pieces` rows and accumulate `xp_earned` in `game_pokemon_map` (XP = damage dealt). This XP is tracked but never triggers persistent evolution.
+- Only rooks, knights, and bishops have mutable `species` and a meaningful `evolution_stage`. Their evolutions happen post-game only, so the Q6 timing problem (abandoned game leaving species out of sync mid-game) does not apply to any piece — no incremental update is needed.
 
 ### Minor implementation notes (no separate decision)
 

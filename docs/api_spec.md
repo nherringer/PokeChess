@@ -1,448 +1,282 @@
-# PokeChess App — API Specification
+# PokeChess — HTTP API specification (app backend)
 
-**Status:** Proposed — see open decisions and **App — open questions** in `implementation_roadmap.md` before implementing  
-**Last updated:** April 2026
+This document describes the **public HTTP API** of the FastAPI app (`pokechess-app`): authentication, request/response bodies, **status codes**, **error shapes**, query parameters, and behavioral notes that are not obvious from Pydantic class definitions alone.
 
-Cross-reference: `docs/pokechess_data_model.md` for all JSONB shapes, table schemas, and the move lifecycle flow.
+**Canonical sources (keep in sync):**
+
+| Concern | Location |
+|--------|----------|
+| Route handlers, business rules, side effects | `app/routes/` (`auth.py`, `users.py`, `friends.py`, `invites.py`, `games.py`, `moves.py`), `app/main.py` (`/health`) |
+| Pydantic models (field names and types) | `app/schemas.py` |
+| High-level overview + product context | [MASTERDOC.md](MASTERDOC.md) §5 |
+| `games.state` / `games.move_history` JSON shapes | [pokechess_data_model.md](pokechess_data_model.md) |
+| Runtime machine-readable schema | OpenAPI: `GET /openapi.json` and Swagger UI `GET /docs` when the server is running |
+
+**Base URL:** Depends on deployment (e.g. `http://localhost:8000`). All API paths below are **absolute** from the app root.
+
+**Content type:** `application/json` for request and response bodies unless noted.
 
 ---
 
-## Overview
+## 1. Authentication
 
-### Base URL
-- Production: `https://api.pokechess.app` (TBD)
-- Local dev: `http://localhost:8000`
+### 1.1 Access token (JWT)
 
-### Authentication
-JWT Bearer tokens. Include in every authenticated request:
-```
-Authorization: Bearer <access_token>
-```
-Tokens are short-lived (suggested: 30 min). A refresh token (longer-lived, httpOnly cookie) is used to obtain new access tokens without re-login.
+- **Header:** `Authorization: Bearer <access_token>`
+- **Algorithm / claims:** `HS256`; payload includes `sub` (user UUID string), `exp`, `type: "access"` — see `app/auth.py`.
+- **Required on:** Every route except `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`, and `GET /health`.
 
-### Versioning
-No versioning prefix for v1 (`/games/{id}`, not `/v1/games/{id}`). Add prefix when a breaking change is required.
+If the header is missing or invalid, FastAPI’s `HTTPBearer` dependency typically yields **403**; invalid/expired JWT decoding raises **`AppError`** → **401** with JSON body (see §2).
 
-### Error response format
+### 1.2 Refresh token (cookie)
+
+- **Cookie name:** `refresh_token`
+- **Set by:** `POST /auth/register`, `POST /auth/login` (HttpOnly, `SameSite=Lax`, `Secure` when `ENVIRONMENT` is not `development`).
+- **Used by:** `POST /auth/refresh` reads this cookie (no Bearer header required for refresh).
+
+### 1.3 Config (environment)
+
+Relevant variables: `SECRET_KEY`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `ENVIRONMENT`, `CORS_ORIGINS` — see `app/config.py`.
+
+---
+
+## 2. Error responses
+
+### 2.1 Application errors (`AppError`)
+
+Many failures use a unified JSON body:
+
 ```json
 {
-  "error": "move_not_legal",
-  "detail": "The submitted move is not in the legal move set for this position."
+  "error": "<short_code>",
+  "detail": "<human-readable message>"
 }
 ```
 
-### Open decision: response envelope
-All endpoints below return bare objects (no outer `{data: ..., meta: ...}` wrapper). Revisit if pagination becomes complex.
+**HTTP status** equals the code passed to `AppError` (e.g. 400, 401, 403, 404, 409, 503). Common `error` string values include: `conflict`, `unauthorized`, `forbidden`, `not_found`, `bad_request`, `game_not_active`, `not_your_turn`, `illegal_move`, `engine_error`, `engine_unavailable`, etc. — see `app/routes/*.py` and `app/auth.py`.
+
+### 2.2 Validation errors (Pydantic / FastAPI)
+
+Malformed JSON or invalid field types typically produce **422 Unprocessable Entity** with FastAPI’s default validation error shape (`detail` array).
+
+### 2.3 Server errors
+
+Unexpected internal failures may return **500** without the `AppError` shape.
 
 ---
 
-## Auth Endpoints
+## 3. Endpoint reference
 
-### `POST /auth/register`
-No auth required.
+### 3.1 Health (no auth)
 
-**Request:**
-```json
-{
-  "username": "ash",
-  "email": "ash@example.com",
-  "password": "..."
-}
-```
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Liveness. **Response:** `200` — `{"status": "ok"}` |
 
-**Response `201`:**
-```json
-{
-  "access_token": "...",
-  "token_type": "bearer",
-  "user_id": "uuid"
-}
-```
+### 3.2 Auth
 
----
+| Method | Path | Auth | Request body | Success response |
+|--------|------|------|--------------|------------------|
+| `POST` | `/auth/register` | None | `RegisterRequest` | **201** `TokenResponse` |
+| `POST` | `/auth/login` | None | `LoginRequest` | **200** `TokenResponse` |
+| `POST` | `/auth/refresh` | Cookie `refresh_token` | None | **200** `RefreshResponse` |
 
-### `POST /auth/login`
-No auth required.
+**`TokenResponse` fields:** `access_token`, `token_type` (default `"bearer"`), `user_id`.
 
-**Request:**
-```json
-{
-  "email": "ash@example.com",
-  "password": "..."
-}
-```
+**`RefreshResponse` fields:** `access_token`, `token_type` (default `"bearer"`).
 
-**Response `200`:**
-```json
-{
-  "access_token": "...",
-  "token_type": "bearer",
-  "user_id": "uuid"
-}
-```
+**Cookies on register/login:** Sets `refresh_token` as described in §1.2.
+
+**Typical errors:**
+
+| Condition | Status | Notes |
+|-----------|--------|--------|
+| Duplicate username/email on register | 409 | `conflict` |
+| Bad login credentials | 401 | `unauthorized` |
+| Missing/invalid refresh cookie or token | 401 | `unauthorized` |
 
 ---
 
-### `POST /auth/refresh`
-Requires valid refresh token (httpOnly cookie). Returns a new access token.
+### 3.3 Current user & settings
 
-**Response `200`:**
-```json
-{ "access_token": "...", "token_type": "bearer" }
-```
+All routes require **Bearer** access token.
 
----
+| Method | Path | Request body | Success response |
+|--------|------|--------------|------------------|
+| `GET` | `/me` | — | **200** `UserProfile` |
+| `PATCH` | `/me/settings` | `SettingsUpdate` | **200** `SettingsOut` |
 
-## User Endpoints
+**`UserProfile`:** `id`, `username`, `email`, `created_at`, `pieces` (list of `PieceOut`).
 
-### `GET /me`
-Auth required. Returns the authenticated user's profile and persistent pieces.
+**`PieceOut`:** `id`, `role`, `species`, `xp`, `evolution_stage`.
 
-**Response `200`:**
-```json
-{
-  "id": "uuid",
-  "username": "ash",
-  "email": "ash@example.com",
-  "created_at": "2026-04-01T00:00:00Z",
-  "pieces": [
-    {
-      "id": "uuid",
-      "role": "king",
-      "species": "pikachu",
-      "xp": 0,
-      "evolution_stage": 0
-    }
-  ]
-}
-```
-`pieces` is the user’s persistent roster from `pokemon_pieces` (see `pokechess_data_model.md`). The collection can grow over time; array length is not fixed. The example shows one object; responses include every owned piece.
+**`SettingsUpdate`:** optional `board_theme`, optional `extra_settings` (object; must serialize to JSON, max **16 384** bytes serialized, max nesting depth **8** — validated in `schemas.py`).
+
+**`SettingsOut`:** `board_theme`, `extra_settings`, `updated_at`.
+
+**Typical errors:**
+
+| Condition | Status |
+|-----------|--------|
+| Settings row missing on PATCH | 404 |
 
 ---
 
-### `PATCH /me/settings`
-Auth required.
+### 3.4 Friends
 
-**Request (partial update — send only changed fields):**
-```json
-{
-  "board_theme": "forest",
-  "extra_settings": { "sound_enabled": false }
-}
-```
+Bearer required.
 
-**Response `200`:** updated settings object.
+| Method | Path | Request body | Success response |
+|--------|------|--------------|------------------|
+| `GET` | `/friends` | — | **200** `FriendsResponse` |
+| `POST` | `/friends` | `SendFriendRequest` | **201** `FriendActionResponse` |
+| `PUT` | `/friends/{friendship_id}` | `FriendActionRequest` | **200** `FriendActionResponse` |
 
----
+**`SendFriendRequest`:** `username` (target user).
 
-## Friends (PvP — may be deferred to v2)
+**`FriendActionRequest`:** `action` — must be **`"accept"`** or **`"reject"`** (otherwise 400).
 
-### `GET /friends`
-Auth required. Returns accepted friends and pending requests.
+**`FriendsResponse`:** `friends` (list of `FriendUser`), `incoming` / `outgoing` (lists of `FriendRequest`).
 
-**Response `200`:**
-```json
-{
-  "friends": [{ "user_id": "uuid", "username": "misty" }],
-  "incoming": [{ "id": "uuid", "from_user_id": "uuid", "username": "brock" }],
-  "outgoing": [{ "id": "uuid", "to_user_id": "uuid", "username": "gary" }]
-}
-```
+**`FriendActionResponse`:** `id` (friendship UUID), `status`.
+
+**Typical errors:**
+
+| Condition | Status |
+|-----------|--------|
+| Target user not found | 404 |
+| Friend request to self | 400 |
+| Duplicate pending request | 409 |
+| Friendship not found / not pending / wrong user | 404 / 400 / 403 |
 
 ---
 
-### `POST /friends`
-Auth required. Send a friend request.
+### 3.5 Game invites (PvP lobby)
 
-**Request:**
-```json
-{ "username": "misty" }
-```
+Bearer required.
 
-**Response `201`:**
-```json
-{ "id": "uuid", "status": "pending" }
-```
+| Method | Path | Request body | Success response |
+|--------|------|--------------|------------------|
+| `GET` | `/game-invites` | — | **200** JSON array of `InviteOut` |
+| `POST` | `/game-invites` | `SendInviteRequest` | **201** `InviteActionResponse` |
+| `PUT` | `/game-invites/{invite_id}` | `InviteActionRequest` | **200** `InviteActionResponse` |
 
----
+**`SendInviteRequest`:** `invitee_id` (UUID). Invitee must already be an **accepted friend** (otherwise 404 `Invitee is not a friend`).
 
-### `PUT /friends/{id}`
-Auth required. Accept or reject an incoming request.
+**`InviteActionRequest`:** `action` — **`"accept"`** or **`"reject"`**.
 
-**Request:**
-```json
-{ "action": "accept" }   // or "reject"
-```
+**`InviteOut`:** `id`, `from_user_id`, `from_username`, `game_id`, `created_at`.
 
-**Response `200`:**
-```json
-{ "id": "uuid", "status": "accepted" }
-```
+**`InviteActionResponse`:** `invite_id`, `status`, `game_id`.
 
----
+**Behavior:** `POST` creates a **pending** game row and invite. **Accept** initializes the PvP game state (roster, etc.); **reject** marks invite rejected.
 
-## Game Invites (PvP — may be deferred to v2)
+**Typical errors:**
 
-The invite flow: sender creates an invite → a pending `games` row is created simultaneously → recipient accepts → game becomes active.
-
-### `GET /game-invites`
-Auth required. Returns pending invites addressed to the authenticated user.
-
-**Response `200`:**
-```json
-[
-  {
-    "id": "uuid",
-    "from_user_id": "uuid",
-    "from_username": "misty",
-    "game_id": "uuid",
-    "created_at": "..."
-  }
-]
-```
+| Condition | Status |
+|-----------|--------|
+| Not friends with invitee | 404 |
+| Active game already exists between pair | 409 |
+| Invite not found / not invitee / not pending | 404 / 403 / 400 |
 
 ---
 
-### `POST /game-invites`
-Auth required. Challenge a friend to a PvP game.
+### 3.6 Games
 
-**Request:**
-```json
-{ "invitee_id": "uuid" }
-```
-Server creates the `game_invites` row and a `games` row with `status='pending'`. The inviter is always assigned Red (moves first) — **open decision: should the inviter choose color?**
+Bearer required.
 
-**Response `201`:**
-```json
-{
-  "invite_id": "uuid",
-  "game_id": "uuid",
-  "status": "pending"
-}
-```
+| Method | Path | Request body | Success response |
+|--------|------|--------------|------------------|
+| `GET` | `/games` | — | **200** `GamesListResponse` |
+| `POST` | `/games` | `CreateGameRequest` | **201** `GameDetail` |
+| `GET` | `/games/{game_id}` | — | **200** `GameDetail` |
+| `POST` | `/games/{game_id}/resign` | — | **200** `GameDetail` |
 
-**Errors:**
-- `409` if an active game already exists between this pair (`one_active_pvp` unique index)
-- `404` if invitee not a friend
+**`CreateGameRequest`:** `bot_id` (UUID), `player_side` — **`"red"`** or **`"blue"`** only.
 
----
+- **`POST /games` creates PvB only:** the human occupies `player_side`; the bot occupies the opposite side. **PvP games are not created here** — they come from the invite flow (`POST /game-invites` + accept).
 
-### `PUT /game-invites/{id}`
-Auth required (invitee only). Accept or reject.
+**`GamesListResponse`:** `active`, `completed` — each lists `GameSummary` objects.
 
-**Request:**
-```json
-{ "action": "accept" }   // or "reject"
-```
+**`GameSummary`:** `id`, `status`, `whose_turn`, `turn_number`, `is_bot_game`, `bot_side`, `red_player_id`, `blue_player_id`, `winner`, `updated_at` — **no** heavy `state`/`move_history` JSONB.
 
-**Response `200`:**
-```json
-{
-  "invite_id": "uuid",
-  "status": "accepted",
-  "game_id": "uuid"
-}
-```
-On `accept`: `games.status` transitions to `'active'`, `games.whose_turn` set to `'red'`.
+**List behavior:** **Completed** games for the user are limited to the **10** most recently updated (`app/db/queries/games.py`). Active games are not capped.
+
+**`GameDetail`:** `id`, `status`, `whose_turn`, `turn_number`, `is_bot_game`, `bot_side`, `red_player_id`, `blue_player_id`, `winner`, `end_reason`, `state`, `move_history`.
+
+- **`state`:** Board snapshot object (see data model doc). May be `null` in edge cases from DB, but normal games have an object.
+- **`move_history`:** Array of move history objects (see data model doc). May be empty `[]`.
+
+**`whose_turn`:** Lowercase **`"red"`** / **`"blue"`** in DB/API; in **`state.active_player`** you will see **`RED`** / **`BLUE`** — compare carefully.
+
+**Typical errors:**
+
+| Condition | Status |
+|-----------|--------|
+| Not a participant | 403 |
+| Game not found | 404 |
+| `player_side` invalid | 400 |
+| Bot not found | 404 |
+| Resign when not active | 409 |
 
 ---
 
-## Game Endpoints
+### 3.7 Moves (legal moves + submit)
 
-### `GET /games`
-Auth required. Returns active and recently completed games for the authenticated user.
+Bearer required.
 
-**Response `200`:**
-```json
-{
-  "active": [ ...GameSummary objects... ],
-  "completed": [ ...GameSummary objects (last 10)... ]
-}
-```
+| Method | Path | Query / body | Success response |
+|--------|------|----------------|------------------|
+| `GET` | `/games/{game_id}/legal_moves` | **Required query:** `piece_row`, `piece_col` (integers **0–7**) | **200** JSON array of `LegalMoveOut` |
+| `POST` | `/games/{game_id}/move` | `MovePayload` | **200** `GameDetail` |
 
-**GameSummary object** (no JSONB — fast query, real columns only):
-```json
-{
-  "id": "uuid",
-  "status": "active",
-  "whose_turn": "red",
-  "turn_number": 14,
-  "is_bot_game": true,
-  "bot_side": "blue",
-  "red_player_id": "uuid",
-  "blue_player_id": null,
-  "winner": null,
-  "updated_at": "..."
-}
-```
+**`LegalMoveOut` / `MovePayload` fields:** `piece_row`, `piece_col`, `action_type`, `target_row`, `target_col`, optional `secondary_row`, `secondary_col`, `move_slot`.
 
----
+**`action_type`:** Must be **`engine.moves.ActionType` enum names** (`MOVE`, `ATTACK`, `FORESIGHT`, `TRADE`, `EVOLVE`, `QUICK_ATTACK`, `RELEASE`) — exactly as returned by `GET .../legal_moves` (see `app/routes/moves.py` / `LegalMoveOut`, which uses `action_type.name`).
 
-### `POST /games`
-Auth required. Create a PvB game directly (no invite flow).
+**Legal moves:** Only returns moves for the **selected piece** at `(piece_row, piece_col)` that match the current player’s turn. Client must send a **verbatim** `MovePayload` matching one of the returned legal moves (including `move_slot` when disambiguating Mew/Eevee).
 
-**Request:**
-```json
-{
-  "bot_id": "uuid",
-  "player_side": "red"
-}
-```
-`player_side` is `"red"` or `"blue"`. The bot occupies the other side. **Open decision: should this be randomized if omitted?**
+**`POST /games/{game_id}/move` behavior:**
 
-Server:
-1. Creates `pokemon_pieces` rows (5 per user) if this is the user's first game
-2. Builds `GameState.new_game()`, injects piece UUIDs from `pokemon_pieces`
-3. Creates `games` row + `game_pokemon_map` rows
+1. Validates move against `get_legal_moves(state)`.
+2. Applies move; resolves Pokéball RNG on the **server** (not in the engine HTTP service).
+3. **PvB:** If the game continues and it becomes the bot’s turn, the app calls the **engine** `POST /move`, applies the bot move, and may append both plies to history before responding — **one** `GameDetail` reflects the post-bot state (and can take up to engine time budget + network).
 
-**Response `201`:** full GameDetail object (see `GET /games/{id}`).
+**Typical errors:**
+
+| Condition | Status | `error` (typical) |
+|-----------|--------|-------------------|
+| Not participant | 403 | `forbidden` |
+| Game not active | 409 | `game_not_active` |
+| Not your turn | 409 | `not_your_turn` |
+| No friendly piece at square | 400 | `bad_request` |
+| Invalid `action_type` | 400 | `bad_request` |
+| Move not legal | 400 | `illegal_move` |
+| Engine unreachable / HTTP error | 503 | `engine_unavailable` / `engine_error` |
 
 ---
 
-### `GET /games/{id}`
-Auth required (must be a participant). Returns full game state for rendering.
+## 4. Response models (quick reference)
 
-**Response `200` — GameDetail object:**
-```json
-{
-  "id": "uuid",
-  "status": "active",
-  "whose_turn": "red",
-  "turn_number": 14,
-  "is_bot_game": true,
-  "bot_side": "blue",
-  "red_player_id": "uuid",
-  "blue_player_id": null,
-  "winner": null,
-  "end_reason": null,
-  "state": { ...GameState.to_dict() output... },
-  "move_history": [ ...move history entries... ]
-}
-```
+Names refer to **`app/schemas.py`**.
 
-`state` is the full `games.state` JSONB — see `pokechess_data_model.md` for the complete shape.  
-`move_history` is the full `games.move_history` JSONB array — included for animation, last-move highlighting, and Foresight display.
-
-**Open decision:** Should `move_history` be a separate endpoint (`GET /games/{id}/history`) to allow the polling loop to skip it when only checking turn state? At 5–20 users the TOAST overhead is negligible, but a `?include=history` query param is a low-cost future option.
+| Model | Used for |
+|-------|----------|
+| `RegisterRequest`, `LoginRequest` | Auth request bodies |
+| `TokenResponse`, `RefreshResponse` | Auth success |
+| `UserProfile`, `PieceOut` | `GET /me` |
+| `SettingsUpdate`, `SettingsOut` | `PATCH /me/settings` |
+| `FriendsResponse`, `SendFriendRequest`, `FriendActionRequest`, `FriendActionResponse` | Friends |
+| `SendInviteRequest`, `InviteOut`, `InviteActionRequest`, `InviteActionResponse` | Invites |
+| `CreateGameRequest`, `GameSummary`, `GameDetail`, `GamesListResponse` | Games |
+| `MovePayload`, `LegalMoveOut` | Moves |
 
 ---
 
-### `POST /games/{id}/resign`
-Auth required (active participant only).
+## 5. Related: engine service (not this app’s routes)
 
-**Request:** empty body.
+The **MCTS engine** is a separate process (e.g. port **5001**). The app calls:
 
-**Response `200`:** GameDetail with `status: "complete"`, `winner` set to the opponent, `end_reason: "resign"`.
+- `POST http://<ENGINE_URL>/move` with JSON `{"state": {...}, "persona_params": {"time_budget": <float>, ...}}` — see `app/engine_client.py` and [MASTERDOC.md](MASTERDOC.md) §5.3.
 
----
-
-## Move Endpoints
-
-### `GET /games/{id}/legal_moves`
-Auth required. Returns all legal moves for the piece at the given square, for the active player.
-
-**Query params:** `piece_row` (int, 0–7), `piece_col` (int, 0–7)
-
-**Response `200`:**
-```json
-[
-  {
-    "piece_row": 7,
-    "piece_col": 4,
-    "action_type": "MOVE",
-    "target_row": 6,
-    "target_col": 4,
-    "secondary_row": null,
-    "secondary_col": null,
-    "move_slot": null
-  },
-  {
-    "piece_row": 7,
-    "piece_col": 4,
-    "action_type": "QUICK_ATTACK",
-    "target_row": 6,
-    "target_col": 5,
-    "secondary_row": 5,
-    "secondary_col": 5,
-    "move_slot": null
-  },
-  {
-    "piece_row": 7,
-    "piece_col": 4,
-    "action_type": "QUICK_ATTACK",
-    "target_row": 6,
-    "target_col": 5,
-    "secondary_row": 5,
-    "secondary_col": 4,
-    "move_slot": null
-  }
-]
-```
-
-**`action_type` values** use engine `ActionType` enum names (uppercase): `"MOVE"`, `"ATTACK"`, `"FORESIGHT"`, `"TRADE"`, `"EVOLVE"`, `"QUICK_ATTACK"`, `"RELEASE"`.
-
-These strings are different from `move_history.action_type` values (lowercase, semantic). The app server handles the mapping when writing history.
-
-**Frontend notes:**
-- For most pieces: one Move object per target square.
-- **Mew targeting an enemy:** up to 3 Move objects for the same `(target_row, target_col)` — one per `move_slot` (0=Fire Blast/Fire, 1=Hydro Pump/Water, 2=Solar Beam/Grass). Additionally, FORESIGHT Move objects will appear for that square (and others). The frontend must present a picker when multiple moves share a target square. See open decisions.
-- **Espeon targeting an enemy:** 2 Move objects for the same square — one `ATTACK` (direct, no slot) and one `FORESIGHT`. Same disambiguation needed.
-- **Eevee QUICK_ATTACK:** multiple Move objects share the same `(target_row, target_col)` but have different `(secondary_row, secondary_col)`. Frontend must first select the attack target, then show available secondary destinations. See open decisions.
-- **Eevee EVOLVE:** exactly 0 or 1 EVOLVE move — determined by held item. No picker needed; just a button.
-
-**Errors:**
-- `400` if it is not the requesting player's turn
-- `404` if no piece exists at the given square
-
----
-
-### `POST /games/{id}/move`
-Auth required (must be the active player). Submit a move.
-
-**Request** — the full Move object as returned by `GET /games/{id}/legal_moves`:
-```json
-{
-  "piece_row": 7,
-  "piece_col": 4,
-  "action_type": "QUICK_ATTACK",
-  "target_row": 6,
-  "target_col": 5,
-  "secondary_row": 5,
-  "secondary_col": 5,
-  "move_slot": null
-}
-```
-Null fields may be omitted. `action_type` must be an engine ActionType enum name (uppercase).
-
-**Server behavior** (see Move Lifecycle Flow in `pokechess_data_model.md`):
-1. Validates move is in `get_legal_moves(state)`
-2. Applies the move via `apply_move()`; resolves stochastic Pokéball outcomes and records `rng_roll`
-3. Detects and records Foresight resolution if it occurred this turn
-4. Checks `is_terminal()` — sets status/winner if game over
-5. PvB only, if not over: calls `POST localhost:5001/move` on the engine container, applies the bot's response
-6. Writes updated state, history, and turn columns to Postgres in a single `UPDATE`
-7. On game over: writes XP to `game_pokemon_map` and `pokemon_pieces`
-
-**Response `200`:** full GameDetail object (same shape as `GET /games/{id}`), reflecting the state after both the human move and (for PvB) the bot's response.
-
-**Open decision:** If the bot move takes close to `time_budget` seconds (up to 3s), this endpoint blocks for that duration. This is acceptable for v1. SSE or a polling model for bot response is a v2 option.
-
-**Errors:**
-- `400 move_not_legal` — submitted move not found in `get_legal_moves(state)`
-- `400 not_your_turn` — `games.whose_turn` does not match the authenticated user's team
-- `409 game_not_active` — game is not in `status='active'`
-
----
-
-## Notes on the `whose_turn` column
-
-`games.whose_turn` stores lowercase `'red'` or `'blue'` (SQL `CHECK` constraint). The `games.state` JSONB stores `"active_player": "RED"` or `"BLUE"` (uppercase, matching the Python `Team` enum). The app server must lowercase `active_player` when writing the `whose_turn` column after each move.
-
----
-
-## Not covered here
-
-- Password reset / email verification (add before launch)
-- Admin endpoints
-- Rate limiting (add at the infrastructure/gateway layer)
-- The engine's internal `POST /move` and `POST /backup` endpoints (see `docs/app_and_engine_communication.md`)
+That contract is **not** part of the public REST API exposed to browsers under the same app prefix; document it for **server-to-server** integration only.
