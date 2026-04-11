@@ -58,14 +58,76 @@
 ```
 
 - **Play vs Bot** → large primary button (red-team color, since Red moves first against the bot), routes to difficulty selection → game creation with `game_type: "PvB"`
-- **Play vs Friend** → secondary button (blue-team), routes to the invite/friends flow — **required for v1**
+- **Play vs Friend** → secondary button (blue-team), routes to the **Friends screen** where the player picks a friend to invite
 - **My Pokemon** → small text link to roster page
+- **Friends** → small text link to the Friends screen (also accessible from the Friends screen itself)
 - **Settings** → small icon/text link
 - Background: subtle animated particle field or looping sprite drift — not distracting, just alive
 
 ---
 
-### 2. My Pokemon (Roster)
+### 2. Friends
+
+**Purpose:** Find new friends by username, manage incoming/outgoing requests, and pick a friend to play against. This is the social hub and the required entry point before sending a game invite.
+
+**Layout (tabbed, scrollable):**
+```
+┌──────────────────────────────────────┐
+│  ← Back           Friends            │
+├──────────────────────────────────────┤
+│  🔍 Search by username or email...   │
+│     [ ash_ketchum          ] [Add]   │
+├──────────────────────────────────────┤
+│  [ Friends ] [ Requests (2) ]        │
+├──────────────────────────────────────┤
+│  (Friends tab — default)             │
+│  ┌─────────────────────────────────┐ │
+│  │ 🟢 Misty         [Invite ▶]    │ │
+│  └─────────────────────────────────┘ │
+│  ┌─────────────────────────────────┐ │
+│  │ 🟢 Brock         [Invite ▶]    │ │
+│  └─────────────────────────────────┘ │
+│  ┌─────────────────────────────────┐ │
+│  │ ⚪ Gary           [Invite ▶]   │ │
+│  └─────────────────────────────────┘ │
+└──────────────────────────────────────┘
+```
+
+```
+┌──────────────────────────────────────┐
+│  (Requests tab)                      │
+│                                      │
+│  Incoming (2)                        │
+│  ┌─────────────────────────────────┐ │
+│  │ Jessie wants to be friends      │ │
+│  │              [Accept] [Decline] │ │
+│  └─────────────────────────────────┘ │
+│  ┌─────────────────────────────────┐ │
+│  │ James wants to be friends       │ │
+│  │              [Accept] [Decline] │ │
+│  └─────────────────────────────────┘ │
+│                                      │
+│  Outgoing (1)                        │
+│  ┌─────────────────────────────────┐ │
+│  │ → Meowth  (pending)   [Cancel]  │ │
+│  └─────────────────────────────────┘ │
+└──────────────────────────────────────┘
+```
+
+**Behaviour:**
+
+- **Search bar:** Detects whether the input contains `@` to choose the identifier type. Calls `POST /friends` with either `{ "username": "<value>" }` or `{ "email": "<value>" }` on tap of **Add**. Shows inline success ("Friend request sent!") or error ("User not found", "Already friends"). Never display the looked-up email address in the UI — show only the username once the request is sent.
+- **Friends tab:** Populated from the `friends[]` array in `GET /friends`. Each row shows username and an **Invite** button. Tapping **Invite** navigates straight to the game lobby (creates the invite via `POST /game-invites` with that friend's `user_id`).
+- **Requests tab:** Badge shows the count of incoming requests. Populated from `incoming[]` (received requests) and `outgoing[]` (sent, awaiting response) from `GET /friends`.
+  - **Accept** → `PUT /friends/{friendship_id}` with `{ "action": "accept" }` → moves the row to Friends tab.
+  - **Decline** / **Cancel** → `PUT /friends/{friendship_id}` with `{ "action": "reject" }` → removes the row.
+- Presence indicators (🟢 online / ⚪ offline) are **decorative placeholders in v1** — the backend has no presence API yet. Show 🟢 for all friends or omit entirely until presence is implemented.
+- Empty state (no friends yet): full-page illustration with copy "Add a friend to play with!" and the search bar as the primary action.
+- On mount and after each action: re-fetch `GET /friends` to keep the list fresh.
+
+---
+
+### 4. My Pokemon (Roster)
 
 **Purpose:** Show all of the player's named Pokemon pieces, their species, XP, and held items. There are more than 5 — each piece role (both Rooks, both Knights, both Bishops, the Queen, and the King) is its own named Pokemon. Read-only in v1.
 
@@ -94,7 +156,7 @@
 
 ---
 
-### 3. Difficulty Selection (PvB only)
+### 5. Difficulty Selection (PvB only)
 
 **Purpose:** Shown after tapping "Play vs Bot" before the game is created. Simple one-tap choice.
 
@@ -131,7 +193,7 @@ On app startup the client should call `GET /bots` (or equivalent discovery endpo
 
 ---
 
-### 4. Game Lobby / Waiting Screen
+### 6. Game Lobby / Waiting Screen
 
 **Purpose:** Shown while the server creates the game (PvB) or while waiting for a friend to accept an invite (PvP).
 
@@ -166,7 +228,7 @@ On app startup the client should call `GET /bots` (or equivalent discovery endpo
 
 ---
 
-### 5. Gameplay Screen
+### 7. Gameplay Screen
 
 **This is the most complex screen. The layout handles: board, piece info, turn status, HP, special move disambiguation, stored-in-ball display, and Foresight — without overwhelming the player.**
 
@@ -342,7 +404,7 @@ Quick Attack requires selecting an attack target and then a post-attack move des
 
 ---
 
-### 6. Game Over Screen
+### 8. Game Over Screen
 
 **Purpose:** Clear team win/loss result, XP earned per piece, prompt for next action.
 
