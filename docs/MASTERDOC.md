@@ -352,8 +352,8 @@ Append-only list of turns. **Snake_case `action_type`** strings in history (`att
 ### 9.1 MCTS engine container
 
 - **Bot code:** `bot/mcts.py` etc.; optional **C++** rollout in `cpp/` for speed.
-- **HTTP surface (repo state):** The app’s client (`app/engine_client.py`) and this doc describe **`POST /move`** with `{ "state", "persona_params" }`. **`bot/server.py` does not exist in the tree yet** — there is no FastAPI app under `bot/` to run. **`Dockerfile.engine`** is wired to `uvicorn bot.server:app` (see repo root Dockerfile), so **building and running that image as-is will fail** until `bot/server.py` (or an equivalent module path) is added. [implementation_roadmap.md](implementation_roadmap.md) tracks this as blocking for production PvB. **PvP never needs the engine.**
-- **Optional:** `POST /backup` for transposition table S3 dumps (design-level; same HTTP entry story).
+- **HTTP surface (repo state):** The app’s client (`app/engine_client.py`) describes **`POST /move`** with `{ "state", "persona_params" }`. **`bot/server.py` does not exist in the tree yet** — there is no FastAPI app under `bot/` to run. **`Dockerfile.engine`** is wired to `uvicorn bot.server:app` (see repo root Dockerfile), so **building and running that image as-is will fail** until `bot/server.py` (or an equivalent module path) is added. [implementation_roadmap.md](implementation_roadmap.md) tracks this as blocking for production PvB. **PvP never needs the engine.**
+- **Persistence:** There is **no** app-triggered **`POST /backup`** or app-orchestrated engine backup. Transposition tables and other bot-side state are **owned by the bot server** inside the engine container (e.g. **local SQLite**), not RDS — see [architecture_design_plan.md](architecture_design_plan.md) and [app_and_engine_communication.md](app_and_engine_communication.md).
 - **Future:** `engine/notation.py` for PokeChess-PGN replay/analysis (not required for Postgres).
 
 ### 9.2 Load-aware budgeting (implemented in app)
@@ -381,12 +381,12 @@ The engine does not need separate code paths — it just receives a smaller `tim
 This is the **intended** production shape, not a guarantee about your current laptop setup.
 
 - **Repo:** Monorepo builds **two** images → push to **ECR** → **ECS** on a single **EC2 t4g.small** (cost estimates in [architecture_design_plan.md](architecture_design_plan.md)).
-- **Services:** `pokechess-app` (public HTTP, port 8000), `pokechess-engine` (internal, port 5001, not exposed publicly).
+- **Services:** `pokechess-app` (public HTTP, port 8000), `pokechess-engine` (internal, port 5001, not exposed publicly). On the **same EC2 host**, the app calls the engine at **`ENGINE_URL`** (typically **`http://localhost:5001`**, matching [`app/engine_client.py`](../app/engine_client.py) and compose).
 - **Browser → app:** HTTP polling (or SSE later); latency on the order of seconds is acceptable.
-- **App → engine:** localhost or private network `POST /move` + optional `POST /backup` for MCTS tree snapshots to **S3**; engine loads snapshots on startup per design doc.
-- **DB:** Postgres (RDS or on-box per plan) — single database for users and games.
-- **Frontend assets:** React/Next on S3 + CloudFront when a client exists.
-- **Concurrency / queue:** Target architecture discussion in [architecture_design_plan.md](architecture_design_plan.md) — e.g. queueing engine work so multiple games do not starve each other’s CPU; pair with load-aware **time** scaling.
+- **App → engine:** **`POST /move` only** — payload `{ "state", "persona_params" }` per `engine_client.py`. **No** app-triggered backup endpoint; bot-side persistence (e.g. TT in **local SQLite**) stays inside the engine process.
+- **DB:** **Amazon RDS (PostgreSQL)** for **all** app tables — the FastAPI app is the only service using `DATABASE_URL` / RDS. The engine **does not** connect to RDS.
+- **Frontend assets:** React/Next on S3 + CloudFront when a client exists (static assets only; unrelated to engine TT storage).
+- **Concurrency / queue:** The engine target is a **queue**: **one MCTS search at a time** per instance, with requests waiting when busy — [architecture_design_plan.md](architecture_design_plan.md). Pair with load-aware **`time_budget`** scaling in the app ([load_aware_budgeting.md](load_aware_budgeting.md)).
 
 **Deferred (v2):** Dedicated compute for engine, start/stop on demand ([architecture_design_plan.md](architecture_design_plan.md)).
 
@@ -400,13 +400,13 @@ This is the **intended** production shape, not a guarantee about your current la
 | [implementation_roadmap.md](implementation_roadmap.md) | Monorepo checklist, container duties, state/history tables, Q&A decisions, next steps |
 | [pokechess_data_model.md](pokechess_data_model.md) | Full schema, JSON examples, HTTP model tables, detailed move lifecycle |
 | [architecture_design_plan.md](architecture_design_plan.md) | Target AWS/ECS/EC2/cost/queue narrative |
-| [app_and_engine_communication.md](app_and_engine_communication.md) | Older integration notes — **verify against `engine_client.py`** |
+| [app_and_engine_communication.md](app_and_engine_communication.md) | App ↔ engine contract, RDS vs bot-local persistence, queue model — aligned with **`engine_client.py`** |
 | [load_aware_budgeting.md](load_aware_budgeting.md) | Load-aware MCTS budgeting |
 | [frontend_layout_proposal.md](frontend_layout_proposal.md) | v1 UI/UX spec (no frontend implemented) |
 | [Rules.md](Rules.md) | Full game rules |
 | [CampaignDesign.md](CampaignDesign.md) | **Future** solo campaign — not current build |
 | [task_log.md](task_log.md) | Historical ML task log |
-| [TT_s3_upload.txt](TT_s3_upload.txt) | TT / S3 notes |
+| [TT_s3_upload.txt](TT_s3_upload.txt) | Older TT / S3 design notes — may not match current “bot-local persistence” direction; see [architecture_design_plan.md](architecture_design_plan.md) |
 | PDFs (optional assets) | Some checkouts include boards/movement/notation PDFs under `docs/`; **this tree may have none** — if missing, they are optional reference art, not required to run the app. |
 
 ---
