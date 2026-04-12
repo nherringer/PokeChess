@@ -12,7 +12,7 @@ export async function sendFriendRequest(identifier: {
   username?: string;
   email?: string;
 }): Promise<FriendActionResponse> {
-  return apiFetch<FriendActionResponse>("/friends/request", {
+  return apiFetch<FriendActionResponse>("/friends", {
     method: "POST",
     body: JSON.stringify(identifier),
   });
@@ -22,7 +22,8 @@ export async function respondToFriend(
   friendshipId: string,
   action: "accept" | "reject"
 ): Promise<FriendActionResponse> {
-  return apiFetch<FriendActionResponse>(`/friends/${friendshipId}/${action}`, {
-    method: "POST",
+  return apiFetch<FriendActionResponse>(`/friends/${friendshipId}`, {
+    method: "PUT",
+    body: JSON.stringify({ action }),
   });
 }

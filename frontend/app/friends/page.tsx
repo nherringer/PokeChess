@@ -68,7 +68,7 @@ function RequestRow({
 
 export default function FriendsPage() {
   const router = useRouter();
-  const { data, loading, error, refresh } = useFriends();
+  const { data, loading, error, unauthenticated, refresh } = useFriends();
   const [activeTab, setActiveTab] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchStatus, setSearchStatus] = useState<string | null>(null);
@@ -128,8 +128,23 @@ export default function FriendsPage() {
   const hasNoFriends =
     !loading && friends.length === 0 && incoming.length === 0 && outgoing.length === 0;
 
+  if (unauthenticated) {
+    return (
+      <PageShell title="Friends" backHref="/">
+        <div className="flex flex-col items-center justify-center py-24 text-center gap-4 px-6">
+          <span className="text-5xl">🔒</span>
+          <h2 className="font-display text-xl font-bold text-white">Log in to see your friends</h2>
+          <p className="text-white/50 text-sm">You need an account to add friends and send game invites.</p>
+          <a href="/login" className="mt-2 px-8 py-3 rounded-full font-display font-bold text-white text-base" style={{ backgroundColor: "#3C72E0" }}>
+            Log In
+          </a>
+        </div>
+      </PageShell>
+    );
+  }
+
   return (
-    <PageShell title="Friends">
+    <PageShell title="Friends" backHref="/">
       <div className="px-4 pt-4 pb-8 max-w-lg mx-auto">
         {/* Search bar */}
         <div className="mb-4">
