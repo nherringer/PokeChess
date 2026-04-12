@@ -7,7 +7,7 @@ from ..main import AppError
 from ..schemas import UserProfile, PieceOut, SettingsUpdate, SettingsOut
 from ..db.queries import users as user_q, settings as settings_q
 
-router = APIRouter(tags=["users"])
+router = APIRouter(prefix="/users", tags=["users"])
 
 
 @router.get("/me", response_model=UserProfile)
