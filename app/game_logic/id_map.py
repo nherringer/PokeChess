@@ -167,10 +167,16 @@ def _trace_piece_origin(
                 return stored_id
 
     # Case 5: piece was at a different position but didn't move via the player's move
-    # This shouldn't happen in normal play, but as a fallback scan old positions
+    # This shouldn't happen in normal play, but as a fallback scan old positions.
+    # Use piece.id as a tiebreaker when available to avoid swapping UUIDs between
+    # duplicate-type pieces (e.g., two rooks or two knights on the same team).
     for old_pos, uid in old_pos_ids.items():
         old_p = old_state.piece_at(old_pos[0], old_pos[1])
         if old_p is not None and _same_piece(old_p, piece) and uid is not None:
+            # When both pieces carry an id, they must match — otherwise this is
+            # a different piece of the same type.
+            if piece.id is not None and old_p.id is not None and piece.id != old_p.id:
+                continue
             # Verify this piece isn't still at its old position in new_state
             new_at_old = new_state.piece_at(old_pos[0], old_pos[1])
             if new_at_old is None or not _same_piece(new_at_old, old_p):

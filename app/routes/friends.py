@@ -29,7 +29,7 @@ async def send_friend_request(body: SendFriendRequest, user: CurrentUser, db: Db
     if body.username:
         target = await user_q.get_user_by_username(db, body.username)
     elif body.email:
-        target = await user_q.get_user_by_email(db, body.email)
+        target = await user_q.get_user_by_email_public(db, body.email)
     else:
         raise AppError(400, "bad_request", "Provide either 'username' or 'email'")
     if target is None:

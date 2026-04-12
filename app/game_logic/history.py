@@ -73,7 +73,7 @@ def build_history_entry(
     elif at == ActionType.QUICK_ATTACK:
         return _build_quick_attack(old_state, piece, move, piece_id, player, turn, id_map)
     elif at == ActionType.FORESIGHT:
-        return _build_foresight(old_state, piece, move, piece_id, player, turn)
+        return _build_foresight(old_state, new_state, piece, move, piece_id, player, turn)
     elif at == ActionType.EVOLVE:
         return _build_evolve(old_state, new_state, piece, move, piece_id, player, turn)
     elif at == ActionType.TRADE:
@@ -282,10 +282,19 @@ def _build_quick_attack(
 
 
 def _build_foresight(
-    old_state: GameState, piece: Piece, move: Move,
+    old_state: GameState, new_state: GameState, piece: Piece, move: Move,
     piece_id: Optional[str], player: str, turn: int,
 ) -> dict:
-    damage = _FORESIGHT_DAMAGE.get(piece.piece_type, 80)
+    # Read damage and resolves_on_turn from the engine's computed ForesightEffect
+    # so item bonuses or rule changes are reflected automatically.
+    fx = new_state.pending_foresight.get(old_state.active_player)
+    if fx is not None:
+        damage = fx.damage
+        resolves_on_turn = fx.resolves_on_turn
+    else:
+        # Fallback: use static table (should not happen if engine set pending_foresight)
+        damage = _FORESIGHT_DAMAGE.get(piece.piece_type, 80)
+        resolves_on_turn = old_state.turn_number + 2
     return {
         "turn": turn,
         "player": player,
@@ -299,7 +308,7 @@ def _build_foresight(
             "target_row": move.target_row,
             "target_col": move.target_col,
             "damage": damage,
-            "resolves_on_turn": old_state.turn_number + 2,
+            "resolves_on_turn": resolves_on_turn,
         },
     }
 

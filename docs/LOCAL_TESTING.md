@@ -43,15 +43,15 @@ Ships with Xcode Command Line Tools (likely already installed). If `make` is not
 xcode-select --install
 ```
 
-### 4. Python 3.12+
+### 4. Python 3.12
 
-The project venv uses Python 3.14. Install via Homebrew:
+The Dockerfiles use `python:3.12-slim`. Install 3.12 locally to match:
 
 ```bash
-brew install python@3.14
+brew install python@3.12
 ```
 
-> Any 3.12+ will work. Use `python3.14` (or `python3.12`, etc.) explicitly in the venv command below.
+> Any 3.12+ will work, but stick to 3.12 to avoid behaviour differences from the container. Use `python3.12` explicitly in the venv command below.
 
 ### 5. Node 20+
 
@@ -67,7 +67,8 @@ Verify: `node --version` should print `v20.x.x` or higher.
 From the `PokeChess/` directory:
 
 ```bash
-python3.14 -m venv .venv
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 .venv/bin/pip install -r app/requirements.txt
 ```
 
@@ -84,7 +85,7 @@ Verify everything is in order:
 ```bash
 docker --version          # Docker version 27+
 make --version            # GNU Make 3.81+
-.venv/bin/python --version  # Python 3.14+
+.venv/bin/python --version  # Python 3.12+
 node --version            # v20+
 ```
 
@@ -93,7 +94,7 @@ node --version            # v20+
 ## Prerequisites summary
 
 - Docker Desktop running
-- `.venv/` set up with `pip install -r app/requirements.txt`
+- `.venv/` set up with both `pip install -r requirements.txt` and `pip install -r app/requirements.txt`
 - `frontend/node_modules/` populated via `npm install`
 
 No local `psql` required — schema is applied via `docker compose exec`.
@@ -104,12 +105,12 @@ No local `psql` required — schema is applied via `docker compose exec`.
 
 | Config | Local (dev) | AWS (prod) |
 |--------|-------------|------------|
-| `DATABASE_URL` | `postgresql+asyncpg://pokechess:pokechess@localhost:5432/pokechess` | RDS endpoint + Secrets Manager credentials |
+| `DATABASE_URL` | `postgresql+asyncpg://pokechess:pokechess@localhost:5432/pokechess` (default — matches compose service, no export needed) | RDS endpoint + Secrets Manager credentials |
 | `ENGINE_URL` | `http://localhost:5001` | `http://localhost:5001` — **same**: ECS uses `network_mode=host` |
 | `SECRET_KEY` | dev default (hardcoded, warns on startup) | Secrets Manager injected via ECS task env |
 | `CORS_ORIGINS` | `*` (allowed when `ENVIRONMENT=development`) | Must be explicit domain — app raises `RuntimeError` if `*` and not development |
 | `ENVIRONMENT` | `development` (default) | Must be set to `production` to enforce CORS + `Secure` cookie flag |
-| `S3_TREE_BUCKET` / `AWS_DEFAULT_REGION` | Not needed — engine skips TT backup | Set in ECS task def for the engine container |
+| `POKECHESS_TT_BUCKET` / `AWS_DEFAULT_REGION` | Not needed — engine skips TT backup | Set in ECS task def for the engine container |
 
 **Specific gotchas:**
 
@@ -151,12 +152,6 @@ make reset          # stops postgres AND wipes DB volume (full clean slate)
 ---
 
 ## 2. Full Integration Testing (PvP + PvB)
-
-> **Blocked until `bot/server.py` is implemented.** See `docs/implementation_roadmap.md`.
-
-`Dockerfile.engine` runs `uvicorn bot.server:app`. That module does not exist yet — the engine container crashes on start.
-
-**When `bot/server.py` is ready:**
 
 **Terminal 1 — all services:**
 ```bash

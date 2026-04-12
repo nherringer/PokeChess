@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-PokeChess is a hybrid chess/Pokemon game. This repo contains the ML bot (MCTS-based) only — a coworker owns the frontend and async layer separately.
+PokeChess is a hybrid chess/Pokemon game. This repo contains the full backend stack: the ML bot (MCTS-based), the FastAPI application layer, and the Next.js frontend. The bot and app are deployed as separate containers on ECS.
 
 ## Commands
 
@@ -41,18 +41,58 @@ engine/     Core game logic — no ML dependencies
   rules.py    apply_move() → [(state, prob)], is_terminal(), hp_winner()
   zobrist.py  Zobrist hashing for transposition table
 
-bot/        MCTS bot — depends on engine, no frontend coupling
+bot/        MCTS bot HTTP service — deployed as the engine container
   mcts.py         MCTS tree, 4-phase loop, tree reuse between moves
   ucb.py          UCB1 formula with tunable exploration constant C
   transposition.py Persistent hash→(wins,visits) table across games
+  server.py       FastAPI service: POST /move, GET /health; wires MCTS + TT
+  tt_store.py     TTStore (S3 upload/download) + TTSyncQueue (background backup)
+
+app/        FastAPI application layer — deployed as the app container
+  main.py         App factory (create_app), CORS, error handler, lifespan
+  config.py       Settings from env vars (DATABASE_URL, SECRET_KEY, ENGINE_URL, …)
+  auth.py         JWT helpers, bcrypt, FastAPI dependencies (get_current_user, Db)
+  schemas.py      Pydantic request/response models
+  routes/         HTTP route handlers (auth, users, friends, invites, games, moves)
+  db/             asyncpg pool + SQL queries (connection.py, queries/, schema.sql)
+  game_logic/     Board serialization, UUID tracking (id_map), history, roster
+  engine_client.py httpx wrapper for POST /move to the bot service
+
+frontend/   Next.js frontend — dev server via `make frontend`
 
 cpp/        C++ rollout engine (pybind11 bridge)
   engine.cpp    Full rollout hot-loop in C++; exposes run_rollouts() and run_rollout_with_rolls()
   state_codec.py  Python→wire-format encoder consumed by the C++ decoder
 tests/      pytest — unit tests per module
 scripts/    Standalone utilities (benchmark.py for win-rate validation)
-docs/       Game design PDFs (rules, piece movement diagrams, board sheets)
+docs/       Design docs, API spec, local testing runbook
 ```
+
+## Key Environment Variables
+
+| Variable | Default | Notes |
+|---|---|---|
+| `DATABASE_URL` | `postgresql+asyncpg://pokechess:pokechess@localhost:5432/pokechess` | Matches compose service — no export needed locally |
+| `SECRET_KEY` | `dev-secret-change-me-in-production` | Must be set (≥32 chars) in non-dev |
+| `ENGINE_URL` | `http://localhost:5001` | Same locally and in ECS (network_mode=host) |
+| `ENVIRONMENT` | `development` | Set to `production` in ECS to enforce guards |
+| `POKECHESS_TT_BUCKET` | _(unset)_ | S3 bucket for TT backups; omit to disable |
+| `POKECHESS_TT_SIZE` | `1048576` | TT slot count; use `67108864` in prod |
+
+## Make Targets
+
+| Command | What it does |
+|---|---|
+| `make partial` | Start postgres, wait healthy, apply schema (PvP only) |
+| `make full` | `docker compose up --build` all 3 services + schema (PvP + PvB) |
+| `make app` | Run uvicorn app on :8000 (foreground) |
+| `make frontend` | Run Next.js dev server on :3000 (foreground) |
+| `make schema` | Apply `app/db/schema.sql` |
+| `make bot-id` | Print seeded Metallic bot UUID |
+| `make test` | Run pytest |
+| `make test-v` | Run pytest verbose |
+| `make down` | `docker compose down` (keeps volume) |
+| `make reset` | `docker compose down -v` (wipes DB volume) |
 
 ## Key Design Decisions
 

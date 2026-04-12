@@ -35,6 +35,18 @@ if SECRET_KEY == "dev-secret-change-me-in-production":
         stacklevel=1,
     )
 
+if len(SECRET_KEY) < 32 and ENVIRONMENT != "development":
+    raise RuntimeError(
+        f"SECRET_KEY is too short ({len(SECRET_KEY)} chars); minimum 32 required in non-development environments."
+    )
+
+_DATABASE_URL_DEFAULT = "postgresql+asyncpg://pokechess:pokechess@localhost:5432/pokechess"
+if DATABASE_URL == _DATABASE_URL_DEFAULT and ENVIRONMENT != "development":
+    raise RuntimeError(
+        "DATABASE_URL is set to the default dev value in a non-development environment. "
+        "Set DATABASE_URL to the production database connection string."
+    )
+
 
 def asyncpg_dsn() -> str:
     """Convert DATABASE_URL to a raw asyncpg-compatible DSN."""

@@ -16,10 +16,14 @@ unchanged so the engine can use them without an app change.
 
 from __future__ import annotations
 
+import logging
+
 import httpx
 from fastapi import Request
 
 from .main import AppError
+
+logger = logging.getLogger(__name__)
 
 # Cap engine HTTP wait so a bad DB bot_params.time_budget cannot hold row locks unbounded.
 _MAX_BOT_TIME_BUDGET = 10.0
@@ -60,7 +64,14 @@ async def request_bot_move(
         )
         resp.raise_for_status()
         return resp.json()
-    except httpx.HTTPStatusError:
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        body = exc.response.text[:500]
+        logger.error("Engine returned HTTP %d: %s", status, body)
+        if 400 <= status < 500:
+            # 4xx means the app sent a bad request — surface as 502 so it's
+            # distinguishable from a 5xx engine failure.
+            raise AppError(502, "engine_request_error", f"Engine rejected request (HTTP {status})")
         raise AppError(503, "engine_error", "Engine returned an error")
     except (httpx.RequestError, httpx.TimeoutException):
         raise AppError(503, "engine_unavailable", "Engine is unreachable")

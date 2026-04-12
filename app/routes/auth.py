@@ -38,7 +38,8 @@ async def register(body: RegisterRequest, response: Response, db: Db):
         httponly=True,
         secure=config.ENVIRONMENT != "development",
         samesite="lax",
-        max_age=30 * 24 * 3600,
+        path="/auth/refresh",
+        max_age=config.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600,
     )
     return TokenResponse(access_token=access, user_id=user["id"])
 
@@ -57,7 +58,8 @@ async def login(body: LoginRequest, response: Response, db: Db):
         httponly=True,
         secure=config.ENVIRONMENT != "development",
         samesite="lax",
-        max_age=30 * 24 * 3600,
+        path="/auth/refresh",
+        max_age=config.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600,
     )
     return TokenResponse(access_token=access, user_id=user["id"])
 

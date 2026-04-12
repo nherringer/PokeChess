@@ -30,7 +30,16 @@ def create_app() -> FastAPI:
     from . import config
     from .routes import auth, users, friends, invites, games, moves
 
-    app = FastAPI(title="PokeChess", lifespan=lifespan)
+    docs_url = "/docs" if config.ENVIRONMENT == "development" else None
+    redoc_url = "/redoc" if config.ENVIRONMENT == "development" else None
+    openapi_url = "/openapi.json" if config.ENVIRONMENT == "development" else None
+    app = FastAPI(
+        title="PokeChess",
+        lifespan=lifespan,
+        docs_url=docs_url,
+        redoc_url=redoc_url,
+        openapi_url=openapi_url,
+    )
     app.state.engine_url = config.ENGINE_URL
 
     # Browsers reject Access-Control-Allow-Origin: * together with credentialed requests.

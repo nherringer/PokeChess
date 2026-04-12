@@ -122,7 +122,7 @@ For background on why the Zobrist hash is insufficient for state serialization, 
 ```
 global_tt: TranspositionTable   # single local TT, shared across all requests
 request_count: int              # total requests served; triggers TT backup at multiples of 50
-tt_sync_queue: TTSyncQueue      # see docs/Transposition_Table_Sync.md
+sync_queue: TTSyncQueue         # see docs/Transposition_Table_Sync.md
 ```
 
 No per-request or per-game state is retained between calls. The global TT accumulates statistics across all requests for the lifetime of the process.
@@ -184,7 +184,7 @@ On startup:
 3. If S3 key also does not exist: start with an empty `global_tt`
 4. Start background TT sync thread
 
-The app does **not** trigger TT backups — persistence is entirely the engine's responsibility. `Dockerfile.engine` mentions a `POST /backup` endpoint; if exposed, it is for ops/admin use only and is not called by the app. The `TTSyncQueue` handles periodic backups automatically.
+The app does **not** trigger TT backups — persistence is entirely the engine's responsibility. A `POST /backup` endpoint could be added for ops/admin use (e.g. forcing a flush before a deploy), but it is not currently implemented. The `TTSyncQueue` handles periodic backups automatically.
 
 See `docs/Transposition_Table_Sync.md` for the full startup and sync design.
 
