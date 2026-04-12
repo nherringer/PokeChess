@@ -191,6 +191,56 @@ class TestTimeBudgetClamping:
         assert kwargs["time_budget"] >= 0.1
 
 
+class TestPersonaFloatClamping:
+    def test_exploration_c_clamped_above(self, client_and_mocks):
+        client, mock_mcts_cls, *_ = client_and_mocks
+        payload = {
+            "state": _new_game_dict(),
+            "persona_params": {"time_budget": 1.0, "exploration_c": 999.0},
+        }
+        client.post("/move", json=payload)
+        _, kwargs = mock_mcts_cls.call_args
+        assert kwargs["exploration_c"] <= 10.0
+
+    def test_exploration_c_clamped_below(self, client_and_mocks):
+        client, mock_mcts_cls, *_ = client_and_mocks
+        payload = {
+            "state": _new_game_dict(),
+            "persona_params": {"time_budget": 1.0, "exploration_c": 0.0},
+        }
+        client.post("/move", json=payload)
+        _, kwargs = mock_mcts_cls.call_args
+        assert kwargs["exploration_c"] >= 0.05
+
+    def test_bias_bonus_clamped_when_move_bias_set(self, client_and_mocks):
+        client, mock_mcts_cls, *_ = client_and_mocks
+        payload = {
+            "state": _new_game_dict(),
+            "persona_params": {
+                "time_budget": 1.0,
+                "move_bias": "chase_pikachu",
+                "bias_bonus": 999.0,
+            },
+        }
+        client.post("/move", json=payload)
+        _, kwargs = mock_mcts_cls.call_args
+        assert kwargs["bias_bonus"] <= 3.0
+
+    def test_bias_bonus_clamped_below_when_move_bias_set(self, client_and_mocks):
+        client, mock_mcts_cls, *_ = client_and_mocks
+        payload = {
+            "state": _new_game_dict(),
+            "persona_params": {
+                "time_budget": 1.0,
+                "move_bias": "chase_pikachu",
+                "bias_bonus": -50.0,
+            },
+        }
+        client.post("/move", json=payload)
+        _, kwargs = mock_mcts_cls.call_args
+        assert kwargs["bias_bonus"] >= 0.0
+
+
 class TestRequestCounterAndEnqueue:
     def test_enqueue_called_at_50_requests(self, client_and_mocks):
         client, mock_mcts_cls, mock_sync_queue, server_mod = client_and_mocks
