@@ -316,8 +316,12 @@ def test_prefer_pikachu_raichu_bonus_set_on_pikachu_moves():
     assert all(c.bias_bonus == 0.0  for c in squirtle_children)
 
 
-def test_chase_pikachu_bonus_is_zero_when_no_pikachu_attackable():
-    """When no Pikachu/Raichu is on the board, all children should have bonus 0.0."""
+def test_chase_pikachu_bonus_is_zero_when_no_pikachu_attackable_from_legal_moves():
+    """chase_pikachu only adds bonus on ATTACKs targeting Pikachu/Raichu.
+
+    Blue has no such attack among legal moves; a Red Pikachu may still be on
+    the board. Every child should get bias_bonus 0.0.
+    """
     board = [[None] * 8 for _ in range(8)]
     board[0][4] = Piece.create(PieceType.PIKACHU, Team.RED,  0, 4)
     board[7][4] = Piece.create(PieceType.EEVEE,   Team.BLUE, 7, 4)
