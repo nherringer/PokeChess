@@ -1,0 +1,173 @@
+# Build & Deploy — PokeChess app repo CI/CD.
+#
+# On push to main:   build both images, push to ECR, update ECS services.
+# On pull_request:   docker build only (no AWS — works for fork PRs with public base images).
+#
+# Required GitHub configuration (Settings → Secrets and variables → Actions):
+#   Secrets:
+#     AWS_ROLE_ARN       — ARN of the CI app deploy IAM role (from `terraform output ci_app_role_arn`)
+#     ECR_APP_REPO       — ECR repo URL for pokechess-app (from `terraform output ecr_app_repo_url`)
+#     ECR_ENGINE_REPO    — ECR repo URL for pokechess-engine (from `terraform output ecr_engine_repo_url`)
+#
+# All three values come from the Terraform-PokeChess infrastructure repo (terraform output / console).
+# The role uses GitHub OIDC — no long-lived AWS keys are stored.
+
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  id-token: write   # required for OIDC on push (configure-aws-credentials)
+  contents: read
+
+env:
+  AWS_REGION: us-west-2
+  ECS_CLUSTER: pokechess-prod
+
+jobs:
+  # ── pokechess-app ────────────────────────────────────────────────────────────
+  deploy-app:
+    name: App — build / push / deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        if: github.event_name == 'push'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        if: github.event_name == 'push'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build app image (push)
+        if: github.event_name == 'push'
+        env:
+          IMAGE_SHA: ${{ secrets.ECR_APP_REPO }}:${{ github.sha }}
+          IMAGE_LATEST: ${{ secrets.ECR_APP_REPO }}:latest
+        run: |
+          docker build -f Dockerfile.app -t "$IMAGE_SHA" -t "$IMAGE_LATEST" .
+
+      - name: Build app image (PR — no registry tags)
+        if: github.event_name == 'pull_request'
+        run: |
+          docker build -f Dockerfile.app -t pokechess-app:ci .
+
+      - name: Push app image to ECR
+        if: github.event_name == 'push'
+        env:
+          IMAGE_SHA: ${{ secrets.ECR_APP_REPO }}:${{ github.sha }}
+          IMAGE_LATEST: ${{ secrets.ECR_APP_REPO }}:latest
+        run: |
+          docker push "$IMAGE_SHA"
+          docker push "$IMAGE_LATEST"
+
+      - name: Download current app task definition
+        if: github.event_name == 'push'
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition pokechess-app-prod \
+            --query taskDefinition \
+            --output json > task-def-app.json
+
+      - name: Render updated app task definition
+        if: github.event_name == 'push'
+        id: render-app
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-def-app.json
+          container-name: pokechess-app
+          image: ${{ secrets.ECR_APP_REPO }}:${{ github.sha }}
+
+      - name: Deploy app to ECS
+        if: github.event_name == 'push'
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-app.outputs.task-definition }}
+          service: pokechess-app
+          cluster: ${{ env.ECS_CLUSTER }}
+          # Waits for the service to reach steady state before marking the step
+          # successful. If the new task fails its health check, ECS rolls back
+          # automatically (deployment_circuit_breaker is enabled in Terraform).
+          wait-for-service-stability: true
+
+  # ── pokechess-engine ─────────────────────────────────────────────────────────
+  # Runs after deploy-app so a failed app build/push/deploy never leaves the
+  # engine image/service ahead of the app. If engine fails after app succeeded,
+  # ECS can still be mixed-SHA until a fix is merged (same as any serial deploy).
+  deploy-engine:
+    name: Engine — build / push / deploy
+    needs: [deploy-app]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        if: github.event_name == 'push'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        if: github.event_name == 'push'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build engine image (push)
+        if: github.event_name == 'push'
+        env:
+          IMAGE_SHA: ${{ secrets.ECR_ENGINE_REPO }}:${{ github.sha }}
+          IMAGE_LATEST: ${{ secrets.ECR_ENGINE_REPO }}:latest
+        run: |
+          docker build -f Dockerfile.engine -t "$IMAGE_SHA" -t "$IMAGE_LATEST" .
+
+      - name: Build engine image (PR — no registry tags)
+        if: github.event_name == 'pull_request'
+        run: |
+          docker build -f Dockerfile.engine -t pokechess-engine:ci .
+
+      - name: Push engine image to ECR
+        if: github.event_name == 'push'
+        env:
+          IMAGE_SHA: ${{ secrets.ECR_ENGINE_REPO }}:${{ github.sha }}
+          IMAGE_LATEST: ${{ secrets.ECR_ENGINE_REPO }}:latest
+        run: |
+          docker push "$IMAGE_SHA"
+          docker push "$IMAGE_LATEST"
+
+      - name: Download current engine task definition
+        if: github.event_name == 'push'
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition pokechess-engine-prod \
+            --query taskDefinition \
+            --output json > task-def-engine.json
+
+      - name: Render updated engine task definition
+        if: github.event_name == 'push'
+        id: render-engine
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-def-engine.json
+          container-name: pokechess-engine
+          image: ${{ secrets.ECR_ENGINE_REPO }}:${{ github.sha }}
+
+      - name: Deploy engine to ECS
+        if: github.event_name == 'push'
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-engine.outputs.task-definition }}
+          service: pokechess-engine
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
