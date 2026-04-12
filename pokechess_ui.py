@@ -640,15 +640,43 @@ class LandingScreen:
                         if 0 <= _nr < _ph and 0 <= _nc < _pw and not _visited[_nr, _nc] and _avg_pk[_nr, _nc] > 210:
                             _visited[_nr, _nc] = True
                             _q.append((_nr, _nc))
-                # Dilate background mask to fill thin enclosed white gaps.
-                # Left half gets a more aggressive pass to catch arm/tail triangles.
+                # --- Phase 2: remove large enclosed white regions (arm/tail triangles) ---
+                # Triangles are 40-50px from the nearest background edge — no dilation
+                # radius is feasible. Instead, label connected components of enclosed
+                # near-white pixels and remove any region larger than ~400px (triangles
+                # are ~1000-2000px; eyes are ~200px so they are preserved).
+                _near_white_pk = _avg_pk > 228
+                _enclosed_pk   = _near_white_pk & ~_visited
+                _labeled_pk    = _np2.zeros((_ph, _pw), dtype=_np2.int32)
+                _comp_id_pk    = 0
+                _comp_sizes_pk: dict = {}
+                for _sr in range(_ph):
+                    for _sc in range(_pw):
+                        if _enclosed_pk[_sr, _sc] and _labeled_pk[_sr, _sc] == 0:
+                            _comp_id_pk += 1
+                            _bfs2 = _deque([((_sr, _sc))])
+                            _labeled_pk[_sr, _sc] = _comp_id_pk
+                            _sz2 = 0
+                            while _bfs2:
+                                _r2, _c2 = _bfs2.popleft()
+                                _sz2 += 1
+                                for _dr2, _dc2 in ((-1,0),(1,0),(0,-1),(0,1)):
+                                    _nr2, _nc2 = _r2+_dr2, _c2+_dc2
+                                    if (0 <= _nr2 < _ph and 0 <= _nc2 < _pw
+                                            and _enclosed_pk[_nr2, _nc2]
+                                            and _labeled_pk[_nr2, _nc2] == 0):
+                                        _labeled_pk[_nr2, _nc2] = _comp_id_pk
+                                        _bfs2.append((_nr2, _nc2))
+                            _comp_sizes_pk[_comp_id_pk] = _sz2
+                # Fold large enclosed blobs (triangles) into the background mask
+                _TRIANGLE_THRESH = 400
+                for _cid2, _csz in _comp_sizes_pk.items():
+                    if _csz > _TRIANGLE_THRESH:
+                        _visited |= (_labeled_pk == _cid2)
+                # --- Phase 3: small dilation to catch thin edge fringe pixels ---
                 from PIL import ImageFilter as _IF
                 _bg_mask_pil = _PILImage2.fromarray(_visited.astype(_np2.uint8) * 255, 'L')
-                _bg_arr_r = _np2.array(_bg_mask_pil.filter(_IF.MaxFilter(15))) > 127  # 7px
-                _bg_arr_l = _np2.array(_bg_mask_pil.filter(_IF.MaxFilter(27))) > 127  # 13px
-                _midcol = _pw // 2
-                _bg_dilated = _bg_arr_r.copy()
-                _bg_dilated[:, :_midcol] = _bg_arr_l[:, :_midcol]
+                _bg_dilated  = _np2.array(_bg_mask_pil.filter(_IF.MaxFilter(9))) > 127
                 # Only apply dilated mask to near-white pixels (grey/colored pixels kept)
                 _is_bg_pk = _bg_dilated & (_avg_pk > 228)
                 _rgba_pk = _np2.zeros((_ph, _pw, 4), dtype=_np2.uint8)
@@ -920,16 +948,17 @@ class LandingScreen:
         self._draw_chess_letters(surf, chess_x, chess_y, chess_h)
 
         # Tagline — "HEY TRAINER! / Wanna battle?" (large hero font)
-        # Center tagline between underside of CHESS and top of buttons
-        _tagline_gap = 18
+        # Gap above is larger so tagline sits in the lower portion of the space
+        _gap_above = 36
+        _gap_below = 18
         chess_bottom = chess_cy + chess_h // 2
-        tagline_y = chess_bottom + _tagline_gap
+        tagline_y = chess_bottom + _gap_above
         hey_surf = self.f_hero.render('HEY TRAINER!', True, C_YELLOW)
         wb_surf  = self.f_hero.render('Wanna battle?', True, C_WHITE)
         tagline_h = hey_surf.get_height() + 4 + wb_surf.get_height()
 
-        # Flanking Pikachu (left) and Eevee (right) centred on tagline block
-        flank_cy = tagline_y + tagline_h // 2
+        # Flanking Pikachu (left) and Eevee (right) centred on the full tagline block
+        flank_cy = tagline_y + tagline_h // 2  # now correct: tagline_y is the top
         _FLANK_PAD = 14   # gap between flanker and text block
         max_text_w = max(hey_surf.get_width(), wb_surf.get_width())
         if self._pikachu_landing is not None:
@@ -942,11 +971,11 @@ class LandingScreen:
             ey = flank_cy - self._eevee_landing.get_height() // 2
             surf.blit(self._eevee_landing, (ex, ey))
 
-        surf.blit(hey_surf, hey_surf.get_rect(center=(cx, tagline_y)))
-        surf.blit(wb_surf,  wb_surf.get_rect(center=(cx, tagline_y + hey_surf.get_height() + 4)))
+        surf.blit(hey_surf, hey_surf.get_rect(midtop=(cx, tagline_y)))
+        surf.blit(wb_surf,  wb_surf.get_rect(midtop=(cx, tagline_y + hey_surf.get_height() + 4)))
 
         # ── Mode selection — buttons placed symmetrically below tagline ─────
-        btn_y = tagline_y + tagline_h + _tagline_gap
+        btn_y = tagline_y + tagline_h + _gap_below
         self.btn_pvb.rect.y = btn_y
         self.btn_pvp.rect.y = btn_y
         self.btn_pvb.draw(surf, mouse_pos)
