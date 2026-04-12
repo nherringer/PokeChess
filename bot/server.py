@@ -124,6 +124,9 @@ app = FastAPI(title="PokeChess Bot Engine", lifespan=lifespan)
 class PersonaParams(BaseModel):
     time_budget: float = 3.0
     exploration_c: Optional[float] = None
+    use_transposition: bool = True
+    move_bias: Optional[str] = None
+    bias_bonus: float = 0.15
 
     model_config = {"extra": "allow"}  # forward unknown keys without error
 
@@ -155,13 +158,15 @@ async def get_move(body: MoveRequest):
     # 2. Extract and clamp time_budget
     time_budget = max(0.1, min(10.0, body.persona_params.time_budget))
 
-    # 3. Build MCTS kwargs — only pass exploration_c if explicitly provided
-    mcts_kwargs: dict[str, Any] = {
-        "time_budget": time_budget,
-        "transposition": global_tt,
-    }
+    # 3. Build MCTS kwargs from persona params
+    mcts_kwargs: dict[str, Any] = {"time_budget": time_budget}
+    if body.persona_params.use_transposition:
+        mcts_kwargs["transposition"] = global_tt
     if body.persona_params.exploration_c is not None:
         mcts_kwargs["exploration_c"] = body.persona_params.exploration_c
+    if body.persona_params.move_bias is not None:
+        mcts_kwargs["move_bias"] = body.persona_params.move_bias
+        mcts_kwargs["bias_bonus"] = body.persona_params.bias_bonus
 
     # 4. Run MCTS (one at a time — CPU-bound)
     async with _mcts_lock:
