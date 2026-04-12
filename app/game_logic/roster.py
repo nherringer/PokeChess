@@ -59,7 +59,7 @@ _ROSTER = [
 async def ensure_roster(db: asyncpg.Connection, user_id: UUID, side: str) -> list[dict]:
     """Create the user's pokemon_pieces if they don't exist yet. Return the roster."""
     existing = await db.fetch(
-        "SELECT id, role, species FROM pokemon_pieces WHERE owner_id = $1 ORDER BY created_at",
+        "SELECT id, role, species FROM pokemon_pieces WHERE owner_id = $1 ORDER BY created_at FOR UPDATE",
         user_id,
     )
     if existing:

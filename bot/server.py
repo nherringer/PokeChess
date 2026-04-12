@@ -165,7 +165,7 @@ async def get_move(body: MoveRequest):
 
     # 4. Run MCTS (one at a time — CPU-bound)
     async with _mcts_lock:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         move = await loop.run_in_executor(None, _run_mcts, state, mcts_kwargs)
 
     # 5. Increment counter; enqueue TT backup every 50 requests
@@ -174,6 +174,9 @@ async def get_move(body: MoveRequest):
         sync_queue.enqueue()
 
     # 6. Return flat move dict
+    if move is None:
+        logger.error("MCTS returned None for state (turn=%d, active=%s)", state.turn_number, state.active_player)
+        raise HTTPException(status_code=500, detail="Engine failed to select a move")
     return move.to_dict()
 
 

@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, field_validator, model_validator
 
 # Limits merged JSON patch size for user_settings.extra_settings (abuse / accidental huge payloads).
 _MAX_EXTRA_SETTINGS_BYTES = 16_384
@@ -44,11 +44,11 @@ def _validate_extra_settings_dict(value: dict) -> dict:
 class RegisterRequest(BaseModel):
     username: str
     email: EmailStr
-    password: str = Field(..., min_length=8)
+    password: str
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 
@@ -124,7 +124,16 @@ class FriendsResponse(BaseModel):
 
 
 class SendFriendRequest(BaseModel):
-    username: str
+    username: str | None = None
+    email: str | None = None
+
+    @model_validator(mode="after")
+    def exactly_one_identifier(self) -> "SendFriendRequest":
+        if not self.username and not self.email:
+            raise ValueError("Provide either 'username' or 'email'")
+        if self.username and self.email:
+            raise ValueError("Provide either 'username' or 'email', not both")
+        return self
 
 
 class FriendActionRequest(BaseModel):

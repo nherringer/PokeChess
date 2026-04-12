@@ -13,6 +13,15 @@ async def get_user_by_email(db: asyncpg.Connection, email: str) -> dict | None:
     return dict(row) if row else None
 
 
+async def get_user_by_email_public(db: asyncpg.Connection, email: str) -> dict | None:
+    """Like get_user_by_email but omits password_hash — for non-auth contexts."""
+    row = await db.fetchrow(
+        "SELECT id, username, email, created_at FROM users WHERE email = $1",
+        email,
+    )
+    return dict(row) if row else None
+
+
 async def get_user_by_username(db: asyncpg.Connection, username: str) -> dict | None:
     row = await db.fetchrow(
         "SELECT id, username, email, created_at FROM users WHERE username = $1",

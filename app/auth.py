@@ -4,11 +4,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated
 from uuid import UUID
 
+import bcrypt as _bcrypt
 import asyncpg
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from passlib.hash import bcrypt
 
 from . import config
 from .main import AppError
@@ -21,11 +21,13 @@ bearer_scheme = HTTPBearer()
 # ---------------------------------------------------------------------------
 
 def hash_password(password: str) -> str:
-    return bcrypt.hash(password)
+    # bcrypt max is 72 bytes; truncate to avoid ValueError
+    pw_bytes = password.encode()[:72]
+    return _bcrypt.hashpw(pw_bytes, _bcrypt.gensalt()).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.verify(plain, hashed)
+    return _bcrypt.checkpw(plain.encode()[:72], hashed.encode())
 
 
 # ---------------------------------------------------------------------------

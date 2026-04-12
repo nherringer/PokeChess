@@ -91,7 +91,7 @@ class TestCountActiveBotPlayers:
 
     def _run(self, coro):
         import asyncio
-        return asyncio.new_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def test_returns_at_least_one_when_db_returns_zero(self):
         from app.db.queries.bot_activity import count_active_bot_players

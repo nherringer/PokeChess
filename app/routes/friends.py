@@ -26,7 +26,12 @@ async def list_friends(user: CurrentUser, db: Db):
 
 @router.post("", status_code=201, response_model=FriendActionResponse)
 async def send_friend_request(body: SendFriendRequest, user: CurrentUser, db: Db):
-    target = await user_q.get_user_by_username(db, body.username)
+    if body.username:
+        target = await user_q.get_user_by_username(db, body.username)
+    elif body.email:
+        target = await user_q.get_user_by_email_public(db, body.email)
+    else:
+        raise AppError(400, "bad_request", "Provide either 'username' or 'email'")
     if target is None:
         raise AppError(404, "not_found", "User not found")
     if target["id"] == user["id"]:

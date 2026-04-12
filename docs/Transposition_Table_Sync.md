@@ -267,7 +267,7 @@ See `docs/Bot_API_Design.md` for the full API design. TT sync integration points
 
 `request_count` is a global counter incremented on every `POST /move` request. A backup fires at every 50th request regardless of which game the move belonged to. Exact alignment to game boundaries is not required.
 
-The app **does not** trigger TT backups and has no visibility into the TT. All persistence is the engine's internal concern. `Dockerfile.engine` notes a `POST /backup` endpoint; if implemented, it is for ops/admin use only (e.g. forcing a flush before a deploy) — not called by the app.
+The app **does not** trigger TT backups and has no visibility into the TT. All persistence is the engine's internal concern. A `POST /backup` endpoint could be added for ops/admin use only (e.g. forcing a flush before a deploy) — it is not currently implemented and would not be called by the app.
 
 ---
 
