@@ -310,6 +310,8 @@ def _do_foresight(state: GameState, piece: Piece, move: Move) -> None:
         target_col=move.target_col,
         damage=damage,
         resolves_on_turn=state.turn_number + 2,
+        caster_row=move.piece_row,
+        caster_col=move.piece_col,
     )
     state.foresight_used_last_turn[state.active_player] = True
 
@@ -441,6 +443,19 @@ def _calc_damage(attacker: Piece, target: Piece, move_slot: Optional[int] = None
     - type_mult: from MATCHUP[attack_type][target_type]
     For Mew, move_slot selects the attack's type (0=Fire, 1=Water, 2=Grass).
     """
+    damage, _ = calc_damage_with_multiplier(attacker, target, move_slot)
+    return damage
+
+
+def calc_damage_with_multiplier(
+    attacker: Piece, target: Piece, move_slot: Optional[int] = None
+) -> tuple[int, float]:
+    """
+    Compute (damage, type_multiplier) for attacker → target.
+
+    Exported for use by the app's move-history builder so the type multiplier
+    can be recorded without duplicating the damage tables.
+    """
     if attacker.piece_type == PieceType.MEW:
         base = 100
         atk_type = _MEW_SLOT_TYPES.get(move_slot, PokemonType.FIRE)
@@ -449,6 +464,5 @@ def _calc_damage(attacker: Piece, target: Piece, move_slot: Optional[int] = None
         atk_type = attacker.pokemon_type
 
     type_mult = MATCHUP[atk_type][target.pokemon_type]
-
     raw = base * type_mult
-    return max(10, int(round(raw / 10)) * 10)
+    return max(10, int(round(raw / 10)) * 10), type_mult

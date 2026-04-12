@@ -24,8 +24,10 @@ from engine.state import (
     PIECE_STATS,
 )
 
-# Type alias: board position → piece UUID (None for pawns / unnamed pieces)
-IdMap = dict[tuple[int, int], Optional[str]]
+# Type alias for the piece-UUID map threaded through serialization and move handlers.
+# Keys are either board positions (row, col) or stored-piece sentinels ("stored", (row, col)).
+# Values are UUID strings for named pieces, or None for pawns / unnamed pieces.
+IdMap = dict
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +61,8 @@ def _foresight_to_dict(fx: Optional[ForesightEffect]) -> Optional[dict]:
         "target_col": fx.target_col,
         "damage": fx.damage,
         "resolves_on_turn": fx.resolves_on_turn,
+        "caster_row": fx.caster_row,
+        "caster_col": fx.caster_col,
     }
 
 
@@ -116,6 +120,8 @@ def _foresight_from_dict(d: Optional[dict]) -> Optional[ForesightEffect]:
         target_col=d["target_col"],
         damage=d["damage"],
         resolves_on_turn=d["resolves_on_turn"],
+        caster_row=d.get("caster_row", -1),
+        caster_col=d.get("caster_col", -1),
     )
 
 

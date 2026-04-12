@@ -42,7 +42,7 @@ The engine **never** calls the app, **never** uses **RDS**, and **never** receiv
 |--------|----------------|
 | Users, games, `games.state`, `move_history`, roster, bots, etc. | **Amazon RDS (PostgreSQL)** — accessed **only** by `pokechess-app` |
 | In-flight MCTS trees | Engine process RAM |
-| Bot-only persistence (e.g. transposition tables) | **Engine / bot server** — e.g. **local SQLite** inside the engine container; **not** RDS |
+| Bot-only persistence (transposition table) | **Engine / bot server** — in-memory array + local `.bin` file, optional S3 backup (`POKECHESS_TT_BUCKET`); **not** RDS. See `docs/Transposition_Table_Sync.md`. |
 
 There is **no** `POST /backup` from the app and **no** app-orchestrated S3 backup for the engine. Persistence beyond `/move` is **the bot server’s responsibility** inside the engine container.
 

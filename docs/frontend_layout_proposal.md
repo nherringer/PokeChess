@@ -57,8 +57,8 @@
 └─────────────────────────────────────────┘
 ```
 
-- **Play vs Bot** → large primary button (red-team color, since Red moves first against the bot), routes to difficulty selection → game creation with `game_type: "PvB"`
-- **Play vs Friend** → secondary button (blue-team), routes to the **Friends screen** where the player picks a friend to invite
+- **Play vs Bot** → large primary button (red-team color, since Red moves first against the bot), routes to difficulty selection → game creation via `POST /games` with `{ bot_id: <uuid>, player_side: "red" | "blue" }`
+- **Play vs Friend** → secondary button (blue-team), routes to the invite/friends flow — **required for v1**
 - **My Pokemon** → small text link to roster page
 - **Friends** → small text link to the Friends screen (also accessible from the Friends screen itself)
 - **Settings** → small icon/text link
