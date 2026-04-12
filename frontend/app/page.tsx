@@ -62,13 +62,20 @@ export default function HomePage() {
           </Link>
         </div>
 
+        {/* Login CTA — players must authenticate first */}
+        <Link
+          href="/login"
+          className="w-full py-3 rounded-full font-display font-bold text-base text-center border-2 border-white/30 text-white hover:border-white/60 hover:bg-white/5 transition-all active:scale-95"
+        >
+          Log In / Register
+        </Link>
+
         {/* Nav links */}
-        <div className="flex gap-6 mt-2">
+        <div className="flex gap-6">
           {[
             { label: "My Pokémon", href: "/roster" },
             { label: "Friends", href: "/friends" },
             { label: "Games", href: "/games" },
-            { label: "Login", href: "/login" },
           ].map(({ label, href }) => (
             <Link
               key={href}
