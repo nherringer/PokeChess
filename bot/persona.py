@@ -41,14 +41,14 @@ _SQRT2 = math.sqrt(2)
 
 BONNIE = Persona(
     name="Bonnie",
-    time_budget=0.1,
+    time_budget=0.5,
     exploration_c=2.5,
     use_transposition=False,
 )
 
 TEAM_ROCKET = Persona(
     name="Team Rocket",
-    time_budget=0.5,
+    time_budget=1.0,
     exploration_c=2.2,
     use_transposition=False,
     move_bias="chase_pikachu",
@@ -56,14 +56,14 @@ TEAM_ROCKET = Persona(
 
 SERENA = Persona(
     name="Serena",
-    time_budget=1.0,
+    time_budget=2.0,
     exploration_c=_SQRT2,
     use_transposition=True,
 )
 
 CLEMONT = Persona(
     name="Clemont",
-    time_budget=2.0,
+    time_budget=3.0,
     exploration_c=_SQRT2,
     use_transposition=True,
     move_bias="prefer_pikachu_raichu",
@@ -71,14 +71,14 @@ CLEMONT = Persona(
 
 DIANTHA = Persona(
     name="Diantha",
-    time_budget=3.5,
+    time_budget=5.0,
     exploration_c=1.0,
     use_transposition=True,
 )
 
 METALLIC = Persona(
     name="METALLIC",
-    time_budget=6.0,
+    time_budget=10.0,
     exploration_c=0.5,
     use_transposition=True,
 )

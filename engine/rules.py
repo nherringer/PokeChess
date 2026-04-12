@@ -68,14 +68,10 @@ _EEVEE_EVOLUTIONS: list[PieceType] = [
     PieceType.ESPEON,     # slot 4
 ]
 
-# Item → evolution slot for Eevee auto-evolve on trade.
-_EEVEE_TRADE_SLOTS: dict[Item, int] = {
-    Item.WATERSTONE:   0,
-    Item.FIRESTONE:    1,
-    Item.LEAFSTONE:    2,
-    Item.THUNDERSTONE: 3,
-    Item.BENTSPOON:    4,
-}
+# (Eevee no longer auto-evolves on trade — player triggers EVOLVE explicitly)
+# _EEVEE_TRADE_SLOTS was removed; kept as comment for reference:
+# WATERSTONE→0(Vaporeon), FIRESTONE→1(Flareon), LEAFSTONE→2(Leafeon),
+# THUNDERSTONE→3(Jolteon), BENTSPOON→4(Espeon)
 
 # Only Pikachu is immune to regular Pokeball capture (lore ability).
 # Raichu loses this immunity on evolution.
@@ -317,20 +313,12 @@ def _do_foresight(state: GameState, piece: Piece, move: Move) -> None:
 
 
 def _do_trade(state: GameState, piece: Piece, move: Move) -> bool:
-    """Swap held items. Returns True if the trade ends the turn (Eevee auto-evolve)."""
+    """Swap held items. Returns True if the trade ends the turn.
+    Eevee does NOT auto-evolve on receiving an evolution stone — it holds the
+    item and the player triggers evolution explicitly via ActionType.EVOLVE."""
     target = state.board[move.target_row][move.target_col]
     piece.held_item, target.held_item = target.held_item, piece.held_item
-    # If Eevee received an evolution stone, auto-evolve and end Blue's turn
-    if target.piece_type == PieceType.EEVEE:
-        evo_slot = _EEVEE_TRADE_SLOTS.get(target.held_item)
-        if evo_slot is not None:
-            evo = _EEVEE_EVOLUTIONS[evo_slot]
-            hp_gain = PIECE_STATS[evo].max_hp - PIECE_STATS[PieceType.EEVEE].max_hp
-            target.piece_type = evo
-            target.current_hp = min(target.current_hp + hp_gain, PIECE_STATS[evo].max_hp)
-            target.held_item = Item.NONE  # stone consumed
-            return True  # ends turn
-    return False
+    return False  # trade is always a free action; player evolves manually
 
 
 def _do_evolve(state: GameState, piece: Piece, move: Move) -> None:

@@ -64,7 +64,7 @@ MATCHUP: dict[PokemonType, dict[PokemonType, float]] = {
     PokemonType.FIRE:     {PokemonType.WATER: 0.5, PokemonType.FIRE: 0.5,  PokemonType.GRASS: 2.0, PokemonType.PSYCHIC: 1.0, PokemonType.ELECTRIC: 1.0, PokemonType.NORMAL: 1.0, PokemonType.NONE: 1.0},
     PokemonType.GRASS:    {PokemonType.WATER: 2.0, PokemonType.FIRE: 0.5,  PokemonType.GRASS: 0.5, PokemonType.PSYCHIC: 1.0, PokemonType.ELECTRIC: 1.0, PokemonType.NORMAL: 1.0, PokemonType.NONE: 1.0},
     PokemonType.PSYCHIC:  {PokemonType.WATER: 1.0, PokemonType.FIRE: 1.0,  PokemonType.GRASS: 1.0, PokemonType.PSYCHIC: 1.0, PokemonType.ELECTRIC: 1.0, PokemonType.NORMAL: 1.0, PokemonType.NONE: 1.0},
-    PokemonType.ELECTRIC: {PokemonType.WATER: 1.0, PokemonType.FIRE: 1.0,  PokemonType.GRASS: 1.0, PokemonType.PSYCHIC: 1.0, PokemonType.ELECTRIC: 1.0, PokemonType.NORMAL: 1.0, PokemonType.NONE: 1.0},
+    PokemonType.ELECTRIC: {PokemonType.WATER: 2.0, PokemonType.FIRE: 1.0,  PokemonType.GRASS: 1.0, PokemonType.PSYCHIC: 1.0, PokemonType.ELECTRIC: 1.0, PokemonType.NORMAL: 1.0, PokemonType.NONE: 1.0},
     PokemonType.NORMAL:   {PokemonType.WATER: 1.0, PokemonType.FIRE: 1.0,  PokemonType.GRASS: 1.0, PokemonType.PSYCHIC: 1.0, PokemonType.ELECTRIC: 1.0, PokemonType.NORMAL: 1.0, PokemonType.NONE: 1.0},
     PokemonType.NONE:     {PokemonType.WATER: 1.0, PokemonType.FIRE: 1.0,  PokemonType.GRASS: 1.0, PokemonType.PSYCHIC: 1.0, PokemonType.ELECTRIC: 1.0, PokemonType.NORMAL: 1.0, PokemonType.NONE: 1.0},
 }

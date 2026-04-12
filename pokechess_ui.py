@@ -14,11 +14,13 @@ import pygame
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from engine.state import GameState, Team, PieceType, Item, PIECE_STATS, PAWN_TYPES, KING_TYPES
+from engine.state import GameState, Team, PieceType, Item, PIECE_STATS, PAWN_TYPES, KING_TYPES, MATCHUP, PokemonType
 from engine.moves import get_legal_moves, Move, ActionType
 from engine.rules import apply_move, is_terminal, hp_winner
 from bot.mcts import MCTS
 from bot.transposition import TranspositionTable
+from bot.persona import ALL_PERSONAS, Persona
+from bot.ucb import DEFAULT_C
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Layout
@@ -116,6 +118,278 @@ ACTION_LABEL = {
 
 MEW_SLOTS  = {0: 'Fire Blast', 1: 'Hydro Pump', 2: 'Solar Beam'}
 EVO_SLOTS  = {0: 'Vaporeon', 1: 'Flareon', 2: 'Leafeon', 3: 'Jolteon', 4: 'Espeon'}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Persona display metadata
+# ──────────────────────────────────────────────────────────────────────────────
+PERSONA_COLORS = {
+    'Bonnie':       (100, 210,  90),
+    'Team Rocket':  (190,  45,  45),
+    'Serena':       ( 90, 150, 230),
+    'Clemont':      (230, 195,  45),
+    'Diantha':      (185,  85, 225),
+    'METALLIC':     (195, 205, 220),
+}
+
+# Flavor text shown on each persona card.
+# Team Rocket and Clemont explicitly state their forced team.
+PERSONA_FLAVOR = {
+    'Bonnie':
+        '"I\'ll take care of you! Dedenne, let\'s go!"',
+    'Team Rocket':
+        '"Prepare for trouble! We\'ll snatch your Pikachu!\n'
+        '⚠ You will play as RED (Pikachu\'s side).',
+    'Serena':
+        '"A true performer never shows weakness. En garde."',
+    'Clemont':
+        '"The science of my strategy is PERFECT! I guarantee it!\n'
+        '⚠ You will play as BLUE (Clemont keeps Pikachu\'s side).',
+    'Diantha':
+        '"I look forward to seeing what you can do. Truly."',
+    'METALLIC':
+        '"MATCH INITIATED. OUTCOME PREDETERMINED. RESISTANCE FUTILE."',
+}
+
+PERSONA_STARS = {
+    'Bonnie': 1, 'Team Rocket': 2, 'Serena': 3,
+    'Clemont': 4, 'Diantha': 5, 'METALLIC': 6,
+}
+
+# Trainer sprite filenames (in SPRITE_DIR).  METALLIC uses Mew with silver tint.
+PERSONA_SPRITE_FILE = {
+    'Bonnie':      'bonnie.png',
+    'Team Rocket': 'teamrocket.png',
+    'Serena':      'serena.png',
+    'Clemont':     'clemont.png',
+    'Diantha':     'diantha-masters.png',
+    'METALLIC':    'METALLIC.jpg',
+}
+
+# Personas that force a specific player team.
+# Value = the team the PLAYER must be (bot takes the other).
+PERSONA_FORCED_PLAYER = {
+    'Team Rocket': 'RED',    # bot hunts Pikachu → player must hold Pikachu (RED)
+    'Clemont':     'BLUE',   # bot plays Pikachu side (RED) → player is BLUE
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Persona chat message banks
+# Keys: 'idle' | 'capture' | 'miss' | 'evolve' | 'foresight' | 'win' | 'loss'
+# ──────────────────────────────────────────────────────────────────────────────
+PERSONA_CHAT: dict = {
+    'Bonnie': {
+        'idle':      [
+            "Your Pokemon are SO cute, but I'm still gonna win!",
+            "Dedenne says you're playing pretty good... but not good enough!",
+            "Heehee, are you nervous? I am a little bit!",
+            "My brother Clemont taught me some tricks. Watch out!",
+            "I believe in my Pokemon! Do you believe in yours?",
+        ],
+        'capture':   [
+            "Gotcha! Your Pokemon is mine now — don't cry!",
+            "Yaaaay! I caught one! Dedenne, did you see that?!",
+            "Oopsie for you! That Pokemon is on MY side now!",
+        ],
+        'miss':      [
+            "Nooo! It got away! That's not fair!",
+            "Hmph! I wasn't ready anyway. I'll get it next time!",
+            "The Pokeball missed... Dedenne is very upset about this.",
+        ],
+        'evolve':    [
+            "WHOAAAA! Your Pokemon evolved!! That looks so cool though...",
+            "An evolution?! That's amazing! I want one too!!",
+            "Wow wow WOW! Even evolved it won't beat me!",
+        ],
+        'foresight': [
+            "Ooh, a Foresight! I learned about that from a book!",
+            "That Foresight is kinda scary... I'll deal with it!",
+        ],
+        'win':       [
+            "YAY YAY YAY! I WON! Dedenne, we did it!!!",
+            "Heehee! I told you I'd win! You were great though!",
+        ],
+        'loss':      [
+            "Aww... you're really really good... I'll train more!",
+            "I lost... but just you wait! I'll get stronger!",
+        ],
+    },
+    'Team Rocket': {
+        'idle':      [
+            "Prepare for trouble — and make it DOUBLE! Nyahaha!",
+            "That Pikachu is as good as ours, twerp.",
+            "Team Rocket is watching your every move. Don't get comfortable.",
+            "Meowth, that's right! We've got a strategy you can't stop!",
+            "We've been blasting off for years. A little chess won't stop us.",
+        ],
+        'capture':   [
+            "MAKE IT DOUBLE! Another Pokemon falls into Team Rocket's hands!",
+            "Jessie: Beautiful! James: Magnificent! Meowth: Dat's right!",
+            "To protect the world from devastation — and steal your pieces!",
+        ],
+        'miss':      [
+            "WOBBUFFET! How did that one escape our magnificent trap?!",
+            "A setback! But Team Rocket NEVER gives up, twerp!",
+            "Grr... we'll get that Pokemon if it's the last thing we do!",
+        ],
+        'evolve':    [
+            "An evolution?! How DARE you power up against Team Rocket!",
+            "Ugh! Even stronger now? This wasn't in the plan!",
+        ],
+        'foresight': [
+            "Oho! A Foresight? Even Team Rocket appreciates a cunning plot!",
+            "Setting traps, are we? We invented that move, twerp.",
+        ],
+        'win':       [
+            "Team Rocket wins! Prepare for trouble — WE WON! NYAHAHA!",
+            "Jessie: We're BRILLIANT! James: Utterly magnificent! Meowth: We're rich!",
+        ],
+        'loss':      [
+            "We're blasting off AGAIN! ...This isn't over, twerp!!",
+            "Retreat! RETREAT! We'll be back... we ALWAYS come back!",
+        ],
+    },
+    'Serena': {
+        'idle':      [
+            "Hmm. A decent move. But real battles need style too.",
+            "I've been watching. You're better than most challengers.",
+            "Every performer knows when to strike with flair. Like this.",
+            "Grace under pressure — that's what separates good from great.",
+            "My Braixen would approve of that technique. Barely.",
+        ],
+        'capture':   [
+            "Beautiful. Like a well-rehearsed performance piece.",
+            "And scene! That capture was utterly flawless.",
+            "The crowd goes wild. Elegant as always.",
+        ],
+        'miss':      [
+            "Even the best performers have unexpected moments. Move on.",
+            "Oh? It escaped? Every routine has its improvisations.",
+            "Hmph. Not my finest showcase. I'll recalibrate.",
+        ],
+        'evolve':    [
+            "An evolution! Even more dazzling. This just got interesting.",
+            "How gorgeous. Evolution is the ultimate performance.",
+        ],
+        'foresight': [
+            "Planning several steps ahead? I see we think alike.",
+            "Foresight — the mark of a true strategist.",
+        ],
+        'win':       [
+            "And that's a perfect score. The audience is on their feet.",
+            "Graceful from start to finish. That's my style.",
+        ],
+        'loss':      [
+            "...Remarkable. You've genuinely surprised me.",
+            "I'll admit it — well played. Truly.",
+        ],
+    },
+    'Clemont': {
+        'idle':      [
+            "The science of this battle is absolutely FASCINATING!",
+            "I've calculated your next 3 moves and prepared accordingly. Probably.",
+            "Did you know the optimal MCTS exploration constant is sqrt(2)? I use that!",
+            "My Aipom Arm invention would be really useful right now...",
+            "The electric type has a 2x effectiveness against water. SCIENCE!",
+        ],
+        'capture':   [
+            "EUREKA! That capture's efficiency is statistically remarkable!",
+            "The science of pokeballs never fails to amaze me! CAUGHT!",
+            "I calculated a 73.6% capture probability! It worked! IT WORKED!",
+        ],
+        'miss':      [
+            "Hmm. A 47.3% failure rate on that attempt. Recalibrating...",
+            "The math said it should work! Why doesn't the math work?!",
+            "...Variance. Every good scientist accounts for variance.",
+        ],
+        'evolve':    [
+            "The SCIENCE of evolution is breathtaking! Updated threat model!",
+            "An evolution! I need to recalculate EVERYTHING!",
+        ],
+        'foresight': [
+            "Ooh, a Foresight! The delayed-action mechanic is so elegant!",
+            "Planning a future attack? I invented a device that does that!",
+        ],
+        'win':       [
+            "I accounted for every variable! The science of victory is MINE!",
+            "EUREKA! My calculations were PERFECT! Science wins again!",
+        ],
+        'loss':      [
+            "Im...impossible. My calculations were flawless! There must be a bug!",
+            "Defeated?! I need to go invent something to process this loss.",
+        ],
+    },
+    'Diantha': {
+        'idle':      [
+            "You're performing admirably. This is a genuinely interesting match.",
+            "I've faced many challengers. Fewer surprise me. You might.",
+            "Take your time. I've waited years for a battle worth having.",
+            "Your intuition is strong. I can see why you came this far.",
+            "Even in defeat, there is something to be learned. For both of us.",
+        ],
+        'capture':   [
+            "Clean. Decisive. That's the mark of a real trainer.",
+            "Beautifully handled. No hesitation.",
+            "Elegant. You executed that with the calm of a champion.",
+        ],
+        'miss':      [
+            "Even certain things slip away. That's the nature of this game.",
+            "How... fleeting. Though nothing is truly lost yet.",
+            "A miss. But your instinct to try was correct.",
+        ],
+        'evolve':    [
+            "Beautiful. Every evolution is a work of art in motion.",
+            "Magnificent. Your bond with that Pokemon is evident.",
+        ],
+        'foresight': [
+            "Foresight. You think ahead. That quality will serve you well.",
+            "Setting the board for what comes next. A Kalos champion's move.",
+        ],
+        'win':       [
+            "A worthy battle. You challenged me more than most ever do.",
+            "Well fought. Come back when you've grown — I'll be waiting.",
+        ],
+        'loss':      [
+            "...Well done. You have earned the right to call yourself a champion.",
+            "I don't lose often. Remember this feeling — it matters.",
+        ],
+    },
+    'METALLIC': {
+        'idle':      [
+            "ANALYSIS COMPLETE. OPTIMAL MOVE SELECTED. RESISTANCE FUTILE.",
+            "THREAT ASSESSMENT: MODERATE. ADJUSTING PARAMETERS.",
+            "WIN PROBABILITY: CALCULATED. OUTCOME: PREDETERMINED.",
+            "PROCESSING. YOUR MOVE WAS WITHIN EXPECTED PARAMETERS.",
+            "OBSERVATION: YOU ARE ATTEMPTING TO COUNTER MY STRATEGY. NOTED. IRRELEVANT.",
+        ],
+        'capture':   [
+            "TARGET ELIMINATED. WIN PROBABILITY INCREASED BY 3.7%.",
+            "CAPTURE SUCCESSFUL. THREAT MATRIX UPDATED.",
+            "UNIT NEUTRALIZED. PROCESSING NEXT TARGET.",
+        ],
+        'miss':      [
+            "LOW-PROBABILITY EVENT MATERIALIZED. RECALIBRATING.",
+            "UNEXPECTED OUTCOME. ERROR MARGIN: 0.001%. ACCEPTABLE.",
+            "PROBABILITY: 12.4%. EVENT OCCURRED. ADAPTING.",
+        ],
+        'evolve':    [
+            "EVOLUTION DETECTED. THREAT LEVEL UPDATED. STRATEGY UNCHANGED.",
+            "TARGET HAS EVOLVED. NEW THREAT MODEL LOADED. PROCEED.",
+        ],
+        'foresight': [
+            "FORESIGHT REGISTERED. COUNTER-SEQUENCE INITIATED.",
+            "DELAYED ATTACK NOTED. EVASION PROBABILITY CALCULATED.",
+        ],
+        'win':       [
+            "MATCH CONCLUDED. OUTCOME: METALLIC WINS. AS CALCULATED.",
+            "VICTORY CONFIRMED. ALL VARIABLES WITHIN PREDICTED BOUNDS.",
+        ],
+        'loss':      [
+            "UNEXPECTED RESULT. ANALYZING ANOMALY FOR FUTURE REFERENCE.",
+            "DEFEAT REGISTERED. THIS DATA WILL IMPROVE FUTURE PERFORMANCE.",
+        ],
+    },
+}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -270,15 +544,559 @@ class ScrollLog:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Landing screen
+# ──────────────────────────────────────────────────────────────────────────────
+class LandingScreen:
+    """Pre-game screen: logo, mode selection, persona picker, team colour."""
+
+
+    def __init__(self):
+        self.screen = pygame.display.set_mode((WIN_W, WIN_H), pygame.RESIZABLE)
+        pygame.display.set_caption('PokeChess')
+        self.clock = pygame.time.Clock()
+
+        self.f_chess  = pygame.font.SysFont('Arial', 68, bold=True)
+        self.f_hero   = pygame.font.SysFont('Arial', 44, bold=True)
+        self.f_head   = pygame.font.SysFont('Arial', 15, bold=True)
+        self.f_body   = pygame.font.SysFont('Arial', 13)
+        self.f_small  = pygame.font.SysFont('Arial', 11)
+        self.f_mode   = pygame.font.SysFont('Arial', 17, bold=True)
+
+        # State
+        self._mode:         Optional[str]     = None   # 'bot' | 'local'
+        self._persona:      Optional[Persona] = None
+        self._player_color: Team              = Team.RED
+
+        # ── POKE logo image ──────────────────────────────────────────────────
+        # ── POKE logo image ──────────────────────────────────────────────────
+        _BOLT_H = 120   # lightning bolt display height (drives logo scale)
+
+        poke_path = os.path.join(SPRITE_DIR, 'POKE.png')
+        raw_poke = pygame.image.load(poke_path).convert_alpha()
+        # Measure CHESS block width so POKE takes up the same horizontal space
+        _f_chess_tmp = pygame.font.SysFont('Arial', 68, bold=True)
+        _chess_sample = [_f_chess_tmp.render(ch, True, (255, 255, 255)) for ch in 'CHESS']
+        _chess_tile_w_init = max(s.get_width() for s in _chess_sample) + 6 * 2
+        _chess_w_init = _chess_tile_w_init * 5
+        # Scale POKE so its width matches chess_w; height follows aspect ratio
+        poke_w = _chess_w_init
+        poke_h = int(raw_poke.get_height() * poke_w / raw_poke.get_width())
+        self._poke_img = pygame.transform.smoothscale(raw_poke, (poke_w, poke_h))
+
+        # ── Lightning bolt image (numpy BG removal → yellow tint) ───────────
+        import numpy as _np
+        from PIL import Image as _PILImage
+        bolt_path = os.path.join(SPRITE_DIR, 'lightningbolt.jpg')
+        _pil = _PILImage.open(bolt_path).convert('RGB')
+        _arr = _np.array(_pil, dtype=_np.float32)
+        _avg = _arr.mean(axis=2)
+        _is_bg = _avg > 245.0
+        _brightness = _np.clip(1.0 - (_avg / 255.0) * 0.6, 0.4, 1.0)
+        _rgba = _np.zeros((_arr.shape[0], _arr.shape[1], 4), dtype=_np.uint8)
+        _rgba[:, :, 0] = _np.where(_is_bg, 0, _np.clip(255 * _brightness, 0, 255).astype(_np.uint8))
+        _rgba[:, :, 1] = _np.where(_is_bg, 0, _np.clip(220 * _brightness, 0, 255).astype(_np.uint8))
+        _rgba[:, :, 2] = _np.where(_is_bg, 0, 30).astype(_np.uint8)
+        _rgba[:, :, 3] = _np.where(_is_bg, 0, 255).astype(_np.uint8)
+        _pil_rgba = _PILImage.fromarray(_rgba, 'RGBA')
+        _full_surf = pygame.image.fromstring(_pil_rgba.tobytes(), _pil.size, 'RGBA').convert_alpha()
+        bolt_w = int(_full_surf.get_width() * _BOLT_H / _full_surf.get_height())
+        self._bolt_img = pygame.transform.smoothscale(_full_surf, (bolt_w, _BOLT_H))
+        self._bolt_h   = _BOLT_H
+
+        # ── Pikachu / Eevee landing flanking images ──────────────────────────
+        # Pikachu: remove white BG via numpy, scale to 185px (slightly larger)
+        # Eevee: webp with transparent BG, scale to 155px
+        self._pikachu_landing: Optional[pygame.Surface] = None
+        self._eevee_landing:   Optional[pygame.Surface] = None
+
+        _pika_path = os.path.join(SPRITE_DIR, 'PikachuLandingPic.jpg')
+        if os.path.exists(_pika_path):
+            try:
+                import numpy as _np2
+                from PIL import Image as _PILImage2
+                from collections import deque as _deque
+                _pil_pk = _PILImage2.open(_pika_path).convert('RGB')
+                _arr_pk = _np2.array(_pil_pk, dtype=_np2.float32)
+                _avg_pk = _arr_pk.mean(axis=2)
+                _ph, _pw = _avg_pk.shape
+                # BFS flood-fill from all edge pixels to identify BACKGROUND only
+                # (preserves white pixels enclosed within the sprite, like eyes)
+                _visited = _np2.zeros((_ph, _pw), dtype=bool)
+                _q = _deque()
+                for _r in range(_ph):
+                    for _c in [0, _pw - 1]:
+                        if _avg_pk[_r, _c] > 220 and not _visited[_r, _c]:
+                            _visited[_r, _c] = True
+                            _q.append((_r, _c))
+                for _c in range(_pw):
+                    for _r in [0, _ph - 1]:
+                        if _avg_pk[_r, _c] > 220 and not _visited[_r, _c]:
+                            _visited[_r, _c] = True
+                            _q.append((_r, _c))
+                while _q:
+                    _r, _c = _q.popleft()
+                    for _dr, _dc in ((-1,0),(1,0),(0,-1),(0,1)):
+                        _nr, _nc = _r+_dr, _c+_dc
+                        if 0 <= _nr < _ph and 0 <= _nc < _pw and not _visited[_nr, _nc] and _avg_pk[_nr, _nc] > 210:
+                            _visited[_nr, _nc] = True
+                            _q.append((_nr, _nc))
+                # Dilate background mask to fill thin enclosed white gaps.
+                # Left half gets a more aggressive pass to catch arm/tail triangles.
+                from PIL import ImageFilter as _IF
+                _bg_mask_pil = _PILImage2.fromarray(_visited.astype(_np2.uint8) * 255, 'L')
+                _bg_arr_r = _np2.array(_bg_mask_pil.filter(_IF.MaxFilter(15))) > 127  # 7px
+                _bg_arr_l = _np2.array(_bg_mask_pil.filter(_IF.MaxFilter(27))) > 127  # 13px
+                _midcol = _pw // 2
+                _bg_dilated = _bg_arr_r.copy()
+                _bg_dilated[:, :_midcol] = _bg_arr_l[:, :_midcol]
+                # Only apply dilated mask to near-white pixels (grey/colored pixels kept)
+                _is_bg_pk = _bg_dilated & (_avg_pk > 228)
+                _rgba_pk = _np2.zeros((_ph, _pw, 4), dtype=_np2.uint8)
+                _rgba_pk[:, :, :3] = _arr_pk.astype(_np2.uint8)
+                _rgba_pk[:, :, 3] = _np2.where(_is_bg_pk, 0, 255).astype(_np2.uint8)
+                _pil_pk_rgba = _PILImage2.fromarray(_rgba_pk, 'RGBA')
+                _pk_surf = pygame.image.fromstring(_pil_pk_rgba.tobytes(), _pil_pk.size, 'RGBA').convert_alpha()
+                _PIKA_H = 185
+                _pk_w = max(1, int(_pk_surf.get_width() * _PIKA_H / _pk_surf.get_height()))
+                self._pikachu_landing = pygame.transform.smoothscale(_pk_surf, (_pk_w, _PIKA_H))
+            except Exception:
+                pass
+
+        _eevee_path = os.path.join(SPRITE_DIR, 'EeveeLandingPic.webp')
+        if os.path.exists(_eevee_path):
+            try:
+                _raw_ev = pygame.image.load(_eevee_path)
+                _ev = _raw_ev.convert_alpha() if _raw_ev.get_alpha() is not None else _raw_ev.convert()
+                _EEVEE_H = 155
+                _ev_w = max(1, int(_ev.get_width() * _EEVEE_H / _ev.get_height()))
+                self._eevee_landing = pygame.transform.smoothscale(_ev, (_ev_w, _EEVEE_H))
+            except Exception:
+                pass
+
+        # ── Trainer sprites ──────────────────────────────────────────────────
+        self._trainer_imgs: Dict[str, pygame.Surface] = {}
+        _TBOX = 80   # bounding box for each trainer portrait in card
+        for name, fname in PERSONA_SPRITE_FILE.items():
+            path = os.path.join(SPRITE_DIR, fname)
+            if not os.path.exists(path):
+                continue
+            raw = pygame.image.load(path)
+            # Normalise to RGBA (palette-mode PNGs and JPEGs need explicit convert)
+            img = raw.convert_alpha() if raw.get_alpha() is not None else raw.convert()
+            # For JPEG/opaque images, wrap in an RGBA surface so alpha ops work
+            if img.get_alpha() is None:
+                rgba = pygame.Surface(img.get_size(), pygame.SRCALPHA)
+                rgba.blit(img, (0, 0))
+                img = rgba
+            # Crop transparent padding (skip for opaque images — bounding_rect is wrong)
+            if raw.get_alpha() is not None:
+                bb = img.get_bounding_rect()
+                if bb.width > 0 and bb.height > 0:
+                    cropped = pygame.Surface((bb.width, bb.height), pygame.SRCALPHA)
+                    cropped.blit(img, (0, 0), bb)
+                    img = cropped
+            # Scale to fit within _TBOX×_TBOX, preserving aspect ratio
+            iw, ih = img.get_size()
+            scale = min(_TBOX / iw, _TBOX / ih)
+            sw, sh = max(1, int(iw * scale)), max(1, int(ih * scale))
+            scaled = pygame.transform.smoothscale(img, (sw, sh))
+            # Centre on a fixed canvas
+            canvas = pygame.Surface((_TBOX, _TBOX), pygame.SRCALPHA)
+            cx_off = (_TBOX - sw) // 2
+            cy_off = (_TBOX - sh) // 2
+            canvas.blit(scaled, (cx_off, cy_off))
+            self._trainer_imgs[name] = canvas
+
+        # ── Mode buttons ─────────────────────────────────────────────────────
+        cx = WIN_W // 2
+        self.btn_pvb = Button(cx - 185, 208, 170, 50, 'Kalos Characters',
+                              font=self.f_mode, corner_radius=8)
+        self.btn_pvp = Button(cx +  15, 208, 170, 50, 'Friends',
+                              font=self.f_mode, corner_radius=8)
+
+        # ── Persona cards (3 × 2 grid) ───────────────────────────────────────
+        self._card_w, self._card_h = 355, 92
+        self._card_gap             = 12
+        cols                       = 3
+        total_w = cols * self._card_w + (cols - 1) * self._card_gap
+        self._grid_x = (WIN_W - total_w) // 2
+        self._grid_y = 302
+
+        # ── Colour toggle buttons ─────────────────────────────────────────────
+        self.btn_red  = Button(cx - 110, 582, 95, 30, 'Play RED',
+                               font=self.f_body, corner_radius=6)
+        self.btn_blue = Button(cx +  15, 582, 95, 30, 'Play BLUE',
+                               font=self.f_body, corner_radius=6)
+        self.btn_red.active = True
+
+        # ── Start button ──────────────────────────────────────────────────────
+        self.btn_start = Button(cx - 90, 632, 180, 48, 'Start Game',
+                                color=(45, 130, 60), hover_color=(60, 165, 78),
+                                text_color=C_WHITE, font=self.f_mode, corner_radius=10)
+
+    # ── helpers ──────────────────────────────────────────────────────────────
+
+    def _draw_lightning(self, surf, cx, cy, h, color=C_YELLOW):
+        """Draw a lightning-bolt polygon centred at (cx, cy) with total height h."""
+        w = h * 0.50
+        pts = [
+            (cx + w * 0.28,  cy - h * 0.50),
+            (cx - w * 0.12,  cy - h * 0.02),
+            (cx + w * 0.18,  cy - h * 0.02),
+            (cx - w * 0.28,  cy + h * 0.50),
+            (cx + w * 0.12,  cy + h * 0.02),
+            (cx - w * 0.18,  cy + h * 0.02),
+        ]
+        pygame.draw.polygon(surf, color, [(int(x), int(y)) for x, y in pts])
+
+    @staticmethod
+    def _truncate_text(text: str, font: pygame.font.Font, max_w: int) -> str:
+        """Truncate text with ellipsis to fit within max_w pixels."""
+        if font.size(text)[0] <= max_w:
+            return text
+        ellipsis = '…'
+        while text and font.size(text + ellipsis)[0] > max_w:
+            text = text[:-1]
+        return text + ellipsis
+
+    def _draw_chess_letters(self, surf, x, y, h):
+        """
+        Render 'CHESS' as alternating dark/light block-letter tiles.
+        Returns the total width rendered.
+        """
+        word   = 'CHESS'
+        pad    = 6      # horizontal padding inside each tile
+        letter_surf = [self.f_chess.render(ch, True, C_WHITE) for ch in word]
+        tile_w = max(s.get_width() for s in letter_surf) + pad * 2
+        tile_h = h
+
+        dark_bg   = (18,  20,  30)
+        light_bg  = (232, 232, 232)
+        dark_txt  = (18,  20,  30)
+        light_txt = (232, 232, 232)
+
+        for i, (ch, lsurf) in enumerate(zip(word, letter_surf)):
+            bg_col  = dark_bg   if i % 2 == 0 else light_bg
+            txt_col = light_txt if i % 2 == 0 else dark_txt
+            rect = pygame.Rect(x + i * tile_w, y, tile_w, tile_h)
+            pygame.draw.rect(surf, bg_col, rect, border_radius=4)
+            pygame.draw.rect(surf, C_DIVIDER, rect, 1, border_radius=4)
+            txt = self.f_chess.render(ch, True, txt_col)
+            surf.blit(txt, txt.get_rect(center=rect.center))
+
+        return tile_w * len(word)
+
+    def _persona_card_rect(self, idx: int) -> pygame.Rect:
+        col = idx % 3
+        row = idx // 3
+        x = self._grid_x + col * (self._card_w + self._card_gap)
+        y = self._grid_y + row * (self._card_h + self._card_gap)
+        return pygame.Rect(x, y, self._card_w, self._card_h)
+
+    def _draw_persona_card(self, surf, idx: int, persona: Persona, mouse_pos):
+        rect       = self._persona_card_rect(idx)
+        pc         = PERSONA_COLORS.get(persona.name, C_WHITE)
+        selected   = self._persona is persona
+        hovered    = rect.collidepoint(mouse_pos)
+
+        # Background
+        if selected:
+            r, g, b = pc
+            pygame.draw.rect(surf, (r // 4, g // 4, b // 4), rect, border_radius=8)
+            pygame.draw.rect(surf, pc, rect, 2, border_radius=8)
+        elif hovered:
+            pygame.draw.rect(surf, C_BTN_HOV, rect, border_radius=8)
+            pygame.draw.rect(surf, C_DIVIDER,  rect, 1, border_radius=8)
+        else:
+            pygame.draw.rect(surf, C_CARD, rect, border_radius=8)
+            pygame.draw.rect(surf, C_DIVIDER, rect, 1, border_radius=8)
+
+        # Trainer sprite (left side)
+        spr = self._trainer_imgs.get(persona.name)
+        spr_w = 0
+        if spr:
+            sy = rect.y + (rect.height - spr.get_height()) // 2
+            surf.blit(spr, (rect.x + 8, sy))
+            spr_w = spr.get_width() + 14
+
+        # Text column
+        tx = rect.x + spr_w + 8
+        ty = rect.y + 8
+
+        # Name
+        name_col = pc if selected else pc
+        name_surf = self.f_head.render(persona.name, True, name_col)
+        surf.blit(name_surf, (tx, ty))
+
+        # Difficulty — filled/empty circles
+        stars = PERSONA_STARS.get(persona.name, 0)
+        sr, sg = 6, 4   # circle radius and spacing gap
+        star_row_y = ty + 26
+        for i in range(6):
+            cx_s = tx + i * (sr * 2 + sg) + sr
+            if i < stars:
+                pygame.draw.circle(surf, pc, (cx_s, star_row_y), sr)
+            else:
+                pygame.draw.circle(surf, C_DIVIDER, (cx_s, star_row_y), sr)
+                pygame.draw.circle(surf, C_DIM, (cx_s, star_row_y), sr, 1)
+        # Difficulty label
+        diff_labels = ['', 'Beginner', 'Sneaky', 'Balanced', 'Strategic', 'Expert', 'LEGEND']
+        diff_x = tx + 6 * (sr * 2 + sg) + 6
+        diff_surf = self.f_small.render(diff_labels[stars], True, C_DIM)
+        surf.blit(diff_surf, (diff_x, star_row_y - diff_surf.get_height() // 2))
+
+        # Flavor text (first line only — newline is the forced-team notice)
+        _max_txt_w = rect.right - tx - 10
+        flavor_lines = PERSONA_FLAVOR.get(persona.name, '').split('\n')
+        fl0 = self._truncate_text(flavor_lines[0], self.f_small, _max_txt_w)
+        fl_surf = self.f_small.render(fl0, True, C_DIM)
+        surf.blit(fl_surf, (tx, ty + 40))
+        if len(flavor_lines) > 1:
+            warn_col = (220, 160, 40)
+            fl1 = self._truncate_text(flavor_lines[1], self.f_small, _max_txt_w)
+            w2 = self.f_small.render(fl1, True, warn_col)
+            surf.blit(w2, (tx, ty + 56))
+
+    # ── main draw ─────────────────────────────────────────────────────────────
+
+    def _draw(self, mouse_pos):
+        surf = self.screen
+        surf.fill(BG)
+        cx = WIN_W // 2
+
+        # ── Logo ──────────────────────────────────────────────────────────────
+        # Bolt is the vertical anchor.
+        # POKE is left of bolt, its centre aligns with bolt's 1/3 height.
+        # CHESS is right of bolt, its centre aligns with bolt's 2/3 height.
+        bh = self._bolt_h                       # e.g. 148
+        bw = self._bolt_img.get_width()
+
+        poke_h = self._poke_img.get_height()
+        poke_w = self._poke_img.get_width()
+
+        # Measure CHESS block exactly (mirrors _draw_chess_letters tile_w calc)
+        _sample_letters = [self.f_chess.render(ch, True, C_WHITE) for ch in 'CHESS']
+        _chess_pad = 6
+        _chess_tile_w = max(s.get_width() for s in _sample_letters) + _chess_pad * 2
+        chess_h = self.f_chess.get_height()
+        chess_w = _chess_tile_w * 5
+
+        total_logo_w = poke_w + bw + chess_w
+        logo_x = (WIN_W - total_logo_w) // 2
+
+        # ── Dynamic vertical centering based on current content state ─────────
+        _hero_line_h = self.f_hero.get_height()
+        _tagline_h_est  = _hero_line_h * 2 + 4
+        # gap_above tagline + tagline + gap_below tagline + btn + divider + content_gap
+        _mode_section_h = 20 + self.btn_pvb.rect.height + 14 + 14
+        _base_h = bh + 20 + _tagline_h_est + _mode_section_h
+        if self._mode == 'bot':
+            _extra = 15 + 16 + 2 * (self._card_h + self._card_gap)
+            if self._persona is not None:
+                _extra += 80
+            _extra += self.btn_start.rect.height + 12
+            _total_h = _base_h + _extra
+        elif self._mode == 'local':
+            _total_h = _base_h + 120
+        else:
+            _total_h = _base_h + 20
+        logo_y = max(8, (WIN_H - _total_h) // 2)
+
+        bolt_x = logo_x + poke_w
+        chess_x = bolt_x + bw
+
+        # Vertical offset: POKE centre @ 1/3, CHESS centre @ 2/3
+        poke_cy  = logo_y + bh // 3
+        chess_cy = logo_y + 2 * bh // 3
+
+        poke_y  = poke_cy  - poke_h  // 2
+        chess_y = chess_cy - chess_h // 2
+
+        # Blit bolt image
+        surf.blit(self._bolt_img, (bolt_x, logo_y))
+        # Blit POKE
+        surf.blit(self._poke_img, (logo_x, poke_y))
+        # Draw CHESS block letters
+        self._draw_chess_letters(surf, chess_x, chess_y, chess_h)
+
+        # Tagline — "HEY TRAINER! / Wanna battle?" (large hero font)
+        # Center tagline between underside of CHESS and top of buttons
+        _tagline_gap = 18
+        chess_bottom = chess_cy + chess_h // 2
+        tagline_y = chess_bottom + _tagline_gap
+        hey_surf = self.f_hero.render('HEY TRAINER!', True, C_YELLOW)
+        wb_surf  = self.f_hero.render('Wanna battle?', True, C_WHITE)
+        tagline_h = hey_surf.get_height() + 4 + wb_surf.get_height()
+
+        # Flanking Pikachu (left) and Eevee (right) centred on tagline block
+        flank_cy = tagline_y + tagline_h // 2
+        _FLANK_PAD = 14   # gap between flanker and text block
+        max_text_w = max(hey_surf.get_width(), wb_surf.get_width())
+        if self._pikachu_landing is not None:
+            px_right = cx - max_text_w // 2 - _FLANK_PAD
+            px = px_right - self._pikachu_landing.get_width()
+            py = flank_cy - self._pikachu_landing.get_height() // 2
+            surf.blit(self._pikachu_landing, (px, py))
+        if self._eevee_landing is not None:
+            ex = cx + max_text_w // 2 + _FLANK_PAD
+            ey = flank_cy - self._eevee_landing.get_height() // 2
+            surf.blit(self._eevee_landing, (ex, ey))
+
+        surf.blit(hey_surf, hey_surf.get_rect(center=(cx, tagline_y)))
+        surf.blit(wb_surf,  wb_surf.get_rect(center=(cx, tagline_y + hey_surf.get_height() + 4)))
+
+        # ── Mode selection — buttons placed symmetrically below tagline ─────
+        btn_y = tagline_y + tagline_h + _tagline_gap
+        self.btn_pvb.rect.y = btn_y
+        self.btn_pvp.rect.y = btn_y
+        self.btn_pvb.draw(surf, mouse_pos)
+        self.btn_pvp.draw(surf, mouse_pos)
+
+        divider_y = btn_y + self.btn_pvb.rect.height + 14
+        pygame.draw.rect(surf, C_DIVIDER, (80, divider_y, WIN_W - 160, 1))
+
+        # ── PvB content ───────────────────────────────────────────────────────
+        content_y = divider_y + 14   # top of content area below divider
+        if self._mode == 'bot':
+            pl = self.f_head.render('Choose your opponent:', True, C_DIM)
+            surf.blit(pl, pl.get_rect(center=(cx, content_y)))
+
+            # Reposition persona grid relative to content_y
+            self._grid_y = content_y + 16
+            for idx, persona in enumerate(ALL_PERSONAS):
+                self._draw_persona_card(surf, idx, persona, mouse_pos)
+
+            # Colour section — only show after persona is chosen
+            if self._persona is not None:
+                forced = PERSONA_FORCED_PLAYER.get(self._persona.name)
+                col_y  = self._grid_y + 2 * (self._card_h + self._card_gap) + 14
+
+                if forced:
+                    lock_text = (
+                        f'Team locked — you play {forced}  '
+                        f'({"Clemont commands Pikachu" if forced == "BLUE" else "Team Rocket hunts your Pikachu"})'
+                    )
+                    lk = self.f_body.render(lock_text, True, (220, 160, 40))
+                    surf.blit(lk, lk.get_rect(center=(cx, col_y + 10)))
+                else:
+                    cl = self.f_head.render('Choose your team:', True, C_DIM)
+                    surf.blit(cl, cl.get_rect(center=(cx - 10, col_y + 5)))
+                    col_btn_y = col_y + 22
+                    self.btn_red.rect.y  = col_btn_y
+                    self.btn_blue.rect.y = col_btn_y
+                    self.btn_red.draw(surf, mouse_pos)
+                    self.btn_blue.draw(surf, mouse_pos)
+
+            # Start button placed below colour section
+            # col_y = grid_bottom + 14; label=20px; btn_h=30px; gap=10px → total ~74px
+            grid_bottom = self._grid_y + 2 * (self._card_h + self._card_gap)
+            start_y = grid_bottom + (0 if self._persona is None else 80)
+            self.btn_start.rect.y = start_y
+
+        elif self._mode == 'local':
+            desc = self.f_body.render(
+                'Two players share this screen.  Pass the keyboard between turns.', True, C_DIM)
+            surf.blit(desc, desc.get_rect(center=(cx, content_y + 30)))
+            self.btn_start.rect.y = content_y + 70
+
+        # ── Start button / hint ───────────────────────────────────────────────
+        can_start = (self._mode == 'local') or (self._mode == 'bot' and self._persona is not None)
+        if can_start:
+            self.btn_start.draw(surf, mouse_pos)
+        else:
+            if self._mode is None:
+                hint = 'Select a game mode above to continue.'
+            else:
+                hint = 'Select an opponent to continue.'
+            ht = self.f_small.render(hint, True, C_DIM)
+            surf.blit(ht, ht.get_rect(center=(cx, self.btn_start.rect.centery)))
+
+    # ── event loop ────────────────────────────────────────────────────────────
+
+    def run(self) -> Optional[dict]:
+        """Return config dict {mode, persona, player_color} or None to quit."""
+        while True:
+            mouse_pos = pygame.mouse.get_pos()
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    return None
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    return None
+
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    pos = event.pos
+
+                    # Mode selection
+                    if self.btn_pvb.hit(event):
+                        self._mode = 'bot'
+                        self.btn_pvb.active = True
+                        self.btn_pvp.active = False
+
+                    elif self.btn_pvp.hit(event):
+                        self._mode = 'local'
+                        self.btn_pvp.active = True
+                        self.btn_pvb.active = False
+                        self._persona = None
+
+                    # Persona card hit
+                    if self._mode == 'bot':
+                        for idx, persona in enumerate(ALL_PERSONAS):
+                            if self._persona_card_rect(idx).collidepoint(pos):
+                                self._persona = persona
+                                # Apply forced colour
+                                forced = PERSONA_FORCED_PLAYER.get(persona.name)
+                                if forced == 'RED':
+                                    self._player_color = Team.RED
+                                    self.btn_red.active  = True
+                                    self.btn_blue.active = False
+                                elif forced == 'BLUE':
+                                    self._player_color = Team.BLUE
+                                    self.btn_red.active  = False
+                                    self.btn_blue.active = True
+                                break
+
+                    # Colour toggle (only active when no forced colour)
+                    if (self._persona is None or
+                            PERSONA_FORCED_PLAYER.get(
+                                self._persona.name if self._persona else '') is None):
+                        if self.btn_red.hit(event):
+                            self._player_color = Team.RED
+                            self.btn_red.active  = True
+                            self.btn_blue.active = False
+                        elif self.btn_blue.hit(event):
+                            self._player_color = Team.BLUE
+                            self.btn_red.active  = False
+                            self.btn_blue.active = True
+
+                    # Start
+                    can_start = (self._mode == 'local') or (
+                        self._mode == 'bot' and self._persona is not None)
+                    if can_start and self.btn_start.hit(event):
+                        return {
+                            'mode':         self._mode,
+                            'persona':      self._persona,
+                            'player_color': self._player_color,
+                        }
+
+            self._draw(mouse_pos)
+            pygame.display.flip()
+            self.clock.tick(30)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Main application
 # ──────────────────────────────────────────────────────────────────────────────
 class PokeChessApp:
     # ── init ────────────────────────────────────────────────────────────────
-    def __init__(self, init_budget: float = 1.0):
-        os.environ.setdefault('SDL_VIDEO_WINDOW_POS', '0,0')
-        pygame.init()
-        pygame.display.set_caption('PokeChess')
+    def __init__(
+        self,
+        init_budget:  float            = 1.0,
+        mode:         str              = 'bot',
+        persona:      Optional[Persona] = None,
+        player_color: Team             = Team.RED,
+    ):
         self.screen = pygame.display.set_mode((WIN_W, WIN_H), pygame.RESIZABLE)
+        pygame.display.set_caption('PokeChess')
         self.clock  = pygame.time.Clock()
 
         # fonts
@@ -301,26 +1119,46 @@ class PokeChessApp:
         self._captures: dict[Team, list] = {Team.RED: [], Team.BLUE: []}
 
         # game state
-        self.state: Optional[GameState]   = None
-        self.history: List[GameState]     = []   # board states (snaps after each move)
-        self.move_log: List[str]          = []   # textual move descriptions
-        self.hist_idx: int                = -1   # -1 = live game
+        self.state: Optional[GameState]         = None
+        self.history: List[GameState]           = []
+        self.move_log: List[str]                = []
+        self.hist_idx: int                      = -1
         self.selected: Optional[Tuple[int,int]] = None
-        self.legal_for_sel: List[Move]    = []
-        self.pending_moves: List[Move]    = []   # disambiguation candidates
-        self.player_color: Team           = Team.RED
+        self.legal_for_sel: List[Move]          = []
+        self.pending_moves: List[Move]          = []
+        self.player_color: Team                 = player_color
+
+        # persona & bot identity
+        self._persona:  Optional[Persona] = persona
+        self._bot_name: str = persona.name if persona else 'Bot'
+
+        # resolve MCTS construction params from persona (or fallback defaults)
+        if persona is not None:
+            _budget  = persona.time_budget
+            _c       = persona.exploration_c
+            _tt      = self.shared_tt if persona.use_transposition else None
+            _bias    = persona.move_bias
+            _bonus   = persona.bias_bonus
+            _tt_init = 1.0 if persona.use_transposition else 0.0
+        else:
+            _budget  = init_budget
+            _c       = DEFAULT_C
+            _tt      = None
+            _bias    = None
+            _bonus   = 0.15
+            _tt_init = 1.0
 
         # bot state
-        self._bot_thread: Optional[threading.Thread]    = None
-        self._bot_result: Optional[Move]                = None
-        self._bot_lock                                  = threading.Lock()
-        self._bot_running                               = False
-        # persistent MCTS instance — tree survives across turns for pondering
+        self._bot_result: Optional[Move]  = None
+        self._bot_lock                    = threading.Lock()
+        self._bot_running                 = False
         self._metalic_bot: MCTS = MCTS(
-            time_budget=1.0,
-            transposition=None,   # set to shared_tt after it is created below
+            time_budget   = _budget,
+            exploration_c = _c,
+            transposition = _tt,
+            move_bias     = _bias,
+            bias_bonus    = _bonus,
         )
-        # ponder (background think during opponent's turn)
         self._ponder_thread: Optional[threading.Thread] = None
         self._ponder_running: bool                      = False
 
@@ -328,54 +1166,69 @@ class PokeChessApp:
         self.status_msg   = ''
         self.status_color = C_WHITE
         self.tooltip_text = ''
-        self.bot_move_highlight: Optional[Tuple[int,int,int,int]] = None   # (fr,fc,tr,tc)
+        self.bot_move_highlight: Optional[Tuple[int,int,int,int]] = None
         self._last_bot_move_time = 0.0
+        self._miss_flash: Optional[Tuple[int,int,float]] = None  # (row, col, start_time)
 
-        # game mode: 'bot' = play vs METALIC, 'local' = two players on same screen
-        self.game_mode: str = 'bot'
-        self._local_pass_pending: bool = False   # show "pass screen" between local turns
-        self._pass_screen_on: bool = True        # user toggle: enable/disable pass screen
+        # game mode
+        self.game_mode: str          = mode
+        self._local_pass_pending     = False
+        self._pass_screen_on: bool   = True
 
         # ── build UI widgets ─────────────────────────────────────────────────
         px = PANEL_X
 
-        # game mode toggle (top of controls)
-        self.btn_vs_metalic = Button(px,       68, 112, 28, 'vs METALIC',
-                                     font=self.f_body, corner_radius=6)
-        self.btn_local_mode = Button(px+120,   68,  84, 28, 'Local',
-                                     font=self.f_body, corner_radius=6)
-        self.btn_vs_metalic.active = True
+        # Menu button — right side of board area, just before the right panel
+        self.btn_menu = Button(BOARD_X + 8 * CELL - 82, 14, 72, 26, '← Menu',
+                               font=self.f_small, corner_radius=4)
 
-        # local mode: pass-screen toggle (shown only in local mode)
+        # game mode toggle
+        bot_label = f'vs {self._bot_name}'
+        self.btn_vs_metalic = Button(px,     68, 120, 28, bot_label,
+                                     font=self.f_body, corner_radius=6)
+        self.btn_local_mode = Button(px+128, 68,  76, 28, 'Local',
+                                     font=self.f_body, corner_radius=6)
+        self.btn_vs_metalic.active = (self.game_mode == 'bot')
+        self.btn_local_mode.active = (self.game_mode == 'local')
+
+        # pass-screen toggle (local mode only)
         self.btn_pass_toggle = Button(px, 106, PANEL_W - 4, 24, 'Pass screen',
                                       font=self.f_body, corner_radius=5)
-        self.btn_pass_toggle.active = True   # on by default
+        self.btn_pass_toggle.active = True
 
-        # color toggle (only meaningful in bot mode)
+        # color toggle (bot mode only)
         self.btn_red  = Button(px,      106, 100, 28, 'Play as RED',
                                font=self.f_body, corner_radius=6)
         self.btn_blue = Button(px+108,  106, 104, 28, 'Play as BLUE',
                                font=self.f_body, corner_radius=6)
-        self.btn_red.active = True
+        self.btn_red.active  = (player_color == Team.RED)
+        self.btn_blue.active = (player_color == Team.BLUE)
 
-        # bot sliders
+        # bot sliders — kept for PvP mode; hidden in bot mode (persona fixes values)
         sx = px
-        sw = PANEL_W - 4   # PANEL_W already includes 30px right margin via the constant
-        self.sl_budget = Slider(sx, 200, sw, 0.2, 10.0, init_budget,
+        sw = PANEL_W - 4
+        self.sl_budget = Slider(sx, 200, sw, 0.2, 10.0, _budget,
                                 label='Bot time budget (s)',
                                 fmt='{:.1f}s',
                                 font=self.f_body, lbl_font=self.f_small)
-        self.sl_tt     = Slider(sx, 255, sw, 0.0, 1.0, 1.0,
+        self.sl_tt     = Slider(sx, 255, sw, 0.0, 1.0, _tt_init,
                                 label='TT access  (prior knowledge)',
                                 fmt='{:.0%}',
                                 font=self.f_body, lbl_font=self.f_small)
 
+        # persona chat widget — replaces slider area in bot mode
+        self.chat_widget = ScrollLog(px, 186, PANEL_W - 4, 120, font=self.f_log)
+
+        # chat pacing: post a random quip every _next_chat_move moves
+        self._move_count:    int = 0
+        self._next_chat_move: int = random.randint(3, 7)
+
         # game controls
         bw = (PANEL_W - 10) // 2 - 2
-        self.btn_new   = Button(px,       318, bw, 34, 'New Game',
-                                font=self.f_body, corner_radius=6)
-        self.btn_undo  = Button(px+bw+4,  318, bw, 34, 'Undo',
-                                font=self.f_body, corner_radius=6)
+        self.btn_new  = Button(px,      318, bw, 34, 'New Game',
+                               font=self.f_body, corner_radius=6)
+        self.btn_undo = Button(px+bw+4, 318, bw, 34, 'Undo',
+                               font=self.f_body, corner_radius=6)
 
         # history nav
         nw = (PANEL_W - 10) // 4 - 2
@@ -392,7 +1245,7 @@ class PokeChessApp:
         self.log_widget = ScrollLog(px, 378, PANEL_W - 10, WIN_H - 378 - 10,
                                     font=self.f_log)
 
-        # action buttons (disambiguation) — built dynamically, placed below board
+        # action buttons (disambiguation) — built dynamically
         self.action_btns: List[Button] = []
 
         self.new_game()
@@ -461,12 +1314,16 @@ class PokeChessApp:
         self._local_pass_pending = False
         self._metalic_bot._root = None   # discard stale tree; TT retains cross-game learning
         self._captures = {Team.RED: [], Team.BLUE: []}
+        self._move_count    = 0
+        self._next_chat_move = random.randint(3, 7)
         self.log_widget.lines.clear()
         self.log_widget.add('─── New game ───', C_YELLOW)
         self.log_widget.add(f'You play as {"RED" if self.player_color == Team.RED else "BLUE"}', C_WHITE)
-        self.log_widget.add(f'Bot budget: {self.sl_budget.value:.1f}s', C_DIM)
-        tt_pct = int(self.sl_tt.value * 100)
-        self.log_widget.add(f'TT access: {tt_pct}%   |   entries: {len(self.shared_tt):,}', C_DIM)
+        if self.game_mode == 'bot' and self._persona is None:
+            self.log_widget.add(f'Bot budget: {self.sl_budget.value:.1f}s', C_DIM)
+        if self.game_mode == 'bot':
+            self.chat_widget.lines.clear()
+            self._post_chat('idle')
         self._update_status()
         if self._is_bot_turn():
             self._start_bot()
@@ -493,6 +1350,48 @@ class PokeChessApp:
         self.bot_move_highlight = None
         self.log_widget.add('Undo', C_ORANGE)
         self._update_status()
+
+    # ── Persona chat ─────────────────────────────────────────────────────────
+
+    def _post_chat(self, event_type: str, color=None):
+        """Post a character-voiced message to the chat widget (bot mode only)."""
+        if self.game_mode != 'bot' or self._persona is None:
+            return
+        bank = PERSONA_CHAT.get(self._persona.name, {}).get(event_type, [])
+        if not bank:
+            bank = PERSONA_CHAT.get(self._persona.name, {}).get('idle', [])
+        if not bank:
+            return
+        msg = random.choice(bank)
+        pc  = PERSONA_COLORS.get(self._persona.name, C_WHITE)
+        col = color or pc
+        # Word-wrap the full line to fit the chat widget
+        full_line = f'{self._persona.name}: {msg}'
+        font = self.chat_widget.font
+        max_w = self.chat_widget.rect.width - 16   # 6px left + 10px right margin
+        words = full_line.split(' ')
+        line_buf = ''
+        for word in words:
+            test = (line_buf + ' ' + word).lstrip()
+            if font.size(test)[0] <= max_w:
+                line_buf = test
+            else:
+                if line_buf:
+                    self.chat_widget.add(line_buf, col)
+                line_buf = word
+        if line_buf:
+            self.chat_widget.add(line_buf, col)
+
+    def _on_move_chat(self, event_type: str, color=None):
+        """Called after every move; also fires idle quips on schedule."""
+        self._move_count += 1
+        # Immediate event-driven message
+        if event_type != 'idle':
+            self._post_chat(event_type, color)
+        # Scheduled idle quip
+        if self._move_count >= self._next_chat_move:
+            self._post_chat('idle')
+            self._next_chat_move = self._move_count + random.randint(5, 10)
 
     # ── HP and capture helpers ────────────────────────────────────────────────
 
@@ -582,7 +1481,7 @@ class PokeChessApp:
                 self.status_msg   = 'Draw'
                 self.status_color = C_YELLOW
             else:
-                self.status_msg   = 'METALIC wins!'
+                self.status_msg   = f'{self._bot_name} wins!'
                 self.status_color = C_RED
         elif self.game_mode == 'local':
             if self._local_pass_pending:
@@ -592,7 +1491,7 @@ class PokeChessApp:
                 self.status_msg   = f'{color_name}\'s turn  —  turn {s.turn_number}'
                 self.status_color = C_RED if s.active_player == Team.RED else C_BLUE
         elif self._bot_running:
-            self.status_msg   = f'METALIC thinking...  (budget {self.sl_budget.value:.1f}s)'
+            self.status_msg   = f'{self._bot_name} thinking...  ({self.sl_budget.value:.1f}s)'
             self.status_color = C_CYAN
         elif self.hist_idx != -1:
             n = len(self.history)
@@ -602,7 +1501,7 @@ class PokeChessApp:
             self.status_msg   = f'Your turn ({color_name})  —  turn {s.turn_number}'
             self.status_color = C_WHITE
         else:
-            self.status_msg   = f'Waiting for METALIC ({color_name})'
+            self.status_msg   = f'Waiting for {self._bot_name} ({color_name})'
             self.status_color = C_DIM
 
     # ── bot thread ───────────────────────────────────────────────────────────
@@ -640,9 +1539,15 @@ class PokeChessApp:
 
         self._bot_running = True
         self._bot_result  = None
-        self.shared_tt.access_pct = self.sl_tt.value
-        self._metalic_bot.time_budget    = max(0.1, self.sl_budget.value)
-        self._metalic_bot.transposition  = self.shared_tt
+        if self._persona is not None:
+            # Persona fixes the bot params — sliders are decorative in this mode
+            self.shared_tt.access_pct = 1.0 if self._persona.use_transposition else 0.0
+            self._metalic_bot.transposition = self.shared_tt
+        else:
+            # No persona — sliders control the bot
+            self.shared_tt.access_pct = self.sl_tt.value
+            self._metalic_bot.time_budget   = max(0.1, self.sl_budget.value)
+            self._metalic_bot.transposition = self.shared_tt
         state = self._live_state()
 
         def _think():
@@ -702,16 +1607,37 @@ class PokeChessApp:
                 f'Bot  {ACTION_LABEL.get(move.action_type,"?")} '
                 f'{p_name}{slot_note} ({pr},{pc})→({tr},{tc})',
                 team_col)
-            # Stochastic outcome note
+            # Determine chat event from board outcome
+            _chat_event = 'idle'
             if is_stochastic:
+                # Bot threw a pokeball
                 if picked == 0:
                     self.log_widget.add(f'  >> Caught {t_name}!', C_GREEN)
+                    _chat_event = 'capture'
                 else:
                     self.log_widget.add(f'  >> {t_name} got away!', C_ORANGE)
-            # Pokemon-attacks-pokeball note (deterministic catch)
-            elif (move.action_type == ActionType.ATTACK and target is not None
-                  and target.piece_type in PAWN_TYPES):
-                self.log_widget.add(f'  >> {p_name} was caught by {t_name}!', C_ORANGE)
+                    self._miss_flash = (tr, tc, time.monotonic())
+                    _chat_event = 'miss'
+            elif move.action_type == ActionType.ATTACK and target is not None:
+                _target_gone = new_state.board[tr][tc] is None
+                _piece_gone  = new_state.board[pr][pc] is None
+                if _target_gone and _piece_gone:
+                    # Both disappeared: masterball caught something, OR bot piece walked into pokeball
+                    if piece.piece_type in PAWN_TYPES:
+                        _chat_event = 'capture'   # bot's pokeball/masterball caught target
+                    else:
+                        self.log_widget.add(f'  >> {p_name} was caught by {t_name}!', C_ORANGE)
+                        _chat_event = 'miss'       # bot's pokemon walked into enemy pokeball
+                elif _target_gone:
+                    _chat_event = 'capture'    # bot killed/captured enemy; bot piece survived
+                elif _piece_gone:
+                    _chat_event = 'miss'       # bot's piece was removed (shouldn't happen in normal attack)
+                # else: damage only → _chat_event stays 'idle'
+            elif move.action_type == ActionType.EVOLVE:
+                _chat_event = 'evolve'
+            elif move.action_type == ActionType.FORESIGHT:
+                _chat_event = 'foresight'
+            self._on_move_chat(_chat_event)
 
         self.bot_move_highlight = (pr, pc, tr, tc)
         self._last_bot_move_time = time.monotonic()
@@ -734,6 +1660,11 @@ class PokeChessApp:
                 # Human's turn — start pondering in the background
                 self._start_ponder(new_state)
         else:
+            _, winner = is_terminal(new_state)
+            if winner != self.player_color:
+                self._post_chat('win')
+            else:
+                self._post_chat('loss')
             if self._is_bot_turn():
                 self._start_bot()
 
@@ -769,16 +1700,37 @@ class PokeChessApp:
                 f'You  {ACTION_LABEL.get(move.action_type,"?")} '
                 f'{p_name}{slot_note} ({pr},{pc})->({tr},{tc})',
                 team_col)
-            # Stochastic outcome note
+            # Determine chat event from board outcome (bot reacts to human's move)
+            _chat_ev = 'idle'
             if is_stochastic:
+                # Human threw a pokeball at a bot piece
                 if picked == 0:
                     self.log_widget.add(f'  >> Caught {t_name}!', C_GREEN)
+                    _chat_ev = 'miss'    # bot lost a piece — bot laments
                 else:
                     self.log_widget.add(f'  >> {t_name} got away!', C_ORANGE)
-            # Pokemon-attacks-pokeball note (deterministic catch)
-            elif (move.action_type == ActionType.ATTACK and target is not None
-                  and target.piece_type in PAWN_TYPES):
-                self.log_widget.add(f'  >> {p_name} was caught by {t_name}!', C_ORANGE)
+                    self._miss_flash = (tr, tc, time.monotonic())
+                    _chat_ev = 'idle'   # miss is neutral — bot says nothing meaningful
+            elif move.action_type == ActionType.ATTACK and target is not None:
+                _target_gone = new_state.board[tr][tc] is None
+                _piece_gone  = new_state.board[pr][pc] is None
+                if _target_gone and _piece_gone:
+                    # Both disappeared: human pokeball caught bot piece, OR human piece walked into bot pokeball
+                    if piece.piece_type in PAWN_TYPES:
+                        _chat_ev = 'miss'    # human's pokeball caught a bot piece
+                    else:
+                        self.log_widget.add(f'  >> {p_name} was caught by {t_name}!', C_ORANGE)
+                        _chat_ev = 'capture'  # human's pokemon was caught by bot's pokeball — bot gloats
+                elif _target_gone:
+                    _chat_ev = 'miss'     # human killed a bot piece; bot laments
+                elif _piece_gone:
+                    _chat_ev = 'capture'  # human piece removed (shouldn't normally happen)
+                # else: damage only → _chat_ev stays 'idle'
+            elif move.action_type == ActionType.EVOLVE:
+                _chat_ev = 'evolve'
+            elif move.action_type == ActionType.FORESIGHT:
+                _chat_ev = 'foresight'
+            self._on_move_chat(_chat_ev)
 
         self._record_captures(s, new_state)
         self.history.append(new_state)
@@ -788,6 +1740,11 @@ class PokeChessApp:
         self.action_btns   = []
 
         done, winner = is_terminal(new_state)
+        if done:
+            if winner == self.player_color:
+                self._post_chat('loss')   # player won → bot loses
+            elif winner is not None:
+                self._post_chat('win')
         if self.game_mode == 'local' and not done and self._pass_screen_on:
             self._local_pass_pending = True
         self._update_status()
@@ -952,15 +1909,15 @@ class PokeChessApp:
         self.action_btns.append(cancel)
 
     # ── event loop ───────────────────────────────────────────────────────────
-    def run(self):
+    def run(self) -> Optional[str]:
+        """Return 'menu' to go back to landing screen, None to quit."""
         while True:
             mouse_pos = pygame.mouse.get_pos()
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self._stop_ponder()
                     self.shared_tt.save(TT_SAVE_PATH)
-                    pygame.quit()
-                    return
+                    return None
 
                 # Sliders
                 self.sl_budget.handle(event)
@@ -972,6 +1929,12 @@ class PokeChessApp:
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     pos = event.pos
 
+                    # Menu button — return to landing screen
+                    if self.btn_menu.hit(event):
+                        self._stop_ponder()
+                        self.shared_tt.save(TT_SAVE_PATH)
+                        return 'menu'
+
                     # Pass screen (local mode): any board click reveals next turn
                     if self._local_pass_pending:
                         rc = self._screen_to_board(pos[0], pos[1])
@@ -982,11 +1945,10 @@ class PokeChessApp:
 
                     # Game mode toggle
                     if self.btn_vs_metalic.hit(event) and not self._bot_running:
-                        self.game_mode = 'bot'
-                        self.btn_vs_metalic.active = True
-                        self.btn_local_mode.active = False
-                        self.new_game()
-                        continue
+                        # Always go back to the landing screen to pick a persona
+                        self._stop_ponder()
+                        self.shared_tt.save(TT_SAVE_PATH)
+                        return 'menu'
                     if self.btn_local_mode.hit(event) and not self._bot_running:
                         self.game_mode = 'local'
                         self.btn_local_mode.active = True
@@ -1001,19 +1963,22 @@ class PokeChessApp:
                             self._local_pass_pending = False
                         continue
 
-                    # Color buttons
-                    if self.btn_red.hit(event) and not self._bot_running:
-                        self.player_color = Team.RED
-                        self.btn_red.active  = True
-                        self.btn_blue.active = False
-                        self.new_game()
-                        continue
-                    if self.btn_blue.hit(event) and not self._bot_running:
-                        self.player_color = Team.BLUE
-                        self.btn_red.active  = False
-                        self.btn_blue.active = True
-                        self.new_game()
-                        continue
+                    # Color buttons — locked for forced-team personas
+                    _forced = PERSONA_FORCED_PLAYER.get(
+                        self._persona.name if self._persona else '')
+                    if not _forced and not self._bot_running:
+                        if self.btn_red.hit(event):
+                            self.player_color = Team.RED
+                            self.btn_red.active  = True
+                            self.btn_blue.active = False
+                            self.new_game()
+                            continue
+                        if self.btn_blue.hit(event):
+                            self.player_color = Team.BLUE
+                            self.btn_red.active  = False
+                            self.btn_blue.active = True
+                            self.new_game()
+                            continue
 
                     # Game control buttons
                     if self.btn_new.hit(event):
@@ -1131,23 +2096,22 @@ class PokeChessApp:
         pygame.draw.rect(surf, C_DIVIDER, (0, 55, WIN_W, 1))
         title = self.f_title.render('PokeChess', True, C_WHITE)
         surf.blit(title, (BOARD_X, 16))
-        state = self._viewing_state()
-        turn_color = C_RED if state.active_player == Team.RED else C_BLUE
-        tc_name = 'RED' if state.active_player == Team.RED else 'BLUE'
-        t_txt = self.f_body.render(
-            f'Turn {state.turn_number}  |  Active: {tc_name}', True, turn_color)
-        surf.blit(t_txt, (BOARD_X + 140, 20))
 
-        # Status
+        mouse_pos = pygame.mouse.get_pos()
+        self.btn_menu.draw(surf, mouse_pos)
+
+        # Status centered over the board area so it never clips into the right panel
+        _board_cx = BOARD_X + 4 * CELL
         st = self.f_head.render(self.status_msg, True, self.status_color)
-        surf.blit(st, (BOARD_X + 400, 18))
+        st_rect = st.get_rect(center=(_board_cx, 28))
+        surf.blit(st, st_rect)
 
-        # Bot thinking spinner
+        # Bot thinking spinner placed just right of the status text
         if self._bot_running:
             t = int(time.monotonic() * 3) % 4
             dots = '.' * (t + 1) + '   '
             sp = self.f_body.render(dots[:4], True, C_CYAN)
-            surf.blit(sp, (BOARD_X + 400 + st.get_width() + 8, 20))
+            surf.blit(sp, (st_rect.right + 4, 22))
 
     def _draw_board(self, surf, mouse_pos):
         state  = self._viewing_state()
@@ -1224,6 +2188,19 @@ class PokeChessApp:
         # Board border
         brd = pygame.Rect(BOARD_X - 2, BOARD_Y - 2, 8 * CELL + 4, 8 * CELL + 4)
         pygame.draw.rect(surf, C_DIVIDER, brd, 2, border_radius=3)
+
+        # Pokeball miss flash — "ESCAPED!" fades over the target square for 1.2s
+        if self._miss_flash is not None:
+            _mrow, _mcol, _mt = self._miss_flash
+            _elapsed = time.monotonic() - _mt
+            if _elapsed > 1.2:
+                self._miss_flash = None
+            else:
+                _alpha = max(0, int(255 * (1.0 - _elapsed / 1.2)))
+                _sx, _sy = self._board_to_screen(_mrow, _mcol)
+                _esc_surf = self.f_head.render('ESCAPED!', True, C_ORANGE)
+                _esc_surf.set_alpha(_alpha)
+                surf.blit(_esc_surf, _esc_surf.get_rect(center=(_sx + CELL // 2, _sy + CELL // 2 - 4)))
 
         # Rank / file labels
         for i in range(8):
@@ -1415,22 +2392,29 @@ class PokeChessApp:
         if self.game_mode == 'local':
             self.btn_pass_toggle.draw(surf, mouse_pos)
         if self.game_mode == 'bot':
-            lbl = self.f_head.render('You play as:', True, C_DIM)
-            surf.blit(lbl, (px, 104))
-            self.btn_red.draw(surf, mouse_pos)
-            self.btn_blue.draw(surf, mouse_pos)
+            forced = PERSONA_FORCED_PLAYER.get(
+                self._persona.name if self._persona else '')
+            if forced:
+                lock_surf = self.f_body.render(
+                    f'Team locked: you play {forced}', True, (220, 160, 40))
+                surf.blit(lock_surf, (px, 106))
+            else:
+                lbl = self.f_head.render('You play as:', True, C_DIM)
+                surf.blit(lbl, (px, 104))
+                self.btn_red.draw(surf, mouse_pos)
+                self.btn_blue.draw(surf, mouse_pos)
 
         # ── Section: Bot settings (bot mode only) ─────────────────────────
         pygame.draw.rect(surf, C_DIVIDER, (px, 178, PANEL_W - 10, 1))
-        if self.game_mode == 'bot':
-            bl = self.f_head.render('METALIC Settings', True, C_DIM)
+        if self.game_mode == 'bot' and self._persona is not None:
+            # Persona chat replaces knobs (name visible in each message)
+            self.chat_widget.draw(surf, mouse_pos)
+        elif self.game_mode == 'bot':
+            # Fallback: show sliders if somehow no persona
+            bl = self.f_head.render('Bot Settings', True, C_DIM)
             surf.blit(bl, (px, 184))
             self.sl_budget.draw(surf)
             self.sl_tt.draw(surf)
-            tt_entries = len(self.shared_tt)
-            tt_txt = self.f_small.render(
-                f'TT entries: {tt_entries:,}  (grows across games)', True, C_DIM)
-            surf.blit(tt_txt, (px, 298))
 
         # ── Section: Controls ─────────────────────────────────────────────
         pygame.draw.rect(surf, C_DIVIDER, (px, 310, PANEL_W - 10, 1))
@@ -1509,20 +2493,46 @@ class PokeChessApp:
         # ── Game-over overlay ─────────────────────────────────────────────
         done, winner = is_terminal(self._live_state())
         if done:
-            s2 = self.f_head.render('Game over  —  press New Game to play again',
-                                    True, C_YELLOW)
-            surf.blit(s2, (BOARD_X, BOARD_Y + 8 * CELL + 8))
+            _banner_h = 64
+            _banner_y = BOARD_Y + (8 * CELL - _banner_h) // 2
+            _banner_surf = pygame.Surface((8 * CELL, _banner_h), pygame.SRCALPHA)
+            _banner_surf.fill((10, 10, 20, 200))
+            surf.blit(_banner_surf, (BOARD_X, _banner_y))
+            _go_line1 = self.f_title.render(self.status_msg, True, self.status_color)
+            _go_line2 = self.f_head.render('Press New Game to play again', True, C_YELLOW)
+            _cx_board = BOARD_X + 4 * CELL
+            surf.blit(_go_line1, _go_line1.get_rect(center=(_cx_board, _banner_y + 18)))
+            surf.blit(_go_line2, _go_line2.get_rect(center=(_cx_board, _banner_y + 44)))
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Entry point
 # ──────────────────────────────────────────────────────────────────────────────
 def main():
-    ap = argparse.ArgumentParser(description='PokeChess — play against the MCTS bot')
-    ap.add_argument('--budget', type=float, default=1.0,
-                    help='Initial bot time budget in seconds (default 1.0)')
-    args = ap.parse_args()
-    PokeChessApp(init_budget=args.budget).run()
+    # Centre the window on-screen before creating the display
+    pygame.init()
+    _si = pygame.display.Info()
+    _wx = max(0, (_si.current_w - WIN_W) // 2)
+    _wy = max(0, (_si.current_h - WIN_H) // 2)
+    os.environ.setdefault('SDL_VIDEO_WINDOW_POS', f'{_wx},{_wy}')
+
+    while True:
+        cfg = LandingScreen().run()
+        if cfg is None:
+            # User closed the window on the landing screen
+            break
+
+        result = PokeChessApp(
+            mode         = cfg['mode'],
+            persona      = cfg.get('persona'),
+            player_color = cfg.get('player_color', Team.RED),
+        ).run()
+
+        if result != 'menu':
+            # User closed the window inside the game
+            break
+
+    pygame.quit()
 
 
 if __name__ == '__main__':
