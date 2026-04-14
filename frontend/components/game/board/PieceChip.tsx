@@ -25,7 +25,7 @@ export function PieceChip({ piece, isSelected = false }: PieceChipProps) {
       <HpHalo pieceType={piece.piece_type} currentHp={piece.current_hp} />
 
       <div
-        className="absolute inset-[10%] rounded-full bg-bg-card flex items-center justify-center border-2 transition-all duration-100 overflow-hidden"
+        className="absolute inset-[5%] rounded-full bg-bg-card flex items-center justify-center border-2 transition-all duration-100 overflow-hidden"
         style={{
           borderColor: isSelected ? "#64A0FF" : borderColor,
           boxShadow: isSelected
@@ -39,7 +39,7 @@ export function PieceChip({ piece, isSelected = false }: PieceChipProps) {
             alt=""
             width={48}
             height={48}
-            className="h-[85%] w-[85%] object-contain select-none pointer-events-none"
+            className="h-[96%] w-[96%] object-contain select-none pointer-events-none"
             unoptimized
           />
         ) : (

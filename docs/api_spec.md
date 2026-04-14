@@ -198,7 +198,7 @@ Bearer required.
 
 **`GamesListResponse`:** `active`, `completed` — each lists `GameSummary` objects.
 
-**`GameSummary`:** `id`, `status`, `whose_turn`, `turn_number`, `is_bot_game`, `bot_side`, `red_player_id`, `blue_player_id`, `winner`, `updated_at` — **no** heavy `state`/`move_history` JSONB.
+**`GameSummary`:** `id`, `status`, `whose_turn`, `turn_number`, `is_bot_game`, `bot_side`, `red_player_id`, `blue_player_id`, `winner`, `updated_at` — **no** heavy `state`/`move_history` JSONB. **List-only (from `GET /games`):** `opponent_display` (other human’s username, or bot name for PvB) and `my_side` (`"red"` / `"blue"` for the authenticated user) so clients can label “vs …” and “your turn” vs “waiting for …”.
 
 **List behavior:** **Completed** games for the user are limited to the **10** most recently updated (`app/db/queries/games.py`). Active games are not capped.
 

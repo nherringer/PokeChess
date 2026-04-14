@@ -5,6 +5,26 @@ from uuid import UUID
 import asyncpg
 
 
+async def has_pending_invite_between(
+    db: asyncpg.Connection, user_a: UUID, user_b: UUID
+) -> bool:
+    """True if either direction has a pending invite between the two users."""
+    row = await db.fetchrow(
+        """
+        SELECT 1 FROM game_invites
+        WHERE status = 'pending'
+          AND (
+            (inviter_id = $1 AND invitee_id = $2)
+            OR (inviter_id = $2 AND invitee_id = $1)
+          )
+        LIMIT 1
+        """,
+        user_a,
+        user_b,
+    )
+    return row is not None
+
+
 async def get_pending_invites(db: asyncpg.Connection, user_id: UUID) -> list[dict]:
     """Pending game invites where the user is invitee (incoming) or inviter (outgoing)."""
     rows = await db.fetch(
@@ -13,6 +33,7 @@ async def get_pending_invites(db: asyncpg.Connection, user_id: UUID) -> list[dic
             SELECT gi.id, g.id AS game_id, gi.created_at,
                    'incoming'::text AS direction,
                    gi.inviter_id AS other_user_id,
+                   gi.inviter_id, gi.invitee_id,
                    u.username AS other_username
             FROM game_invites gi
             JOIN users u ON u.id = gi.inviter_id
@@ -22,6 +43,7 @@ async def get_pending_invites(db: asyncpg.Connection, user_id: UUID) -> list[dic
             SELECT gi.id, g.id AS game_id, gi.created_at,
                    'outgoing'::text AS direction,
                    gi.invitee_id AS other_user_id,
+                   gi.inviter_id, gi.invitee_id,
                    u.username AS other_username
             FROM game_invites gi
             JOIN users u ON u.id = gi.invitee_id

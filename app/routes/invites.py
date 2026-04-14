@@ -24,6 +24,12 @@ async def send_invite(body: SendInviteRequest, user: CurrentUser, db: Db):
     # Must be friends
     if not await friend_q.are_friends(db, user["id"], body.invitee_id):
         raise AppError(404, "not_found", "Invitee is not a friend")
+    if await invite_q.has_pending_invite_between(db, user["id"], body.invitee_id):
+        raise AppError(
+            409,
+            "conflict",
+            "A pending game invite already exists with this player",
+        )
     try:
         result = await invite_q.insert_invite_and_game(db, user["id"], body.invitee_id)
     except UniqueViolationError:

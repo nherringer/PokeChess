@@ -26,7 +26,7 @@ export function AuthNav() {
   };
 
   return (
-    <nav className="sticky top-0 z-40 bg-bg-surface border-b border-white/10">
+    <nav className="sticky top-0 z-50 bg-bg-surface border-b border-white/10">
       <div className="max-w-5xl mx-auto px-4 h-14 flex items-center gap-4">
         {/* Home button */}
         <button

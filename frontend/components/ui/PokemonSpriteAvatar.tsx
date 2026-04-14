@@ -33,7 +33,7 @@ export function PokemonSpriteAvatar({
           alt=""
           width={sizePx}
           height={sizePx}
-          className="h-[88%] w-[88%] object-contain"
+          className="h-[96%] w-[96%] object-contain"
           unoptimized
         />
       ) : (

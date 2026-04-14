@@ -31,7 +31,7 @@ export function PageShell({
   return (
     <div className="min-h-screen bg-bg-deep flex flex-col">
       {/* Sticky top bar */}
-      <header className="sticky top-0 z-40 bg-bg-panel border-b border-white/10 px-4 py-3 flex items-center gap-3">
+      <header className="bg-bg-panel border-b border-white/10 px-4 py-3 flex items-center gap-3">
         {showBack && (
           <button
             onClick={handleBack}

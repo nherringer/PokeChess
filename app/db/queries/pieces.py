@@ -6,10 +6,10 @@ import asyncpg
 
 # Canonical starter set — one full chess set's worth of Pokémon
 _STARTER_PIECES = [
-    ("king",   "PIKACHU"),
-    ("queen",  "MEW"),
-    ("rook",   "SQUIRTLE"),
-    ("rook",   "SQUIRTLE"),
+    ("king", "PIKACHU"),
+    ("queen", "MEW"),
+    ("rook", "SQUIRTLE"),
+    ("rook", "SQUIRTLE"),
     ("bishop", "BULBASAUR"),
     ("bishop", "BULBASAUR"),
     ("knight", "CHARMANDER"),

@@ -23,6 +23,11 @@ export function useInvites() {
     }
   }, []);
 
+  /** Remove one invite from local state (e.g. after accept/reject) before the next poll. */
+  const dismissInvite = useCallback((inviteId: string) => {
+    setData((prev) => (prev ? prev.filter((i) => i.id !== inviteId) : null));
+  }, []);
+
   useEffect(() => {
     refresh();
     intervalRef.current = setInterval(refresh, POLL_INTERVAL_MS);
@@ -31,5 +36,5 @@ export function useInvites() {
     };
   }, [refresh]);
 
-  return { data, loading, error, refresh };
+  return { data, loading, error, refresh, dismissInvite };
 }

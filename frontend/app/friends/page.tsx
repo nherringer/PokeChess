@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Tabs } from "@/components/ui/Tabs";
@@ -8,8 +8,15 @@ import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { useFriends } from "@/lib/hooks/useFriends";
 import { sendFriendRequest, respondToFriend } from "@/lib/api/friends";
-import { createInvite, respondToInvite } from "@/lib/api/invites";
+import {
+  createInvite,
+  respondToInvite,
+  cancelInviteAsInviter,
+} from "@/lib/api/invites";
+import { ApiError } from "@/lib/api/client";
 import { useInvites } from "@/lib/hooks/useInvites";
+import { dedupeInvitesByPlayerPair } from "@/lib/game/inviteUtils";
+import { useAuthStore } from "@/lib/store/authStore";
 import type { FriendUser, FriendRequest, InviteOut } from "@/lib/types/api";
 
 function FriendRow({
@@ -65,7 +72,7 @@ function RequestRow({
   );
 }
 
-function GameInviteRow({
+function IncomingGameInviteRow({
   inv,
   onAccept,
   onDecline,
@@ -95,15 +102,40 @@ function GameInviteRow({
   );
 }
 
+function OutgoingGameInviteRow({
+  inv,
+  onCancel,
+}: {
+  inv: InviteOut;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 py-3 border-b border-white/5 last:border-0">
+      <div className="w-10 h-10 rounded-full bg-poke-blue/30 flex items-center justify-center font-bold text-white text-sm shrink-0">
+        {inv.other_username.slice(0, 2).toUpperCase()}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-white text-sm font-bold truncate">{inv.other_username}</p>
+        <p className="text-text-muted text-xs">Invite pending</p>
+      </div>
+      <Button size="sm" variant="ghost" onClick={onCancel}>
+        Cancel
+      </Button>
+    </div>
+  );
+}
+
 export default function FriendsPage() {
   const router = useRouter();
+  const userId = useAuthStore((s) => s.userId);
   const { data, loading, error, unauthenticated, refresh } = useFriends();
-  const { data: invites, refresh: refreshInvites } = useInvites();
+  const { data: invites, refresh: refreshInvites, dismissInvite } = useInvites();
   const [activeTab, setActiveTab] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchStatus, setSearchStatus] = useState<string | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [sendingReq, setSendingReq] = useState(false);
+  const [inviteActionError, setInviteActionError] = useState<string | null>(null);
 
   const friends = data?.friends ?? [];
   const incoming = data?.incoming ?? [];
@@ -129,29 +161,87 @@ export default function FriendsPage() {
     }
   };
 
-  const incomingGameInvites =
-    invites?.filter((i) => i.direction === "incoming") ?? [];
+  const invitesDeduped = useMemo(
+    () => (invites?.length ? dedupeInvitesByPlayerPair(invites) : []),
+    [invites]
+  );
+
+  /** Someone challenged you to a battle. */
+  const incomingGameInvites = useMemo(() => {
+    if (!userId) return [];
+    return invitesDeduped.filter(
+      (i) => String(i.invitee_id) === String(userId)
+    );
+  }, [invitesDeduped, userId]);
+
+  const outgoingGameInvites = useMemo(() => {
+    if (!userId) return [];
+    return invitesDeduped.filter(
+      (i) => String(i.inviter_id) === String(userId)
+    );
+  }, [invitesDeduped, userId]);
 
   const handleInvite = async (userId: string) => {
+    setInviteActionError(null);
     try {
       const res = await createInvite(userId);
+      await refreshInvites();
       router.push(
         `/play/lobby?mode=pvp&inviteId=${res.invite_id}&gameId=${res.game_id}`
       );
     } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setInviteActionError(err.message);
+        return;
+      }
       console.error("Invite error:", err);
+      setInviteActionError(
+        err instanceof Error ? err.message : "Could not send invite"
+      );
     }
   };
 
   const handleGameInviteAccept = async (inv: InviteOut) => {
-    const res = await respondToInvite(inv.id, "accept");
-    refreshInvites();
-    router.push(`/game/${res.game_id}`);
+    setInviteActionError(null);
+    try {
+      const res = await respondToInvite(inv.id, "accept");
+      dismissInvite(inv.id);
+      await refreshInvites();
+      router.push(`/game/${res.game_id}`);
+    } catch (err) {
+      await refreshInvites();
+      setInviteActionError(
+        err instanceof Error ? err.message : "Could not accept invite"
+      );
+    }
   };
 
   const handleGameInviteDecline = async (inv: InviteOut) => {
-    await respondToInvite(inv.id, "reject");
-    refreshInvites();
+    setInviteActionError(null);
+    try {
+      await respondToInvite(inv.id, "reject");
+      dismissInvite(inv.id);
+      await refreshInvites();
+    } catch (err) {
+      await refreshInvites();
+      setInviteActionError(
+        err instanceof Error ? err.message : "Could not decline invite"
+      );
+    }
+  };
+
+  const handleCancelOutgoingGameInvite = async (inv: InviteOut) => {
+    setInviteActionError(null);
+    try {
+      await cancelInviteAsInviter(inv.id);
+      dismissInvite(inv.id);
+      await refreshInvites();
+    } catch (err) {
+      await refreshInvites();
+      setInviteActionError(
+        err instanceof Error ? err.message : "Could not cancel invite"
+      );
+    }
   };
 
   const handleRespondToFriend = async (id: string, action: "accept" | "reject") => {
@@ -163,17 +253,28 @@ export default function FriendsPage() {
     }
   };
 
+  /** Friend requests only — matches GET /friends (MASTERDOC §5.1); not game invites (GET /game-invites). */
+  const friendRequestsBadge = incoming.length + outgoing.length;
+
   const tabs = [
     { label: "Friends" },
-    { label: "Requests", badge: incoming.length },
+    { label: "Requests", badge: friendRequestsBadge },
   ];
 
-  const hasNoFriends =
+  const hasFriendGraphActivity =
+    friends.length > 0 || incoming.length > 0 || outgoing.length > 0;
+  const hasPendingGameInvites =
+    incomingGameInvites.length > 0 || outgoingGameInvites.length > 0;
+
+  /** Nothing to show: no friends, no friend requests, no battle invites. */
+  const showEmptyPikachuState =
     !loading &&
-    friends.length === 0 &&
-    incoming.length === 0 &&
-    outgoing.length === 0 &&
-    incomingGameInvites.length === 0;
+    !error &&
+    !hasFriendGraphActivity &&
+    !hasPendingGameInvites;
+
+  /** Sub-tabs + lists: show when there is any friend or game-invite activity. */
+  const showTabsSection = !loading && !error && (hasFriendGraphActivity || hasPendingGameInvites);
 
   if (unauthenticated) {
     return (
@@ -197,19 +298,48 @@ export default function FriendsPage() {
       <div className="px-4 pt-6 pb-8 max-w-lg mx-auto">
         <h1 className="font-display text-2xl font-bold text-white mb-4">Friends</h1>
 
-        {incomingGameInvites.length > 0 && (
-          <div className="mb-6 rounded-xl border border-poke-blue/40 bg-bg-card/80 px-3 py-2">
-            <h2 className="text-xs font-bold text-poke-blue uppercase tracking-wide mb-2 px-1">
-              Battle invites
-            </h2>
-            {incomingGameInvites.map((inv) => (
-              <GameInviteRow
-                key={inv.id}
-                inv={inv}
-                onAccept={() => handleGameInviteAccept(inv)}
-                onDecline={() => handleGameInviteDecline(inv)}
-              />
-            ))}
+        {inviteActionError && (
+          <p className="mb-3 text-xs text-red-team">{inviteActionError}</p>
+        )}
+
+        {/* GET /game-invites — separate from GET /friends (MASTERDOC §5.1). */}
+        {hasPendingGameInvites && (
+          <div className="mb-6 space-y-4">
+            {incomingGameInvites.length > 0 && (
+              <div className="rounded-xl border border-poke-blue/40 bg-bg-card/80 px-3 py-2">
+                <h2 className="text-xs font-bold text-poke-blue uppercase tracking-wide mb-2 px-1">
+                  Battle invites
+                </h2>
+                <p className="text-[11px] text-text-muted mb-2 px-1">
+                  Trainers who want to play — accept to start the match.
+                </p>
+                {incomingGameInvites.map((inv) => (
+                  <IncomingGameInviteRow
+                    key={inv.id}
+                    inv={inv}
+                    onAccept={() => handleGameInviteAccept(inv)}
+                    onDecline={() => handleGameInviteDecline(inv)}
+                  />
+                ))}
+              </div>
+            )}
+            {outgoingGameInvites.length > 0 && (
+              <div className="rounded-xl border border-white/10 bg-bg-card/50 px-3 py-2">
+                <h2 className="text-xs font-bold text-text-muted uppercase tracking-wide mb-2 px-1">
+                  Waiting on opponent
+                </h2>
+                <p className="text-[11px] text-text-muted mb-2 px-1">
+                  Battle invites you sent — cancel if you changed your mind.
+                </p>
+                {outgoingGameInvites.map((inv) => (
+                  <OutgoingGameInviteRow
+                    key={inv.id}
+                    inv={inv}
+                    onCancel={() => handleCancelOutgoingGameInvite(inv)}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -243,7 +373,7 @@ export default function FriendsPage() {
         )}
 
         {/* Empty state with Pikachu */}
-        {hasNoFriends && !loading && !error && (
+        {showEmptyPikachuState && (
           <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
             <Image
               src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/25.png"
@@ -260,8 +390,8 @@ export default function FriendsPage() {
           </div>
         )}
 
-        {/* Tabs + lists */}
-        {!loading && !hasNoFriends && (
+        {/* Tabs: Friends list vs friend requests only (POST/PUT /friends). */}
+        {showTabsSection && (
           <>
             <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} className="mb-4" />
 
@@ -324,7 +454,7 @@ export default function FriendsPage() {
                 )}
                 {incoming.length === 0 && outgoing.length === 0 && (
                   <p className="text-center text-text-muted text-sm py-8">
-                    No pending requests.
+                    No pending friend requests.
                   </p>
                 )}
               </div>

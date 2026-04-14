@@ -211,7 +211,7 @@ All routes are mounted from `app/main.py`. Prefixes below are **full path prefix
 | `GET` | `/game-invites` | Pending invites |
 | `POST` | `/game-invites` | Create invite + pending game (must be friends) |
 | `PUT` | `/game-invites/{invite_id}` | Accept/reject invite |
-| `GET` | `/games` | Active + completed lists (**GameSummary** — no heavy JSONB). **Completed** list is capped at **10** rows (most recently updated); active games are not capped (`app/db/queries/games.py`). |
+| `GET` | `/games` | Active + completed lists (**GameSummary** — no heavy JSONB). Includes **`opponent_display`** and **`my_side`** for UI copy (vs opponent / whose turn). **Completed** list is capped at **10** rows (most recently updated); active games are not capped (`app/db/queries/games.py`). |
 | `POST` | `/games` | Create **PvB** game only — body requires `bot_id` and `player_side` (`CreateGameRequest`). **PvP** games are created via **`POST /game-invites`** (pending row + invite), then activated on accept — not via this endpoint. |
 | `GET` | `/games/{game_id}` | **GameDetail** — full `state` + `move_history` |
 | `POST` | `/games/{game_id}/resign` | Resign |

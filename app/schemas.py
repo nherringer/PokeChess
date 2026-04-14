@@ -166,6 +166,8 @@ class InviteOut(BaseModel):
     direction: str  # "incoming" | "outgoing"
     other_user_id: UUID
     other_username: str
+    inviter_id: UUID
+    invitee_id: UUID
 
 
 class InviteActionRequest(BaseModel):
@@ -210,6 +212,9 @@ class GameSummary(BaseModel):
     blue_player_id: UUID | None
     winner: str | None
     updated_at: datetime
+    # Populated by GET /games list query (joined users / bots)
+    opponent_display: str | None = None
+    my_side: str | None = None  # "red" | "blue" — requesting user's team
 
 
 class GameDetail(BaseModel):

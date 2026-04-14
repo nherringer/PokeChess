@@ -53,6 +53,8 @@ export interface InviteOut {
   direction: "incoming" | "outgoing";
   other_user_id: string;
   other_username: string;
+  inviter_id: string;
+  invitee_id: string;
 }
 
 export interface InviteActionResponse {
@@ -114,6 +116,10 @@ export interface GameSummary {
   blue_player_id: string | null;
   winner: "red" | "blue" | "draw" | null;
   updated_at: string;
+  /** Human opponent username or bot name (from GET /games list). */
+  opponent_display?: string | null;
+  /** Current user's team — compare to whose_turn for "your turn" (red | blue). */
+  my_side?: "red" | "blue" | null;
 }
 
 export interface GameDetail extends GameSummary {
