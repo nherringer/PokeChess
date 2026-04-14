@@ -21,7 +21,7 @@ export function PieceChip({ piece, isSelected = false }: PieceChipProps) {
   const sprite = pokemonSpriteSrc(piece.piece_type);
 
   return (
-    <div className="relative flex aspect-square w-[min(78%,3.75rem)] max-w-[min(56px,12vmin)] items-center justify-center">
+    <div className="relative flex aspect-square w-full max-w-[min(3.75rem,56px,14vmin)] items-center justify-center pointer-events-none">
       <HpHalo pieceType={piece.piece_type} currentHp={piece.current_hp} />
 
       <div

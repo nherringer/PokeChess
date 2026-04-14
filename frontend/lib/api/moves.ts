@@ -7,7 +7,7 @@ export async function getLegalMoves(
   pieceCol: number
 ): Promise<LegalMoveOut[]> {
   return apiFetch<LegalMoveOut[]>(
-    `/games/${gameId}/legal-moves?piece_row=${pieceRow}&piece_col=${pieceCol}`
+    `/games/${gameId}/legal_moves?piece_row=${pieceRow}&piece_col=${pieceCol}`
   );
 }
 
