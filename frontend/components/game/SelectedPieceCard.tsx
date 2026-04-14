@@ -8,6 +8,7 @@ import {
   POKEMON_TYPE_FOR_PIECE,
   MAX_HP,
 } from "@/lib/constants";
+import { PokemonSpriteAvatar } from "@/components/ui/PokemonSpriteAvatar";
 
 interface SelectedPieceCardProps {
   piece: BoardPieceData;
@@ -36,12 +37,13 @@ export function SelectedPieceCard({
         .join(" ")}
     >
       {/* Avatar */}
-      <div
-        className="w-14 h-14 rounded-full bg-bg-panel flex items-center justify-center shrink-0 border-2"
+      <PokemonSpriteAvatar
+        speciesOrPieceType={piece.piece_type}
+        emojiFallback={emoji}
+        sizePx={56}
+        className="border-2"
         style={{ borderColor: teamColor }}
-      >
-        <span style={{ fontSize: 28 }}>{emoji}</span>
-      </div>
+      />
 
       {/* Details */}
       <div className="flex-1 min-w-0">

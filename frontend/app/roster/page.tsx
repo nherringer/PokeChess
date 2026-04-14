@@ -12,6 +12,7 @@ import {
   PIECE_TYPE_LABELS,
   POKEMON_TYPE_FOR_PIECE,
 } from "@/lib/constants";
+import { PokemonSpriteAvatar } from "@/components/ui/PokemonSpriteAvatar";
 
 const ROLE_ORDER = ["KING", "QUEEN", "ROOK", "KNIGHT", "BISHOP", "PAWN"];
 const XP_THRESHOLDS = [30, 100]; // stage 1 → 2, stage 2 → 3
@@ -38,9 +39,12 @@ function PieceCard({ piece, index, sameSpeCount }: PieceCardProps) {
       style={{ animationDelay: `${index * 60}ms`, animationFillMode: "both", opacity: 0 }}
     >
       {/* Avatar */}
-      <div className="w-16 h-16 rounded-full bg-bg-panel flex items-center justify-center border-2 border-blue-team shrink-0">
-        <span style={{ fontSize: 32 }}>{emoji}</span>
-      </div>
+      <PokemonSpriteAvatar
+        speciesOrPieceType={piece.species}
+        emojiFallback={emoji}
+        sizePx={64}
+        className="border-2 border-blue-team"
+      />
 
       {/* Details */}
       <div className="flex-1 min-w-0">

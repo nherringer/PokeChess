@@ -34,7 +34,7 @@ export function BoardSquare({
 
   return (
     <div
-      className="relative aspect-square flex items-center justify-center cursor-pointer select-none"
+      className="relative min-h-0 min-w-0 h-full w-full flex items-center justify-center cursor-pointer select-none"
       style={{
         backgroundColor: baseBg,
         outline: isSelected ? "3px solid #64A0FF" : undefined,
