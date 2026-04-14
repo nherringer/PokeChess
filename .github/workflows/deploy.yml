@@ -32,7 +32,7 @@ jobs:
   # ── pokechess-app ────────────────────────────────────────────────────────────
   deploy-app:
     name: App — build / push / deploy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
 
     steps:
       - name: Checkout
@@ -99,6 +99,7 @@ jobs:
           # successful. If the new task fails its health check, ECS rolls back
           # automatically (deployment_circuit_breaker is enabled in Terraform).
           wait-for-service-stability: true
+          wait-for-minutes: 10
 
   # ── pokechess-engine ─────────────────────────────────────────────────────────
   # Runs after deploy-app so a failed app build/push/deploy never leaves the
@@ -107,7 +108,7 @@ jobs:
   deploy-engine:
     name: Engine — build / push / deploy
     needs: [deploy-app]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
 
     steps:
       - name: Checkout
@@ -171,3 +172,4 @@ jobs:
           service: pokechess-engine
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
+          wait-for-minutes: 10
