@@ -112,7 +112,7 @@ Each user owns **named** pieces (king, queen, rooks, knights, bishops) stored in
 
 ### 3.4 Client application
 
-There is **no shipped production frontend** yet. [frontend_layout_proposal.md](frontend_layout_proposal.md) is the **v1 UX specification** (tablet/phone-first, dark Pokémon-inspired UI). The backend is designed to support polling (`GET /games/{id}` every 1–3s) and clear move payloads for a future client.
+A **Next.js** client lives under **`frontend/`** on this branch (local development; not necessarily production-deployed). It uses the same polling pattern the API was designed for (`GET /games/{id}` on a ~2.5s interval in code) and the REST contracts below. [frontend_layout_proposal.md](frontend_layout_proposal.md) remains the **v1 UX specification** (tablet/phone-first, dark Pokémon-inspired UI); the implementation may lag or diverge in details.
 
 ### 3.5 Future: solo campaign
 
@@ -203,8 +203,10 @@ All routes are mounted from `app/main.py`. Prefixes below are **full path prefix
 | `POST` | `/auth/register` | Create user, default settings, return access token; sets httpOnly refresh cookie |
 | `POST` | `/auth/login` | Login; tokens + refresh cookie |
 | `POST` | `/auth/refresh` | New access token from refresh cookie |
-| `GET` | `/me` | Authenticated user profile + pieces |
-| `PATCH` | `/me/settings` | User settings (`board_theme`, `extra_settings` JSONB with API validation) |
+| `GET` | `/users/me` | Authenticated user profile + pieces |
+| `POST` | `/users/me/starter` | Idempotent “claim starter roster” (returns pieces; register/login also seeds roster when empty) |
+| `PATCH` | `/users/me/settings` | User settings (`board_theme`, `extra_settings` JSONB with API validation) |
+| `GET` | `/bots` | List bot personalities (`BotOut`: id, name, label, flavor, `time_budget`) — **no Bearer required** |
 | `GET` | `/friends` | Friends + incoming/outgoing friend requests |
 | `POST` | `/friends` | Send friend request by username |
 | `PUT` | `/friends/{friendship_id}` | Accept or reject (`action` in body) |
@@ -329,7 +331,7 @@ Append-only list of turns. **Snake_case `action_type`** strings in history (`att
 
 ## 8. Frontend specification (planned client)
 
-**Source:** [frontend_layout_proposal.md](frontend_layout_proposal.md). **Status:** specification only; **not implemented** in this repo.
+**Source:** [frontend_layout_proposal.md](frontend_layout_proposal.md). **Status:** UX spec + reference layout; a **Next.js app** under **`frontend/`** implements much of the flow on active branches (see §3.4). Treat the proposal as the design target, not a line-by-line match to the current UI.
 
 **Audience / platform:** Roughly 8–15 years old; **tablet and phone** primary (portrait primary, landscape secondary).
 
@@ -404,7 +406,7 @@ This is the **intended** production shape, not a guarantee about your current la
 | [architecture_design_plan.md](architecture_design_plan.md) | Target AWS/ECS/EC2/cost/queue narrative |
 | [app_and_engine_communication.md](app_and_engine_communication.md) | App ↔ engine contract, RDS vs bot-local persistence, queue model — aligned with **`engine_client.py`** |
 | [load_aware_budgeting.md](load_aware_budgeting.md) | Load-aware MCTS budgeting |
-| [frontend_layout_proposal.md](frontend_layout_proposal.md) | v1 UI/UX spec (no frontend implemented) |
+| [frontend_layout_proposal.md](frontend_layout_proposal.md) | v1 UI/UX spec; **`frontend/`** holds the Next.js client (see §3.4, §8) |
 | [Rules.md](Rules.md) | Full game rules |
 | [CampaignDesign.md](CampaignDesign.md) | **Future** solo campaign — not current build |
 | [task_log.md](task_log.md) | Historical ML task log |

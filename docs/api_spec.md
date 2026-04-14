@@ -6,7 +6,7 @@ This document describes the **public HTTP API** of the FastAPI app (`pokechess-a
 
 | Concern | Location |
 |--------|----------|
-| Route handlers, business rules, side effects | `app/routes/` (`auth.py`, `users.py`, `friends.py`, `invites.py`, `games.py`, `moves.py`), `app/main.py` (`/health`) |
+| Route handlers, business rules, side effects | `app/routes/` (`auth.py`, `users.py`, `friends.py`, `invites.py`, `games.py`, `moves.py`, `bots.py`), `app/main.py` (`/health`) |
 | Pydantic models (field names and types) | `app/schemas.py` |
 | High-level overview + product context | [MASTERDOC.md](MASTERDOC.md) §5 |
 | `games.state` / `games.move_history` JSON shapes | [pokechess_data_model.md](pokechess_data_model.md) |
@@ -24,7 +24,7 @@ This document describes the **public HTTP API** of the FastAPI app (`pokechess-a
 
 - **Header:** `Authorization: Bearer <access_token>`
 - **Algorithm / claims:** `HS256`; payload includes `sub` (user UUID string), `exp`, `type: "access"` — see `app/auth.py`.
-- **Required on:** Every route except `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`, and `GET /health`.
+- **Required on:** Every route except `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`, `GET /health`, and `GET /bots` (public bot catalog).
 
 If the header is missing or invalid, FastAPI’s `HTTPBearer` dependency typically yields **403**; invalid/expired JWT decoding raises **`AppError`** → **401** with JSON body (see §2).
 
@@ -83,7 +83,7 @@ Unexpected internal failures may return **500** without the `AppError` shape.
 
 **`TokenResponse` fields:** `access_token`, `token_type` (default `"bearer"`), `user_id`.
 
-**`RefreshResponse` fields:** `access_token`, `token_type` (default `"bearer"`).
+**`RefreshResponse` fields:** `access_token`, `token_type` (default `"bearer"`). (No `user_id` in the body — clients should retain it from `TokenResponse` or fetch `GET /users/me` after refresh.)
 
 **Cookies on register/login:** Sets `refresh_token` as described in §1.2.
 
@@ -99,16 +99,19 @@ Unexpected internal failures may return **500** without the `AppError` shape.
 
 ### 3.3 Current user & settings
 
-All routes require **Bearer** access token.
+User routes are mounted under the **`/users`** prefix (`app/routes/users.py`). All routes in this subsection require **Bearer** access token.
 
 | Method | Path | Request body | Success response |
 |--------|------|--------------|------------------|
-| `GET` | `/me` | — | **200** `UserProfile` |
-| `PATCH` | `/me/settings` | `SettingsUpdate` | **200** `SettingsOut` |
+| `GET` | `/users/me` | — | **200** `UserProfile` |
+| `POST` | `/users/me/starter` | — | **201** `StarterResponse` |
+| `PATCH` | `/users/me/settings` | `SettingsUpdate` | **200** `SettingsOut` |
 
 **`UserProfile`:** `id`, `username`, `email`, `created_at`, `pieces` (list of `PieceOut`).
 
 **`PieceOut`:** `id`, `role`, `species`, `xp`, `evolution_stage`.
+
+**`StarterResponse`:** `pieces` (list of `PieceOut`). **Idempotent** — if the user already has roster rows, returns existing pieces with **201**.
 
 **`SettingsUpdate`:** optional `board_theme`, optional `extra_settings` (object; must serialize to JSON, max **16 384** bytes serialized, max nesting depth **8** — validated in `schemas.py`).
 
@@ -122,7 +125,19 @@ All routes require **Bearer** access token.
 
 ---
 
-### 3.4 Friends
+### 3.4 Bots (catalog)
+
+**No Bearer token** — public list for difficulty / PvB UI (`app/routes/bots.py`).
+
+| Method | Path | Request body | Success response |
+|--------|------|--------------|------------------|
+| `GET` | `/bots` | — | **200** JSON array of `BotOut` |
+
+**`BotOut`:** `id`, `name`, `label`, `flavor`, `time_budget` (from `bots.params`, ordered ascending by `time_budget` in the list query).
+
+---
+
+### 3.5 Friends
 
 Bearer required.
 
@@ -132,7 +147,7 @@ Bearer required.
 | `POST` | `/friends` | `SendFriendRequest` | **201** `FriendActionResponse` |
 | `PUT` | `/friends/{friendship_id}` | `FriendActionRequest` | **200** `FriendActionResponse` |
 
-**`SendFriendRequest`:** `username` (target user).
+**`SendFriendRequest`:** exactly one of **`username`** or **`email`** (target user).
 
 **`FriendActionRequest`:** `action` — must be **`"accept"`** or **`"reject"`** (otherwise 400).
 
@@ -151,7 +166,7 @@ Bearer required.
 
 ---
 
-### 3.5 Game invites (PvP lobby)
+### 3.6 Game invites (PvP lobby)
 
 Bearer required.
 
@@ -181,7 +196,7 @@ Bearer required.
 
 ---
 
-### 3.6 Games
+### 3.7 Games
 
 Bearer required.
 
@@ -221,7 +236,7 @@ Bearer required.
 
 ---
 
-### 3.7 Moves (legal moves + submit)
+### 3.8 Moves (legal moves + submit)
 
 Bearer required.
 
@@ -264,8 +279,10 @@ Names refer to **`app/schemas.py`**.
 |-------|----------|
 | `RegisterRequest`, `LoginRequest` | Auth request bodies |
 | `TokenResponse`, `RefreshResponse` | Auth success |
-| `UserProfile`, `PieceOut` | `GET /me` |
-| `SettingsUpdate`, `SettingsOut` | `PATCH /me/settings` |
+| `UserProfile`, `PieceOut` | `GET /users/me` |
+| `StarterResponse` | `POST /users/me/starter` |
+| `SettingsUpdate`, `SettingsOut` | `PATCH /users/me/settings` |
+| `BotOut` | `GET /bots` |
 | `FriendsResponse`, `SendFriendRequest`, `FriendActionRequest`, `FriendActionResponse` | Friends |
 | `SendInviteRequest`, `InviteOut`, `InviteActionRequest`, `InviteActionResponse` | Invites |
 | `CreateGameRequest`, `GameSummary`, `GameDetail`, `GamesListResponse` | Games |
