@@ -51,9 +51,14 @@ function PvPLobby({ inviteId, gameId }: { inviteId: string; gameId: string }) {
   // Inviter's pending invite is listed under GET /game-invites (outgoing). When it
   // disappears, either the friend accepted (game active) or declined (still pending game row).
   useEffect(() => {
-    if (invitesLoading || !invites || !gameId) return;
+    if (invitesLoading || !invites || !inviteId) return;
     const invite = invites.find((inv) => inv.id === inviteId);
     if (invite) return;
+
+    if (!gameId) {
+      router.replace("/");
+      return;
+    }
 
     getGame(gameId)
       .then((g) => {
