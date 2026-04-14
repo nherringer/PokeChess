@@ -3,6 +3,10 @@ import Image from "next/image";
 import type { BoardPieceData } from "@/lib/types/api";
 import { PIECE_TYPE_EMOJIS } from "@/lib/constants";
 import { pokemonSpriteSrc } from "@/lib/game/pokemonSprites";
+import {
+  BallPieceIcon,
+  ballPieceVariantFromType,
+} from "@/components/ui/BallPieceIcon";
 import { HpHalo } from "./HpHalo";
 
 interface PieceChipProps {
@@ -19,6 +23,7 @@ export function PieceChip({ piece, isSelected = false }: PieceChipProps) {
   const emoji = PIECE_TYPE_EMOJIS[piece.piece_type] ?? "?";
   const borderColor = TEAM_COLORS[piece.team];
   const sprite = pokemonSpriteSrc(piece.piece_type);
+  const ballVariant = ballPieceVariantFromType(piece.piece_type);
 
   return (
     <div className="relative flex aspect-square w-full max-w-[min(3.75rem,56px,14vmin)] items-center justify-center pointer-events-none">
@@ -33,7 +38,12 @@ export function PieceChip({ piece, isSelected = false }: PieceChipProps) {
             : `0 0 0 1px ${borderColor}44`,
         }}
       >
-        {sprite ? (
+        {ballVariant ? (
+          <BallPieceIcon
+            variant={ballVariant}
+            className="h-[96%] w-[96%] select-none pointer-events-none"
+          />
+        ) : sprite ? (
           <Image
             src={sprite}
             alt=""

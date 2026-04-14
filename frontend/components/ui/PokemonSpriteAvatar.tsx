@@ -3,6 +3,10 @@
 import type { CSSProperties } from "react";
 import Image from "next/image";
 import { pokemonSpriteSrc } from "@/lib/game/pokemonSprites";
+import {
+  BallPieceIcon,
+  ballPieceVariantFromType,
+} from "@/components/ui/BallPieceIcon";
 
 interface PokemonSpriteAvatarProps {
   speciesOrPieceType: string;
@@ -21,13 +25,19 @@ export function PokemonSpriteAvatar({
   style,
 }: PokemonSpriteAvatarProps) {
   const src = pokemonSpriteSrc(speciesOrPieceType);
+  const ballVariant = ballPieceVariantFromType(speciesOrPieceType);
 
   return (
     <div
       className={`relative flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-bg-panel ${className}`}
       style={{ width: sizePx, height: sizePx, ...style }}
     >
-      {src ? (
+      {ballVariant ? (
+        <BallPieceIcon
+          variant={ballVariant}
+          className="h-[90%] w-[90%]"
+        />
+      ) : src ? (
         <Image
           src={src}
           alt=""
