@@ -1,15 +1,16 @@
 "use client";
 
-import React, { useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { PageShell } from "@/components/ui/PageShell";
+import Image from "next/image";
 import { Tabs } from "@/components/ui/Tabs";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { useFriends } from "@/lib/hooks/useFriends";
 import { sendFriendRequest, respondToFriend } from "@/lib/api/friends";
-import { createInvite } from "@/lib/api/invites";
-import type { FriendUser, FriendRequest } from "@/lib/types/api";
+import { createInvite, respondToInvite } from "@/lib/api/invites";
+import { useInvites } from "@/lib/hooks/useInvites";
+import type { FriendUser, FriendRequest, InviteOut } from "@/lib/types/api";
 
 function FriendRow({
   friend,
@@ -21,11 +22,9 @@ function FriendRow({
   const initials = friend.username.slice(0, 2).toUpperCase();
   return (
     <div className="flex items-center gap-3 py-3 border-b border-white/5 last:border-0">
-      {/* Avatar */}
-      <div className="w-10 h-10 rounded-full bg-blue-team flex items-center justify-center font-bold text-white text-sm shrink-0">
+      <div className="w-10 h-10 rounded-full bg-poke-blue flex items-center justify-center font-bold text-white text-sm shrink-0">
         {initials}
       </div>
-      {/* Name + presence */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="font-bold text-white text-sm">{friend.username}</span>
@@ -33,7 +32,7 @@ function FriendRow({
         </div>
       </div>
       <Button size="sm" variant="secondary" onClick={() => onInvite(friend.user_id)}>
-        Invite ▶
+        Challenge ▶
       </Button>
     </div>
   );
@@ -66,9 +65,40 @@ function RequestRow({
   );
 }
 
+function GameInviteRow({
+  inv,
+  onAccept,
+  onDecline,
+}: {
+  inv: InviteOut;
+  onAccept: () => void;
+  onDecline: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 py-3 border-b border-white/5 last:border-0">
+      <div className="w-10 h-10 rounded-full bg-red-team/30 flex items-center justify-center font-bold text-white text-sm shrink-0">
+        {inv.other_username.slice(0, 2).toUpperCase()}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-white text-sm font-bold truncate">{inv.other_username}</p>
+        <p className="text-text-muted text-xs">Wants to battle</p>
+      </div>
+      <div className="flex gap-2 shrink-0">
+        <Button size="sm" variant="secondary" onClick={onAccept}>
+          Play
+        </Button>
+        <Button size="sm" variant="danger" onClick={onDecline}>
+          Decline
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export default function FriendsPage() {
   const router = useRouter();
   const { data, loading, error, unauthenticated, refresh } = useFriends();
+  const { data: invites, refresh: refreshInvites } = useInvites();
   const [activeTab, setActiveTab] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchStatus, setSearchStatus] = useState<string | null>(null);
@@ -99,19 +129,32 @@ export default function FriendsPage() {
     }
   };
 
+  const incomingGameInvites =
+    invites?.filter((i) => i.direction === "incoming") ?? [];
+
   const handleInvite = async (userId: string) => {
     try {
       const res = await createInvite(userId);
-      router.push(`/play/lobby?mode=pvp&inviteId=${res.invite_id}`);
+      router.push(
+        `/play/lobby?mode=pvp&inviteId=${res.invite_id}&gameId=${res.game_id}`
+      );
     } catch (err) {
       console.error("Invite error:", err);
     }
   };
 
-  const handleRespondToFriend = async (
-    id: string,
-    action: "accept" | "reject"
-  ) => {
+  const handleGameInviteAccept = async (inv: InviteOut) => {
+    const res = await respondToInvite(inv.id, "accept");
+    refreshInvites();
+    router.push(`/game/${res.game_id}`);
+  };
+
+  const handleGameInviteDecline = async (inv: InviteOut) => {
+    await respondToInvite(inv.id, "reject");
+    refreshInvites();
+  };
+
+  const handleRespondToFriend = async (id: string, action: "accept" | "reject") => {
     try {
       await respondToFriend(id, action);
       refresh();
@@ -126,28 +169,52 @@ export default function FriendsPage() {
   ];
 
   const hasNoFriends =
-    !loading && friends.length === 0 && incoming.length === 0 && outgoing.length === 0;
+    !loading &&
+    friends.length === 0 &&
+    incoming.length === 0 &&
+    outgoing.length === 0 &&
+    incomingGameInvites.length === 0;
 
   if (unauthenticated) {
     return (
-      <PageShell title="Friends" backHref="/">
-        <div className="flex flex-col items-center justify-center py-24 text-center gap-4 px-6">
-          <span className="text-5xl">🔒</span>
-          <h2 className="font-display text-xl font-bold text-white">Log in to see your friends</h2>
-          <p className="text-white/50 text-sm">You need an account to add friends and send game invites.</p>
-          <a href="/login" className="mt-2 px-8 py-3 rounded-full font-display font-bold text-white text-base" style={{ backgroundColor: "#3C72E0" }}>
-            Log In
-          </a>
-        </div>
-      </PageShell>
+      <div className="flex flex-col items-center justify-center py-24 text-center gap-4 px-6">
+        <span className="text-5xl">🔒</span>
+        <h2 className="font-display text-xl font-bold text-white">Log in to see your friends</h2>
+        <p className="text-text-muted text-sm">You need an account to add friends and send game invites.</p>
+        <a
+          href="/login"
+          className="mt-2 px-8 py-3 rounded-full font-display font-bold text-white text-base"
+          style={{ backgroundColor: "#3B5EE5" }}
+        >
+          Log In
+        </a>
+      </div>
     );
   }
 
   return (
-    <PageShell title="Friends" backHref="/">
-      <div className="px-4 pt-4 pb-8 max-w-lg mx-auto">
-        {/* Search bar */}
-        <div className="mb-4">
+    <div className="min-h-screen bg-bg-deep">
+      <div className="px-4 pt-6 pb-8 max-w-lg mx-auto">
+        <h1 className="font-display text-2xl font-bold text-white mb-4">Friends</h1>
+
+        {incomingGameInvites.length > 0 && (
+          <div className="mb-6 rounded-xl border border-poke-blue/40 bg-bg-card/80 px-3 py-2">
+            <h2 className="text-xs font-bold text-poke-blue uppercase tracking-wide mb-2 px-1">
+              Battle invites
+            </h2>
+            {incomingGameInvites.map((inv) => (
+              <GameInviteRow
+                key={inv.id}
+                inv={inv}
+                onAccept={() => handleGameInviteAccept(inv)}
+                onDecline={() => handleGameInviteDecline(inv)}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Search bar — centered */}
+        <div className="mb-6">
           <div className="flex gap-2">
             <input
               type="text"
@@ -155,49 +222,45 @@ export default function FriendsPage() {
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSendRequest()}
               placeholder="Search by username or email..."
-              className="flex-1 bg-bg-card border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-team transition-colors"
+              className="flex-1 bg-bg-card border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-poke-blue transition-colors"
             />
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={handleSendRequest}
-              loading={sendingReq}
-            >
+            <Button variant="secondary" size="sm" onClick={handleSendRequest} loading={sendingReq}>
               Add
             </Button>
           </div>
-          {searchStatus && (
-            <p className="mt-1.5 text-xs text-green-400">{searchStatus}</p>
-          )}
-          {searchError && (
-            <p className="mt-1.5 text-xs text-red-400">{searchError}</p>
-          )}
+          {searchStatus && <p className="mt-1.5 text-xs text-green-400">{searchStatus}</p>}
+          {searchError && <p className="mt-1.5 text-xs text-red-team">{searchError}</p>}
         </div>
 
-        {/* Loading */}
         {loading && (
           <div className="flex justify-center py-12">
             <Spinner />
           </div>
         )}
 
-        {/* Error */}
         {error && (
-          <div className="text-center py-8 text-red-400 text-sm">{error}</div>
+          <div className="text-center py-8 text-red-team text-sm">{error}</div>
         )}
 
-        {/* Empty state */}
+        {/* Empty state with Pikachu */}
         {hasNoFriends && !loading && !error && (
           <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
-            <span className="text-6xl">👋</span>
+            <Image
+              src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/25.png"
+              alt="Pikachu"
+              width={96}
+              height={96}
+              className="opacity-80"
+              unoptimized
+            />
             <h2 className="font-display text-xl font-bold text-white">No friends yet!</h2>
-            <p className="text-white/50 text-sm">
-              Add someone to play PokeChess with!
+            <p className="text-text-muted text-sm">
+              Search for a Trainer above to get started!
             </p>
           </div>
         )}
 
-        {/* Tabs */}
+        {/* Tabs + lists */}
         {!loading && !hasNoFriends && (
           <>
             <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} className="mb-4" />
@@ -205,7 +268,7 @@ export default function FriendsPage() {
             {activeTab === 0 && (
               <div>
                 {friends.length === 0 ? (
-                  <p className="text-center text-white/40 text-sm py-8">
+                  <p className="text-center text-text-muted text-sm py-8">
                     No friends yet. Add someone using the search bar!
                   </p>
                 ) : (
@@ -220,7 +283,7 @@ export default function FriendsPage() {
               <div>
                 {incoming.length > 0 && (
                   <div className="mb-6">
-                    <h3 className="text-xs font-bold text-white/50 uppercase tracking-wide mb-2">
+                    <h3 className="text-xs font-bold text-text-muted uppercase tracking-wide mb-2">
                       Incoming
                     </h3>
                     {incoming.map((req) => (
@@ -235,7 +298,7 @@ export default function FriendsPage() {
                 )}
                 {outgoing.length > 0 && (
                   <div>
-                    <h3 className="text-xs font-bold text-white/50 uppercase tracking-wide mb-2">
+                    <h3 className="text-xs font-bold text-text-muted uppercase tracking-wide mb-2">
                       Outgoing
                     </h3>
                     {outgoing.map((req) => (
@@ -246,10 +309,8 @@ export default function FriendsPage() {
                         <div className="w-10 h-10 rounded-full bg-bg-card flex items-center justify-center font-bold text-white text-sm shrink-0">
                           {req.username.slice(0, 2).toUpperCase()}
                         </div>
-                        <span className="flex-1 text-white/70 text-sm">
-                          {req.username}
-                        </span>
-                        <span className="text-xs text-white/30">(pending)</span>
+                        <span className="flex-1 text-white/70 text-sm">{req.username}</span>
+                        <span className="text-xs text-text-muted">(pending)</span>
                         <Button
                           size="sm"
                           variant="ghost"
@@ -262,7 +323,7 @@ export default function FriendsPage() {
                   </div>
                 )}
                 {incoming.length === 0 && outgoing.length === 0 && (
-                  <p className="text-center text-white/40 text-sm py-8">
+                  <p className="text-center text-text-muted text-sm py-8">
                     No pending requests.
                   </p>
                 )}
@@ -271,6 +332,6 @@ export default function FriendsPage() {
           </>
         )}
       </div>
-    </PageShell>
+    </div>
   );
 }

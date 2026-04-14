@@ -6,15 +6,29 @@ import asyncpg
 
 
 async def get_pending_invites(db: asyncpg.Connection, user_id: UUID) -> list[dict]:
+    """Pending game invites where the user is invitee (incoming) or inviter (outgoing)."""
     rows = await db.fetch(
         """
-        SELECT gi.id, gi.inviter_id AS from_user_id, u.username AS from_username,
-               g.id AS game_id, gi.created_at
-        FROM game_invites gi
-        JOIN users u ON u.id = gi.inviter_id
-        JOIN games g ON g.invite_id = gi.id
-        WHERE gi.invitee_id = $1 AND gi.status = 'pending'
-        ORDER BY gi.created_at DESC
+        SELECT * FROM (
+            SELECT gi.id, g.id AS game_id, gi.created_at,
+                   'incoming'::text AS direction,
+                   gi.inviter_id AS other_user_id,
+                   u.username AS other_username
+            FROM game_invites gi
+            JOIN users u ON u.id = gi.inviter_id
+            JOIN games g ON g.invite_id = gi.id
+            WHERE gi.invitee_id = $1 AND gi.status = 'pending'
+            UNION ALL
+            SELECT gi.id, g.id AS game_id, gi.created_at,
+                   'outgoing'::text AS direction,
+                   gi.invitee_id AS other_user_id,
+                   u.username AS other_username
+            FROM game_invites gi
+            JOIN users u ON u.id = gi.invitee_id
+            JOIN games g ON g.invite_id = gi.id
+            WHERE gi.inviter_id = $1 AND gi.status = 'pending'
+        ) AS combined
+        ORDER BY created_at DESC
         """,
         user_id,
     )

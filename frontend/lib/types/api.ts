@@ -45,13 +45,14 @@ export interface FriendActionResponse {
   status: string;
 }
 
-// Invites
+// Invites (GET /game-invites — pending incoming + outgoing)
 export interface InviteOut {
   id: string;
-  from_user_id: string;
-  from_username: string;
   game_id: string;
   created_at: string;
+  direction: "incoming" | "outgoing";
+  other_user_id: string;
+  other_username: string;
 }
 
 export interface InviteActionResponse {

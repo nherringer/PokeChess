@@ -150,8 +150,10 @@ CREATE TABLE bot_player_activity (
 -- Supports: COUNT(*) WHERE bot_id = X AND last_moved_at > now() - window
 CREATE INDEX idx_bpa_bot_time ON bot_player_activity (bot_id, last_moved_at);
 
--- ===== Seed bot: Metallic =====
-INSERT INTO bots (name, params) VALUES (
-    'Metallic',
-    '{"time_budget": 1.0, "iteration_budget": null}'::jsonb
-);
+-- ===== Seed bots: Metallic difficulty tiers =====
+INSERT INTO bots (name, params) VALUES
+    ('Metallic', '{"time_budget": 0.5,  "label": "Easy",   "flavor": "Metallic is sleepy"}'::jsonb),
+    ('Metallic', '{"time_budget": 1.5,  "label": "Medium", "flavor": "Metallic woke up"}'::jsonb),
+    ('Metallic', '{"time_budget": 3.0,  "label": "Hard",   "flavor": "Metallic means it"}'::jsonb),
+    ('Metallic', '{"time_budget": 5.0,  "label": "Expert", "flavor": "Metallic is scary"}'::jsonb),
+    ('Metallic', '{"time_budget": 10.0, "label": "Master", "flavor": "Good luck..."}'::jsonb);

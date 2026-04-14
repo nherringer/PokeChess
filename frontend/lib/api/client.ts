@@ -78,8 +78,16 @@ export async function apiFetch<T>(
     let errorCode = "UNKNOWN";
     try {
       const errorData = await res.json();
-      errorMessage = errorData.error ?? errorData.detail ?? errorMessage;
-      errorCode = errorData.code ?? errorCode;
+      // AppError uses { error: machine code, detail: human message }; prefer detail.
+      errorCode = errorData.code ?? errorData.error ?? errorCode;
+      const detail = errorData.detail;
+      if (typeof detail === "string") {
+        errorMessage = detail;
+      } else if (Array.isArray(detail) && detail.length > 0) {
+        errorMessage = detail[0]?.msg ?? errorMessage;
+      } else if (typeof errorData.error === "string" && errorData.error !== errorCode) {
+        errorMessage = errorData.error;
+      }
     } catch {
       // ignore parse errors
     }

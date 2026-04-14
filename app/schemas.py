@@ -101,6 +101,10 @@ class SettingsOut(BaseModel):
     updated_at: datetime | None
 
 
+class StarterResponse(BaseModel):
+    pieces: list[PieceOut]
+
+
 # ---------------------------------------------------------------------------
 # Friends
 # ---------------------------------------------------------------------------
@@ -154,11 +158,14 @@ class SendInviteRequest(BaseModel):
 
 
 class InviteOut(BaseModel):
+    """Pending PvP invite for the current user (incoming or outgoing)."""
+
     id: UUID
-    from_user_id: UUID
-    from_username: str
     game_id: UUID
     created_at: datetime
+    direction: str  # "incoming" | "outgoing"
+    other_user_id: UUID
+    other_username: str
 
 
 class InviteActionRequest(BaseModel):
@@ -169,6 +176,18 @@ class InviteActionResponse(BaseModel):
     invite_id: UUID
     status: str
     game_id: UUID
+
+
+# ---------------------------------------------------------------------------
+# Bots
+# ---------------------------------------------------------------------------
+
+class BotOut(BaseModel):
+    id: UUID
+    name: str
+    label: str
+    flavor: str
+    time_budget: float
 
 
 # ---------------------------------------------------------------------------

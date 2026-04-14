@@ -15,7 +15,7 @@ from ..auth import (
 )
 from ..main import AppError
 from ..schemas import RegisterRequest, LoginRequest, TokenResponse, RefreshResponse
-from ..db.queries import users as user_q, settings as settings_q
+from ..db.queries import users as user_q, settings as settings_q, pieces as pieces_q
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -29,6 +29,8 @@ async def register(body: RegisterRequest, response: Response, db: Db):
         raise AppError(409, "conflict", "Username or email already exists")
 
     await settings_q.create_default_settings(db, user["id"])
+    if not await pieces_q.has_roster(db, user["id"]):
+        await pieces_q.insert_starter_pieces(db, user["id"])
 
     access = create_access_token(user["id"])
     refresh = create_refresh_token(user["id"])
@@ -49,6 +51,9 @@ async def login(body: LoginRequest, response: Response, db: Db):
     user = await user_q.get_user_by_email(db, body.email)
     if user is None or not verify_password(body.password, user["password_hash"]):
         raise AppError(401, "unauthorized", "Invalid email or password")
+
+    if not await pieces_q.has_roster(db, user["id"]):
+        await pieces_q.insert_starter_pieces(db, user["id"])
 
     access = create_access_token(user["id"])
     refresh = create_refresh_token(user["id"])

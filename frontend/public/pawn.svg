@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 40" fill="none">
+  <!-- Head -->
+  <circle cx="16" cy="9" r="6" fill="#F0EAD6" stroke="#1A1A1A" stroke-width="1.5"/>
+  <!-- Neck + body -->
+  <path d="M11 15h10l2 10H9L11 15z" fill="#F0EAD6" stroke="#1A1A1A" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- Base -->
+  <path d="M6 37h20l-2-12H8L6 37z" fill="#F0EAD6" stroke="#1A1A1A" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- Base foot -->
+  <rect x="4" y="35" width="24" height="4" rx="2" fill="#F0EAD6" stroke="#1A1A1A" stroke-width="1.5"/>
+</svg>

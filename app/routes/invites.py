@@ -7,12 +7,7 @@ from asyncpg import UniqueViolationError
 
 from ..auth import Db, CurrentUser
 from ..main import AppError
-from ..schemas import (
-    SendInviteRequest,
-    InviteOut,
-    InviteActionRequest,
-    InviteActionResponse,
-)
+from ..schemas import SendInviteRequest, InviteOut, InviteActionRequest, InviteActionResponse
 from ..db.queries import invites as invite_q, friends as friend_q
 
 router = APIRouter(prefix="/game-invites", tags=["invites"])
@@ -34,6 +29,22 @@ async def send_invite(body: SendInviteRequest, user: CurrentUser, db: Db):
     except UniqueViolationError:
         raise AppError(409, "conflict", "An active game already exists between these players")
     return InviteActionResponse(**result)
+
+
+@router.delete("/{invite_id}", response_model=InviteActionResponse)
+async def cancel_invite(invite_id: UUID, user: CurrentUser, db: Db):
+    """Withdraw a pending invite (inviter only)."""
+    inv = await invite_q.get_invite(db, invite_id)
+    if inv is None:
+        raise AppError(404, "not_found", "Invite not found")
+    if inv["inviter_id"] != user["id"]:
+        raise AppError(403, "forbidden", "Only the inviter can cancel this invite")
+    if inv["status"] != "pending":
+        raise AppError(400, "bad_request", "Invite is not pending")
+    await invite_q.update_invite_status(db, invite_id, "rejected")
+    return InviteActionResponse(
+        invite_id=inv["id"], status="rejected", game_id=inv["game_id"]
+    )
 
 
 @router.put("/{invite_id}", response_model=InviteActionResponse)

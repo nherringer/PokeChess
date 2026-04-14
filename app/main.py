@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     from . import config
-    from .routes import auth, users, friends, invites, games, moves
+    from .routes import auth, users, friends, invites, games, moves, bots
 
     docs_url = "/docs" if config.ENVIRONMENT == "development" else None
     redoc_url = "/redoc" if config.ENVIRONMENT == "development" else None
@@ -80,6 +80,7 @@ def create_app() -> FastAPI:
     app.include_router(invites.router)
     app.include_router(games.router)
     app.include_router(moves.router)
+    app.include_router(bots.router)
 
     @app.get("/health")
     async def health():

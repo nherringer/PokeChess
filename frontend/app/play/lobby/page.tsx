@@ -5,7 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Spinner } from "@/components/ui/Spinner";
 import { Button } from "@/components/ui/Button";
 import { useInvites } from "@/lib/hooks/useInvites";
-import { respondToInvite } from "@/lib/api/invites";
+import { cancelInviteAsInviter } from "@/lib/api/invites";
+import { getGame } from "@/lib/api/games";
 
 function PvBLobby({ gameId }: { gameId: string }) {
   const router = useRouter();
@@ -43,26 +44,33 @@ function PvBLobby({ gameId }: { gameId: string }) {
   );
 }
 
-function PvPLobby({ inviteId }: { inviteId: string }) {
+function PvPLobby({ inviteId, gameId }: { inviteId: string; gameId: string }) {
   const router = useRouter();
-  const { data: invites } = useInvites();
+  const { data: invites, loading: invitesLoading } = useInvites();
 
-  // When invite disappears from list (accepted), navigate to game
+  // Inviter's pending invite is listed under GET /game-invites (outgoing). When it
+  // disappears, either the friend accepted (game active) or declined (still pending game row).
   useEffect(() => {
-    if (!invites) return;
+    if (invitesLoading || !invites || !gameId) return;
     const invite = invites.find((inv) => inv.id === inviteId);
-    // If no longer in list, the friend accepted — navigate to game
-    // The game_id would come from the invite that was stored before
-    if (invites.length === 0 || !invite) {
-      // Try to get game from invite history — for now navigate home
-      // In production, we'd track the game_id from createInvite response
-      router.push("/games");
-    }
-  }, [invites, inviteId, router]);
+    if (invite) return;
+
+    getGame(gameId)
+      .then((g) => {
+        if (g.status === "active") {
+          router.replace(`/game/${gameId}`);
+        } else {
+          router.replace("/");
+        }
+      })
+      .catch(() => {
+        router.replace("/");
+      });
+  }, [invitesLoading, invites, inviteId, gameId, router]);
 
   const handleCancel = async () => {
     try {
-      await respondToInvite(inviteId, "reject");
+      await cancelInviteAsInviter(inviteId);
     } catch {
       // ignore
     }
@@ -95,9 +103,10 @@ function LobbyContent() {
   const mode = params.get("mode") ?? "pvb";
   const gameId = params.get("gameId") ?? "";
   const inviteId = params.get("inviteId") ?? "";
+  const inviteGameId = params.get("gameId") ?? "";
 
   if (mode === "pvp") {
-    return <PvPLobby inviteId={inviteId} />;
+    return <PvPLobby inviteId={inviteId} gameId={inviteGameId} />;
   }
 
   return <PvBLobby gameId={gameId} />;

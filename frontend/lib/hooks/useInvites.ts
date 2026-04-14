@@ -31,5 +31,5 @@ export function useInvites() {
     };
   }, [refresh]);
 
-  return { data, loading, error };
+  return { data, loading, error, refresh };
 }
