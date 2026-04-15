@@ -130,7 +130,7 @@ def apply_move(state: GameState, move: Move) -> list[tuple[GameState, float]]:
         _advance_turn(new)
         return [(new, _POKEBALL_CAPTURE_PROB), (fail, 1.0 - _POKEBALL_CAPTURE_PROB)]
 
-    # --- TRADE: free action (does not consume turn) unless Eevee auto-evolves ---
+    # --- TRADE: free action (does not consume turn) ---
     if move.action_type == ActionType.TRADE:
         ends_turn = _do_trade(new, piece, move)
         if ends_turn:

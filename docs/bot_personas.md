@@ -6,7 +6,7 @@ Six playable bot personalities inspired by the Pokémon XY anime (Kalos region).
 
 ## How Personas Work
 
-Each bot row in the DB carries a `bot_params` JSON column. When the backend triggers a bot move, it forwards `bot_params` (with a load-adjusted `time_budget`) to the engine's `POST /move` endpoint as `persona_params`. The engine reads those params to configure the MCTS instance for that request.
+Each bot row in the DB carries a `params` JSONB column. When the backend triggers a bot move, it forwards `params` (with a load-adjusted `time_budget`) to the engine's `POST /move` endpoint as `persona_params`. The engine reads those params to configure the MCTS instance for that request.
 
 **Relevant MCTS parameters:**
 
