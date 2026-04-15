@@ -150,8 +150,12 @@ CREATE TABLE bot_player_activity (
 -- Supports: COUNT(*) WHERE bot_id = X AND last_moved_at > now() - window
 CREATE INDEX idx_bpa_bot_time ON bot_player_activity (bot_id, last_moved_at);
 
--- ===== Seed bot: Metallic =====
-INSERT INTO bots (name, params) VALUES (
-    'Metallic',
-    '{"time_budget": 1.0, "iteration_budget": null}'::jsonb
-);
+-- ===== Seed bots (all six personas) =====
+-- For existing databases run this block manually or via a migration.
+INSERT INTO bots (name, params) VALUES
+    ('Bonnie',      '{"time_budget": 0.1,  "exploration_c": 2.5,                 "use_transposition": false}'::jsonb),
+    ('Team Rocket', '{"time_budget": 0.5,  "exploration_c": 2.2,                 "use_transposition": false, "move_bias": "chase_pikachu",        "bias_bonus": 0.15}'::jsonb),
+    ('Serena',      '{"time_budget": 1.0,  "exploration_c": 1.4142135623730951,  "use_transposition": true}'::jsonb),
+    ('Clemont',     '{"time_budget": 2.0,  "exploration_c": 1.4142135623730951,  "use_transposition": true,  "move_bias": "prefer_pikachu_raichu", "bias_bonus": 0.15}'::jsonb),
+    ('Diantha',     '{"time_budget": 3.5,  "exploration_c": 1.0,                 "use_transposition": true}'::jsonb),
+    ('METALLIC',    '{"time_budget": 6.0,  "exploration_c": 0.5,                 "use_transposition": true}'::jsonb);

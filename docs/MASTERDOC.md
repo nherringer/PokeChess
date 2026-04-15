@@ -24,7 +24,7 @@
 ## 1. TL;DR
 
 - **Game:** Two-player strategy on an 8×8 board. Chess-like movement, but pieces have **HP**, **Pokémon types**, **items**, and **abilities**. **RED** (Pikachu king) moves first; **BLUE** (Eevee king) second. Win by eliminating the opponent’s king (see [Rules.md](Rules.md)).
-- **Modes:** **PvP** — two human accounts (friends + game invites). **PvB** — one human vs bot personality **Metallic** (MCTS); the app calls a separate **engine** service only for the bot’s move choice.
+- **Modes:** **PvP** — two human accounts (friends + game invites). **PvB** — one human vs one of **six bot personalities** (Bonnie → METALLIC, Kalos-themed difficulty tiers); the app calls a separate **engine** service only for the bot’s move choice.
 - **Code:** **One monorepo**: `engine/` (pure rules), `app/` (FastAPI + Postgres), `bot/` + `cpp/` (MCTS + optional C++ rollout in the engine image). **Two Docker images** (`Dockerfile.app`, `Dockerfile.engine`) built from the same repo.
 - **Truth for HTTP:** **[api_spec.md](api_spec.md)** (methods, bodies, status codes, errors); **`app/schemas.py`** (Pydantic field types); **`app/routes/`** (handler behavior); **[pokechess_data_model.md](pokechess_data_model.md)** (`games.state` / `move_history` JSON). At runtime, **`/openapi.json`** and **`/docs`** (Swagger UI).
 - **Local dev:** `docker-compose.yml` + env (`DATABASE_URL`, `ENGINE_URL`, `SECRET_KEY`, etc.). **Target production:** two ECS services on one small EC2 instance ([architecture_design_plan.md](architecture_design_plan.md)).
@@ -102,8 +102,8 @@ The **engine container is stateless for game rules**: it receives a state dict, 
 ### 3.2 PvB flow
 
 1. Human creates a game with a **bot_id** and side (`POST /games`) — roadmap and schemas define the exact body.
-2. **Metallic** is the seeded bot personality in `bots` (see `app/db/schema.sql`).
-3. Difficulty maps to **`time_budget`** (seconds) for MCTS — e.g. Easy 0.5s through Master 10.0s ([frontend_layout_proposal.md](frontend_layout_proposal.md)).
+2. Six **bot personas** are seeded in `bots` (see `app/db/schema.sql` and [bot_personas.md](bot_personas.md)): **Bonnie** (easiest), **Team Rocket**, **Serena**, **Clemont**, **Diantha**, **METALLIC** (hardest).
+3. Each bot row’s **`params` JSONB** carries its full MCTS configuration (`time_budget`, `exploration_c`, `use_transposition`, and optionally `move_bias` + `bias_bonus`). These are forwarded as `persona_params` to the engine on every move request — see Section 5.3.
 4. After each human move, if the game continues and it is the bot’s turn, the app calls the **engine** `POST /move`, applies the returned move, and returns a single **GameDetail** (human + bot plies in one response when applicable — [implementation_roadmap.md](implementation_roadmap.md) Q3).
 
 ### 3.3 Persistent roster (“My Pokémon”)
@@ -235,12 +235,16 @@ The app sends (`app/engine_client.py`):
 {
   "state": { "...": "GameState wire dict" },
   "persona_params": {
-    "time_budget": 1.5
+    "time_budget": 1.5,
+    "exploration_c": 1.4142135623730951,
+    "use_transposition": true,
+    "move_bias": "chase_pikachu",
+    "bias_bonus": 0.15
   }
 }
 ```
 
-`time_budget` is **seconds**, possibly **divided by N** active players for load-aware budgeting (Section 9.2). Extra keys in `persona_params` are forwarded for future engine tuning. Values are **clamped** to `[0.1, 10.0]` before the HTTP call.
+`time_budget` is **seconds**, possibly **divided by N** active players for load-aware budgeting (Section 9.2). All numeric persona params are **clamped** by the engine before use (`time_budget` to `[0.1, 10.0]`, `exploration_c` to `[0.05, 10.0]`, `bias_bonus` to `[0.0, 3.0]`). `move_bias` and `bias_bonus` are optional — only sent for personas with behavioral biases (Team Rocket, Clemont). See [bot_personas.md](bot_personas.md) for the full parameter table.
 
 The engine must return a **flat** JSON object the app can pass into `Move(...)`:
 
@@ -274,7 +278,7 @@ The engine must return a **flat** JSON object the app can pass into `Move(...)`:
 - **`users`** — Identity: username, email, password hash.
 - **`user_settings`** — 1:1 with users; `board_theme`, `extra_settings` JSONB for flexible client prefs.
 - **`friendships`** — Ordered pair (`user_a_id` < `user_b_id`), status pending/accepted/rejected, initiator tracked.
-- **`bots`** — Bot personality rows; **`params` JSONB** holds MCTS knobs (`time_budget`, optional `iteration_budget`, rollout weights, etc.). Seed includes **Metallic**.
+- **`bots`** — Bot personality rows; **`params` JSONB** holds MCTS knobs (`time_budget`, `exploration_c`, `use_transposition`, optional `move_bias` + `bias_bonus`). Six personas are seeded: Bonnie, Team Rocket, Serena, Clemont, Diantha, METALLIC. See [bot_personas.md](bot_personas.md) and `bot/persona.py`.
 - **`game_invites`** — Inviter, invitee, status; ties to games created in pending state.
 - **`games`** — Players (nullable slot for bot side), `is_bot_game`, `bot_id`, `bot_side`, `invite_id`, **`status`** (`pending` / `active` / `complete`), **`whose_turn`**, **`turn_number`**, **`state`** JSONB, **`move_history`** JSONB, **`winner`**, **`end_reason`**. Frequently queried fields are real columns, not buried only in JSONB.
 - **`pokemon_pieces`** — Persistent named pieces per user: role, species, xp, evolution_stage.
@@ -352,7 +356,8 @@ Append-only list of turns. **Snake_case `action_type`** strings in history (`att
 
 ### 9.1 MCTS engine container
 
-- **Bot code:** `bot/mcts.py`, `bot/server.py` (FastAPI), `bot/transposition.py` (fixed-size array TT), `bot/tt_store.py` (S3 backup); optional **C++** rollout in `cpp/` for speed.
+- **Bot code:** `bot/mcts.py`, `bot/server.py` (FastAPI), `bot/transposition.py` (fixed-size array TT), `bot/tt_store.py` (S3 backup), `bot/persona.py` (six canonical persona definitions); optional **C++** rollout in `cpp/` for speed.
+- **Persona system:** `bot/persona.py` defines a `Persona` dataclass and six instances. Each exposes `to_bot_params()` which produces the dict stored in `bots.params` (same numeric values as the seed `INSERT`s in `app/db/schema.sql` and the tables in [bot_personas.md](bot_personas.md)). The engine's `PersonaParams` model reads `time_budget`, `exploration_c`, `use_transposition`, `move_bias`, and `bias_bonus`. A **UCB1 bias bonus** is added to matching child nodes on every selection pass for `chase_pikachu` (Team Rocket) and `prefer_pikachu_raichu` (Clemont) — see [bot_personas.md](bot_personas.md).
 - **HTTP surface (repo state):** `bot/server.py` implements `POST /move` and `GET /health`. The engine image builds and runs. App calls it via `app/engine_client.py`.
 - **Persistence:** There is **no** app-triggered **`POST /backup`** or app-orchestrated engine backup. The transposition table is stored as a local `.bin` file inside the engine container and optionally backed up to S3 (`POKECHESS_TT_BUCKET`). The app has no visibility into TT state — see [Transposition_Table_Sync.md](Transposition_Table_Sync.md).
 - **Future:** `engine/notation.py` for PokeChess-PGN replay/analysis (not required for Postgres).
@@ -403,6 +408,7 @@ This is the **intended** production shape, not a guarantee about your current la
 | [pokechess_data_model.md](pokechess_data_model.md) | Full schema, JSON examples, HTTP model tables, detailed move lifecycle |
 | [architecture_design_plan.md](architecture_design_plan.md) | Target AWS/ECS/EC2/cost/queue narrative |
 | [app_and_engine_communication.md](app_and_engine_communication.md) | App ↔ engine contract, RDS vs bot-local persistence, queue model — aligned with **`engine_client.py`** |
+| [bot_personas.md](bot_personas.md) | Six bot personas — difficulty tiers, parameter tables, UCB1 bias design |
 | [load_aware_budgeting.md](load_aware_budgeting.md) | Load-aware MCTS budgeting |
 | [frontend_layout_proposal.md](frontend_layout_proposal.md) | v1 UI/UX spec (no frontend implemented) |
 | [Rules.md](Rules.md) | Full game rules |
@@ -423,7 +429,7 @@ Use **git history** on `docs/` (e.g. `git log -- docs/`) to see what changed rec
 
 | Topic | Notes |
 |-------|--------|
-| **Roadmap vs app engine JSON** | Roadmap shows top-level `time_budget`; app uses `persona_params.time_budget`. |
+| **Roadmap vs app engine JSON** | Roadmap shows top-level `time_budget`; app uses `persona_params.time_budget` plus additional persona fields (`exploration_c`, `use_transposition`, `move_bias`, `bias_bonus`). |
 | **`app_and_engine_communication.md`** | May reference removed files or wrapped move JSON — **use `engine_client.py` + `moves.py`**. |
 | **Roadmap vs routes** | Roadmap sometimes says `PATCH` for invites/friends; implementation uses **`PUT`**. |
 | **Data model move lifecycle** | One step may mention updating `species` mid-game; Q6 decisions say kings/queen immutable, other pieces post-game — reconcile wording in [pokechess_data_model.md](pokechess_data_model.md) when editing. |

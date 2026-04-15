@@ -28,12 +28,49 @@ from typing import Optional, TYPE_CHECKING
 
 from bot.ucb import ucb1, DEFAULT_C
 from bot.transposition import TranspositionTable
-from engine.moves import get_legal_moves, Move
+from engine.moves import get_legal_moves, Move, ActionType
 from engine.rules import apply_move, is_terminal, hp_winner
-from engine.state import GameState, Team
+from engine.state import GameState, Team, PieceType
 from engine.zobrist import hash_state, ZOBRIST_TABLE
 
 DEFAULT_ROLLOUT_DEPTH_LIMIT = 150
+
+# ---------------------------------------------------------------------------
+# Move bias helpers
+# ---------------------------------------------------------------------------
+
+_PIKACHU_TYPES: frozenset = frozenset({PieceType.PIKACHU, PieceType.RAICHU})
+
+
+def _chase_pikachu_fn(bonus: float):
+    """Return a bias function that rewards ATTACK moves targeting Pikachu/Raichu."""
+    def _fn(move: Move, state: GameState) -> float:
+        if move.action_type != ActionType.ATTACK:
+            return 0.0
+        target = state.board[move.target_row][move.target_col]
+        if target is not None and target.piece_type in _PIKACHU_TYPES:
+            return bonus
+        return 0.0
+    return _fn
+
+
+def _prefer_pikachu_raichu_fn(bonus: float):
+    """Return a bias function that rewards moves where the mover is Pikachu/Raichu."""
+    def _fn(move: Move, state: GameState) -> float:
+        piece = state.board[move.piece_row][move.piece_col]
+        if piece is not None and piece.piece_type in _PIKACHU_TYPES:
+            return bonus
+        return 0.0
+    return _fn
+
+
+def _make_bias_fn(move_bias: Optional[str], bonus: float):
+    """Resolve a move_bias string to a callable, or None for no bias."""
+    if move_bias == "chase_pikachu":
+        return _chase_pikachu_fn(bonus)
+    if move_bias == "prefer_pikachu_raichu":
+        return _prefer_pikachu_raichu_fn(bonus)
+    return None
 
 # ---------------------------------------------------------------------------
 # C++ rollout engine (optional — falls back to pure Python if not built)
@@ -62,17 +99,20 @@ class MCTSNode:
         'state', 'move',
         'wins', 'visits', 'children',
         '_untried', '_terminal', '_winner', '_hash',
+        'bias_bonus',
     )
 
     def __init__(
         self,
         state: GameState,
         move: Optional[Move] = None,
+        bias_bonus: float = 0.0,
     ) -> None:
-        self.state   = state
-        self.move    = move
-        self.wins    = 0.0
-        self.visits  = 0
+        self.state      = state
+        self.move       = move
+        self.wins       = 0.0
+        self.visits     = 0
+        self.bias_bonus = bias_bonus
         self.children: list[MCTSNode] = []
 
         # Lazy: populated on first call to _get_untried() / is_fully_expanded
@@ -104,13 +144,13 @@ class MCTSNode:
         return self._terminal or len(self._get_untried()) == 0
 
     def select_child(self, c: float) -> MCTSNode:
-        """Return the child with the highest UCB1 score."""
+        """Return the child with the highest UCB1 score, plus any persona bias bonus."""
         return max(
             self.children,
-            key=lambda ch: ucb1(ch.wins, ch.visits, self.visits, c),
+            key=lambda ch: ucb1(ch.wins, ch.visits, self.visits, c) + ch.bias_bonus,
         )
 
-    def expand(self) -> MCTSNode:
+    def expand(self, bias_fn=None) -> MCTSNode:
         """Pop one untried move, sample its outcome, return the new child node."""
         untried = self._get_untried()
         move = untried.pop()            # shuffled on init, so this is random
@@ -125,7 +165,8 @@ class MCTSNode:
                 weights=[p for _, p in outcomes],
             )[0]
 
-        child = MCTSNode(new_state, move=move)
+        bonus = bias_fn(move, self.state) if bias_fn is not None else 0.0
+        child = MCTSNode(new_state, move=move, bias_bonus=bonus)
         self.children.append(child)
         return child
 
@@ -154,11 +195,14 @@ class MCTS:
         rollout_depth_limit: int = DEFAULT_ROLLOUT_DEPTH_LIMIT,
         exploration_c: float = DEFAULT_C,
         transposition: Optional[TranspositionTable] = None,
+        move_bias: Optional[str] = None,
+        bias_bonus: float = 0.15,
     ) -> None:
         self.time_budget         = time_budget
         self.rollout_depth_limit = rollout_depth_limit
         self.exploration_c       = exploration_c
         self.transposition       = transposition
+        self._bias_fn            = _make_bias_fn(move_bias, bias_bonus)
         self._root: Optional[MCTSNode] = None
 
     # ── Public API ────────────────────────────────────────────────────────────
@@ -248,7 +292,7 @@ class MCTS:
 
         # 2. Expansion: grow the tree by one node
         if not node._terminal and not node.is_fully_expanded:
-            node = node.expand()
+            node = node.expand(self._bias_fn)
             path.append(node)
             self._warm_start(node)
 

@@ -29,6 +29,13 @@ from engine.state import GameState
 
 logger = logging.getLogger(__name__)
 
+# Persona floats from HTTP JSON — clamp so callers cannot distort UCB1 with
+# extreme exploration_c or bias_bonus (time_budget is capped the same way).
+_EXPLORATION_C_MIN = 0.05
+_EXPLORATION_C_MAX = 10.0
+_BIAS_BONUS_MIN = 0.0
+_BIAS_BONUS_MAX = 3.0
+
 # ---------------------------------------------------------------------------
 # Module-level process state (initialised in lifespan)
 # ---------------------------------------------------------------------------
@@ -124,6 +131,9 @@ app = FastAPI(title="PokeChess Bot Engine", lifespan=lifespan)
 class PersonaParams(BaseModel):
     time_budget: float = 3.0
     exploration_c: Optional[float] = None
+    use_transposition: bool = True
+    move_bias: Optional[str] = None
+    bias_bonus: float = 0.15
 
     model_config = {"extra": "allow"}  # forward unknown keys without error
 
@@ -155,13 +165,23 @@ async def get_move(body: MoveRequest):
     # 2. Extract and clamp time_budget
     time_budget = max(0.1, min(10.0, body.persona_params.time_budget))
 
-    # 3. Build MCTS kwargs — only pass exploration_c if explicitly provided
-    mcts_kwargs: dict[str, Any] = {
-        "time_budget": time_budget,
-        "transposition": global_tt,
-    }
+    # 3. Build MCTS kwargs from persona params
+    mcts_kwargs: dict[str, Any] = {"time_budget": time_budget}
+    if body.persona_params.use_transposition:
+        mcts_kwargs["transposition"] = global_tt
     if body.persona_params.exploration_c is not None:
-        mcts_kwargs["exploration_c"] = body.persona_params.exploration_c
+        exploration_c = max(
+            _EXPLORATION_C_MIN,
+            min(_EXPLORATION_C_MAX, body.persona_params.exploration_c),
+        )
+        mcts_kwargs["exploration_c"] = exploration_c
+    if body.persona_params.move_bias is not None:
+        mcts_kwargs["move_bias"] = body.persona_params.move_bias
+        bias_bonus = max(
+            _BIAS_BONUS_MIN,
+            min(_BIAS_BONUS_MAX, body.persona_params.bias_bonus),
+        )
+        mcts_kwargs["bias_bonus"] = bias_bonus
 
     # 4. Run MCTS (one at a time — CPU-bound)
     async with _mcts_lock:

@@ -169,6 +169,7 @@ Each piece has a type (or no type, in the case of Pokéballs). When a piece atta
 | Water → Fire | 2× |
 | Fire → Grass | 2× |
 | Grass → Water | 2× |
+| Electric → Water | 2× |
 | Fire → Water | 0.5× |
 | Grass → Fire | 0.5× |
 | Water → Grass | 0.5× |
