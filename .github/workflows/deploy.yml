@@ -105,9 +105,12 @@ jobs:
   # Runs after deploy-app so a failed app build/push/deploy never leaves the
   # engine image/service ahead of the app. If engine fails after app succeeded,
   # ECS can still be mixed-SHA until a fix is merged (same as any serial deploy).
+  #
+  # TODO: Re-enable `needs: [deploy-app]` after engine ECS deployment has been
+  # verified and stabilized (parallel app/engine jobs until then).
   deploy-engine:
     name: Engine — build / push / deploy
-    needs: [deploy-app]
+    # needs: [deploy-app]
     runs-on: ubuntu-24.04-arm
 
     steps:
