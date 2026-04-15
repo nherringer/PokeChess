@@ -32,7 +32,7 @@ Bonnie is the youngest trainer in the Kalos crew and very much a beginner. She g
 
 | Param | Value |
 |---|---|
-| `time_budget` | `0.1s` |
+| `time_budget` | `0.5s` |
 | `exploration_c` | `2.5` |
 | `use_transposition` | `false` |
 | `move_bias` | — |
@@ -48,7 +48,7 @@ Jessie, James, and Meowth are after one thing: Pikachu. They always play as Blue
 
 | Param | Value |
 |---|---|
-| `time_budget` | `0.5s` |
+| `time_budget` | `1.0s` |
 | `exploration_c` | `2.2` |
 | `use_transposition` | `false` |
 | `move_bias` | `chase_pikachu` |
@@ -66,7 +66,7 @@ Serena is a capable, well-rounded trainer. She has a full time budget to think, 
 
 | Param | Value |
 |---|---|
-| `time_budget` | `1.0s` |
+| `time_budget` | `2.0s` |
 | `exploration_c` | `1.414` (√2) |
 | `use_transposition` | `true` |
 | `move_bias` | — |
@@ -82,7 +82,7 @@ Clemont is Lumiose City's Electric-type Gym Leader and Bonnie's older brother. H
 
 | Param | Value |
 |---|---|
-| `time_budget` | `2.0s` |
+| `time_budget` | `3.0s` |
 | `exploration_c` | `1.414` (√2) |
 | `use_transposition` | `true` |
 | `move_bias` | `prefer_pikachu_raichu` |
@@ -100,7 +100,7 @@ Diantha is the strongest official trainer in Kalos. She gets a long time budget,
 
 | Param | Value |
 |---|---|
-| `time_budget` | `3.5s` |
+| `time_budget` | `5.0s` |
 | `exploration_c` | `1.0` |
 | `use_transposition` | `true` |
 | `move_bias` | — |
@@ -116,7 +116,7 @@ METALLIC is the secret final boss. Maximum time budget, full TT access, and an e
 
 | Param | Value |
 |---|---|
-| `time_budget` | `6.0s` |
+| `time_budget` | `10.0s` |
 | `exploration_c` | `0.5` |
 | `use_transposition` | `true` |
 | `move_bias` | — |
@@ -127,9 +127,9 @@ METALLIC is the secret final boss. Maximum time budget, full TT access, and an e
 
 | # | Persona | Budget | TT | `exploration_c` | Bias |
 |---|---|---|---|---|---|
-| 1 | Bonnie | 0.1s | No | 2.5 | — |
-| 2 | Team Rocket | 0.5s | No | 2.2 | `chase_pikachu` |
-| 3 | Serena | 1.0s | Yes | 1.414 | — |
-| 4 | Clemont | 2.0s | Yes | 1.414 | `prefer_pikachu_raichu` |
-| 5 | Diantha | 3.5s | Yes | 1.0 | — |
-| 6 | METALLIC | 6.0s | Yes | 0.5 | — |
+| 1 | Bonnie | 0.5s | No | 2.5 | — |
+| 2 | Team Rocket | 1.0s | No | 2.2 | `chase_pikachu` |
+| 3 | Serena | 2.0s | Yes | 1.414 | — |
+| 4 | Clemont | 3.0s | Yes | 1.414 | `prefer_pikachu_raichu` |
+| 5 | Diantha | 5.0s | Yes | 1.0 | — |
+| 6 | METALLIC | 10.0s | Yes | 0.5 | — |
