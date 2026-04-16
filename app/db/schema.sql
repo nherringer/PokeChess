@@ -38,7 +38,7 @@ CREATE INDEX idx_friendships_b ON friendships (user_b_id);
 -- ===== bots =====
 CREATE TABLE bots (
     id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    name        VARCHAR     NOT NULL,
+    name        VARCHAR     UNIQUE NOT NULL,
     params      JSONB       NOT NULL DEFAULT '{}',
     created_at  TIMESTAMP   NOT NULL DEFAULT now()
 );
@@ -160,4 +160,5 @@ INSERT INTO bots (name, params) VALUES
     ('Serena',      '{"time_budget": 1.0,  "exploration_c": 1.4142135623730951,  "use_transposition": true}'::jsonb),
     ('Clemont',     '{"time_budget": 2.0,  "exploration_c": 1.4142135623730951,  "use_transposition": true,  "move_bias": "prefer_pikachu_raichu", "bias_bonus": 0.15}'::jsonb),
     ('Diantha',     '{"time_budget": 3.5,  "exploration_c": 1.0,                 "use_transposition": true}'::jsonb),
-    ('METALLIC',    '{"time_budget": 6.0,  "exploration_c": 0.5,                 "use_transposition": true}'::jsonb);
+    ('METALLIC',    '{"time_budget": 6.0,  "exploration_c": 0.5,                 "use_transposition": true}'::jsonb)
+ON CONFLICT (name) DO NOTHING;
