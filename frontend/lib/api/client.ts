@@ -1,3 +1,5 @@
+import { useAuthStore } from "@/lib/store/authStore";
+
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export class ApiError extends Error {
@@ -28,7 +30,10 @@ async function refreshToken(): Promise<string | null> {
       method: "POST",
       credentials: "include",
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      useAuthStore.getState().clearAuth();
+      return null;
+    }
     const data = await res.json();
     if (data.access_token) {
       setToken(data.access_token);
