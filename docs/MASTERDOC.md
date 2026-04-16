@@ -308,7 +308,7 @@ Append-only list of turns. **Snake_case `action_type`** strings in history (`att
 
 - **XP earned (v1):** Sum of **`damage`** from `move_history` entries attributed to that **named** piece (attacks, foresight resolve, etc.). Pokéball captures without damage do not add XP. Implemented in a dedicated helper (e.g. `compute_xp`) so the formula can change.
 - **`xp_earned` vs `xp_applied`:** Raw earned vs what business rules apply to `pokemon_pieces.xp` (e.g. wins only — see data model).
-- **Kings / queen:** `pokemon_pieces.species` for king and queen is **immutable** (`pikachu`, `eevee`, `mew`). Mid-game evolutions (Raichu, Eeveelutions) exist **only** in engine state for that game. **Rooks, knights, bishops** can change species/evolution stage **post-game** via XP thresholds; those updates happen at game completion, not mid-game ([implementation_roadmap.md](implementation_roadmap.md) Q6).
+- **Kings / queen:** `pokemon_pieces.species` for king and queen is **immutable** (`PIKACHU`, `EEVEE`, `MEW` — stored uppercase to match the engine's `PieceType` enum member names). Mid-game evolutions (Raichu, Eeveelutions) exist **only** in engine state for that game. **Rooks, knights, bishops** can change species/evolution stage **post-game** via XP thresholds; those updates happen at game completion, not mid-game ([implementation_roadmap.md](implementation_roadmap.md) Q6).
 
 ### 6.5 Important indexes
 

@@ -250,7 +250,7 @@ If **Eevee** (or similar) evolves during a game, engine state and `move_history`
 **✅ Resolved — Kings (Pikachu and Eevee) are in-game-only evolutions and are never persisted as evolved forms.**
 
 - Every new game always starts with **Pikachu** (Red King) and **Eevee** (Blue King) — never Raichu or any Eevee evolution. Their mid-game evolved forms are transient engine state only.
-- `pokemon_pieces.species` for king and queen pieces is **immutable** — `'pikachu'`, `'eevee'`, or `'mew'`, never updated. Mew has no evolution. King mid-game evolutions are transient engine state only.
+- `pokemon_pieces.species` for king and queen pieces is **immutable** — `'PIKACHU'`, `'EEVEE'`, or `'MEW'` (stored uppercase to match the engine's `PieceType` enum member names), never updated. Mew has no evolution. King mid-game evolutions are transient engine state only.
 - `pokemon_pieces.evolution_stage` does **not apply** to kings or the queen (always 0). They are exempt from the XP-threshold evolution system.
 - Kings and queen still have `pokemon_pieces` rows and accumulate `xp_earned` in `game_pokemon_map` (XP = damage dealt). This XP is tracked but never triggers persistent evolution.
 - Only rooks, knights, and bishops have mutable `species` and a meaningful `evolution_stage`. Their evolutions happen post-game only, so the Q6 timing problem (abandoned game leaving species out of sync mid-game) does not apply to any piece — no incremental update is needed.
