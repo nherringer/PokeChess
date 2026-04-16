@@ -27,7 +27,7 @@
 - **Modes:** **PvP** — two human accounts (friends + game invites). **PvB** — one human vs one of **six bot personalities** (Bonnie → METALLIC, Kalos-themed difficulty tiers); the app calls a separate **engine** service only for the bot’s move choice.
 - **Code:** **One monorepo**: `engine/` (pure rules), `app/` (FastAPI + Postgres), `bot/` + `cpp/` (MCTS + optional C++ rollout in the engine image). **Two Docker images** (`Dockerfile.app`, `Dockerfile.engine`) built from the same repo.
 - **Truth for HTTP:** **[api_spec.md](api_spec.md)** (methods, bodies, status codes, errors); **`app/schemas.py`** (Pydantic field types); **`app/routes/`** (handler behavior); **[pokechess_data_model.md](pokechess_data_model.md)** (`games.state` / `move_history` JSON). At runtime, **`/openapi.json`** and **`/docs`** (Swagger UI).
-- **Local dev:** `docker-compose.yml` + env (`DATABASE_URL`, `ENGINE_URL`, `SECRET_KEY`, etc.). **Target production:** two ECS services on one small EC2 instance ([architecture_design_plan.md](architecture_design_plan.md)).
+- **Local dev:** `docker-compose.yml` + env (`DATABASE_URL`, `ENGINE_URL`, `JWT_SECRET_KEY`, etc.). **Target production:** two ECS services on one small EC2 instance ([architecture_design_plan.md](architecture_design_plan.md)).
 - **Engine HTTP container:** `bot/server.py` exists and is functional. `Dockerfile.engine` wires to `uvicorn bot.server:app`. The engine image builds and runs. PvB bot moves are unblocked end-to-end — see [implementation_roadmap.md](implementation_roadmap.md) for remaining polish items.
 
 ---
@@ -57,7 +57,7 @@ pokechess/                    ← single repo (may still be named PokeChess-engi
     zobrist.py                # transposition hashing (engine-side search)
   bot/
     mcts.py, ucb.py, transposition.py
-    # bot/server.py — FastAPI HTTP wrapper (required for production PvB; see roadmap)
+    # bot/server.py — FastAPI HTTP wrapper; POST /move + GET /health
   cpp/                        # optional C++ rollout; pybind11 bridge
   app/
     main.py                   # FastAPI, lifespan, DB pool, httpx engine client
@@ -228,7 +228,7 @@ All routes are mounted from `app/main.py`. Prefixes below are **full path prefix
 
 - **Access token:** JWT in `Authorization: Bearer` for API calls.
 - **Refresh token:** HttpOnly cookie (`refresh_token`) on register/login; `/auth/refresh` rotates access.
-- **Config:** `SECRET_KEY`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `ENVIRONMENT`, `CORS_ORIGINS` — see `app/config.py`. Production must not use the default `SECRET_KEY`.
+- **Config:** `JWT_SECRET_KEY`, `BOT_API_SECRET`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `ENVIRONMENT`, `CORS_ORIGINS` — see `app/config.py`. `JWT_SECRET_KEY` and `BOT_API_SECRET` must always be set (≥ 32 chars); the app raises `RuntimeError` at startup if either is missing.
 
 ### 5.3 Engine `POST /move` — **code is canonical**
 
@@ -264,9 +264,10 @@ The engine must return a **flat** JSON object the app can pass into `Move(...)`:
 |----------|------|
 | `DATABASE_URL` | AsyncPG DSN (see `config.asyncpg_dsn()`) |
 | `ENGINE_URL` | Base URL for engine (default `http://localhost:5001`) |
-| `SECRET_KEY` | JWT signing |
-| `ENVIRONMENT` | `development` vs production checks |
-| `CORS_ORIGINS` | Comma-separated origins; `*` handled specially for credentialed CORS |
+| `JWT_SECRET_KEY` | JWT signing — required, ≥ 32 chars |
+| `BOT_API_SECRET` | Shared secret for app→bot auth — required, ≥ 32 chars |
+| `ENVIRONMENT` | `development` vs `production` checks (defaults to `production`) |
+| `CORS_ORIGINS` | Comma-separated origins — required, no wildcard default |
 | `BOT_ACTIVE_WINDOW_MINUTES` | Sliding window for load-aware bot budgeting (default 22) |
 | `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS` | Token lifetimes |
 
