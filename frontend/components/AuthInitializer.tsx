@@ -27,5 +27,8 @@ export function AuthInitializer({ children }: { children: React.ReactNode }) {
     }
   }, [hydrated, accessToken, pathname, router]);
 
+  // Don't render protected content until auth state is known — prevents UI flash.
+  if (!hydrated && !PUBLIC_PATHS.includes(pathname)) return null;
+
   return <>{children}</>;
 }

@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, field_validator, model_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 # Limits merged JSON patch size for user_settings.extra_settings (abuse / accidental huge payloads).
 _MAX_EXTRA_SETTINGS_BYTES = 16_384
@@ -44,7 +44,7 @@ def _validate_extra_settings_dict(value: dict) -> dict:
 class RegisterRequest(BaseModel):
     username: str
     email: EmailStr
-    password: str
+    password: str = Field(min_length=8)
 
 
 class LoginRequest(BaseModel):
