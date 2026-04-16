@@ -73,7 +73,8 @@ docs/       Design docs, API spec, local testing runbook
 | Variable | Default | Notes |
 |---|---|---|
 | `DATABASE_URL` | `postgresql+asyncpg://pokechess:pokechess@localhost:5432/pokechess` | Matches compose service — no export needed locally |
-| `SECRET_KEY` | `dev-secret-change-me-in-production` | Must be set (≥32 chars) in non-dev |
+| `JWT_SECRET_KEY` | _(unset)_ | JWT signing secret; must be set (≥32 chars) always |
+| `BOT_API_SECRET` | _(unset)_ | Shared secret for app→bot auth; must be set (≥32 chars) always |
 | `ENGINE_URL` | `http://localhost:5001` | Same locally and in ECS (network_mode=host) |
 | `ENVIRONMENT` | `development` | Set to `production` in ECS to enforce guards |
 | `POKECHESS_TT_BUCKET` | _(unset)_ | S3 bucket for TT backups; omit to disable |

@@ -1,15 +1,13 @@
 import os
-import warnings
 
-DATABASE_URL: str = os.environ.get(
-    "DATABASE_URL", "postgresql+asyncpg://pokechess:pokechess@localhost:5432/pokechess"
-)
+DATABASE_URL: str = os.environ.get("DATABASE_URL", "")
 ENGINE_URL: str = os.environ.get("ENGINE_URL", "http://localhost:5001")
-SECRET_KEY: str = os.environ.get("SECRET_KEY", "dev-secret-change-me-in-production")
+JWT_SECRET_KEY: str = os.environ.get("JWT_SECRET_KEY", "")
+BOT_API_SECRET: str = os.environ.get("BOT_API_SECRET", "")
 ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.environ.get("REFRESH_TOKEN_EXPIRE_DAYS", "30"))
 ALGORITHM: str = "HS256"
-ENVIRONMENT: str = os.environ.get("ENVIRONMENT", "development")
+ENVIRONMENT: str = os.environ.get("ENVIRONMENT", "production")
 # A single "*" entry means “any origin”; main.py maps that to allow_origin_regex so
 # credentialed requests work (browsers disallow Origin: * with credentials).
 # Minutes a PvB player is considered "active" against a bot after their last move.
@@ -19,32 +17,42 @@ BOT_ACTIVE_WINDOW_MINUTES: int = int(os.environ.get("BOT_ACTIVE_WINDOW_MINUTES",
 
 CORS_ORIGINS: list[str] = [
     o.strip()
-    for o in os.environ.get("CORS_ORIGINS", "*").split(",")
+    for o in os.environ.get("CORS_ORIGINS", "").split(",")
     if o.strip()
 ]
 
-if SECRET_KEY == "dev-secret-change-me-in-production" and ENVIRONMENT != "development":
+if not CORS_ORIGINS:
     raise RuntimeError(
-        "SECRET_KEY is set to the default dev value in a non-development environment. "
-        "Set SECRET_KEY to a secure random string."
+        "CORS_ORIGINS is not set. "
+        "Set it via environment variable or .env file (e.g. 'https://yourdomain.com' or '*' for local dev)."
     )
 
-if SECRET_KEY == "dev-secret-change-me-in-production":
-    warnings.warn(
-        "Using default SECRET_KEY — do not use in production",
-        stacklevel=1,
+if not JWT_SECRET_KEY:
+    raise RuntimeError(
+        "JWT_SECRET_KEY is not set. "
+        "Set it via environment variable or .env file (minimum 32 characters)."
     )
 
-if len(SECRET_KEY) < 32 and ENVIRONMENT != "development":
+if len(JWT_SECRET_KEY) < 32:
     raise RuntimeError(
-        f"SECRET_KEY is too short ({len(SECRET_KEY)} chars); minimum 32 required in non-development environments."
+        f"JWT_SECRET_KEY is too short ({len(JWT_SECRET_KEY)} chars); minimum 32 required."
     )
 
-_DATABASE_URL_DEFAULT = "postgresql+asyncpg://pokechess:pokechess@localhost:5432/pokechess"
-if DATABASE_URL == _DATABASE_URL_DEFAULT and ENVIRONMENT != "development":
+if not BOT_API_SECRET:
     raise RuntimeError(
-        "DATABASE_URL is set to the default dev value in a non-development environment. "
-        "Set DATABASE_URL to the production database connection string."
+        "BOT_API_SECRET is not set. "
+        "Set it via environment variable or .env file (minimum 32 characters)."
+    )
+
+if len(BOT_API_SECRET) < 32:
+    raise RuntimeError(
+        f"BOT_API_SECRET is too short ({len(BOT_API_SECRET)} chars); minimum 32 required."
+    )
+
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL is not set. "
+        "Set it via environment variable or .env file."
     )
 
 
