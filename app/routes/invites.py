@@ -31,7 +31,9 @@ async def send_invite(body: SendInviteRequest, user: CurrentUser, db: Db):
             "A pending game invite already exists with this player",
         )
     try:
-        result = await invite_q.insert_invite_and_game(db, user["id"], body.invitee_id)
+        result = await invite_q.insert_invite_and_game(
+            db, user["id"], body.invitee_id, body.player_side
+        )
     except UniqueViolationError:
         raise AppError(409, "conflict", "An active game already exists between these players")
     return InviteActionResponse(**result)
@@ -73,12 +75,20 @@ async def respond_to_invite(
             invite_id=inv["id"], status="rejected", game_id=inv["game_id"]
         )
 
-    # Accept: update invite + initialize game in one transaction
+    # Accept: update invite + initialize game in one transaction.
+    # red_player_id / blue_player_id were set correctly when the invite was created
+    # (inviter_side resolved, sides assigned at that point), so we read them from the
+    # game row rather than re-deriving from inviter/invitee ordering.
     from ..game_logic.roster import initialize_pvp_game
 
     async with db.transaction():
         await invite_q.update_invite_status(db, invite_id, "accepted")
-        await initialize_pvp_game(db, inv["game_id"], inv["inviter_id"], inv["invitee_id"])
+        await initialize_pvp_game(
+            db,
+            inv["game_id"],
+            red_player_id=inv["red_player_id"],
+            blue_player_id=inv["blue_player_id"],
+        )
 
     return InviteActionResponse(
         invite_id=inv["id"], status="accepted", game_id=inv["game_id"]

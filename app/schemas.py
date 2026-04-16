@@ -155,6 +155,14 @@ class FriendActionResponse(BaseModel):
 
 class SendInviteRequest(BaseModel):
     invitee_id: UUID
+    player_side: str  # "red" | "blue" | "random"
+
+    @field_validator("player_side")
+    @classmethod
+    def _valid_player_side(cls, v: str) -> str:
+        if v not in ("red", "blue", "random"):
+            raise ValueError("player_side must be 'red', 'blue', or 'random'")
+        return v
 
 
 class InviteOut(BaseModel):
@@ -168,6 +176,7 @@ class InviteOut(BaseModel):
     other_username: str
     inviter_id: UUID
     invitee_id: UUID
+    inviter_side: str  # "red" | "blue" — always concrete (random resolved at creation)
 
 
 class InviteActionRequest(BaseModel):
@@ -187,8 +196,11 @@ class InviteActionResponse(BaseModel):
 class BotOut(BaseModel):
     id: UUID
     name: str
-    label: str
+    stars: int
     flavor: str
+    forced_player_side: str | None  # "red" | "blue" | None
+    accent_color: str               # CSS hex string, e.g. "#be2d2d"
+    trainer_sprite: str             # filename, e.g. "teamrocket.png"
     time_budget: float
 
 

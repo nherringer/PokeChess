@@ -45,13 +45,15 @@ CREATE TABLE bots (
 
 -- ===== game_invites =====
 CREATE TABLE game_invites (
-    id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    inviter_id  UUID        NOT NULL REFERENCES users(id),
-    invitee_id  UUID        NOT NULL REFERENCES users(id),
-    status      VARCHAR     NOT NULL DEFAULT 'pending',
-    created_at  TIMESTAMP   NOT NULL DEFAULT now(),
+    id           UUID      PRIMARY KEY DEFAULT gen_random_uuid(),
+    inviter_id   UUID      NOT NULL REFERENCES users(id),
+    invitee_id   UUID      NOT NULL REFERENCES users(id),
+    inviter_side VARCHAR   NOT NULL DEFAULT 'red',
+    status       VARCHAR   NOT NULL DEFAULT 'pending',
+    created_at   TIMESTAMP NOT NULL DEFAULT now(),
 
-    CONSTRAINT invite_status CHECK (status IN ('pending', 'accepted', 'rejected', 'expired'))
+    CONSTRAINT invite_status     CHECK (status IN ('pending', 'accepted', 'rejected', 'expired')),
+    CONSTRAINT invite_side_valid CHECK (inviter_side IN ('red', 'blue'))
 );
 
 -- ===== games =====

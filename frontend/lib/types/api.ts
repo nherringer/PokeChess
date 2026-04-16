@@ -55,6 +55,8 @@ export interface InviteOut {
   other_username: string;
   inviter_id: string;
   invitee_id: string;
+  /** Concrete side the inviter chose — always "red" or "blue" (random resolved server-side). */
+  inviter_side: "red" | "blue";
 }
 
 export interface InviteActionResponse {

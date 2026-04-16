@@ -19,28 +19,97 @@ import { dedupeInvitesByPlayerPair } from "@/lib/game/inviteUtils";
 import { useAuthStore } from "@/lib/store/authStore";
 import type { FriendUser, FriendRequest, InviteOut } from "@/lib/types/api";
 
+type InviteSide = "red" | "blue" | "random";
+
 function FriendRow({
   friend,
   onInvite,
 }: {
   friend: FriendUser;
-  onInvite: (userId: string) => void;
+  onInvite: (userId: string, side: InviteSide) => void;
 }) {
+  const [picking, setPicking] = useState(false);
+  const [selectedSide, setSelectedSide] = useState<InviteSide | null>(null);
   const initials = friend.username.slice(0, 2).toUpperCase();
+
+  const handleConfirm = () => {
+    if (!selectedSide) return;
+    onInvite(friend.user_id, selectedSide);
+    setPicking(false);
+    setSelectedSide(null);
+  };
+
+  const handleCancel = () => {
+    setPicking(false);
+    setSelectedSide(null);
+  };
+
+  const sideOptions: { value: InviteSide; label: string; color: string }[] = [
+    { value: "red",    label: "RED",    color: "#d93737" },
+    { value: "blue",   label: "BLUE",   color: "#3b5ee5" },
+    { value: "random", label: "RANDOM", color: "#666" },
+  ];
+
   return (
-    <div className="flex items-center gap-3 py-3 border-b border-white/5 last:border-0">
-      <div className="w-10 h-10 rounded-full bg-poke-blue flex items-center justify-center font-bold text-white text-sm shrink-0">
-        {initials}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="font-bold text-white text-sm">{friend.username}</span>
-          <span className="w-2 h-2 rounded-full bg-green-400 shrink-0" title="Online" />
+    <div className="py-3 border-b border-white/5 last:border-0">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-full bg-poke-blue flex items-center justify-center font-bold text-white text-sm shrink-0">
+          {initials}
         </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-white text-sm">{friend.username}</span>
+            <span className="w-2 h-2 rounded-full bg-green-400 shrink-0" title="Online" />
+          </div>
+        </div>
+        {picking ? (
+          <button
+            onClick={handleCancel}
+            className="text-white/40 hover:text-white/70 text-lg leading-none px-1"
+            aria-label="Cancel"
+          >
+            ×
+          </button>
+        ) : (
+          <Button size="sm" variant="secondary" onClick={() => setPicking(true)}>
+            Challenge ▶
+          </Button>
+        )}
       </div>
-      <Button size="sm" variant="secondary" onClick={() => onInvite(friend.user_id)}>
-        Challenge ▶
-      </Button>
+
+      {/* Inline side picker — shown when Challenge is clicked */}
+      {picking && (
+        <div className="mt-3 ml-13 pl-1 flex flex-col gap-2">
+          <p className="text-xs text-white/50">Choose your team:</p>
+          <div className="flex gap-2">
+            {sideOptions.map(({ value, label, color }) => {
+              const active = selectedSide === value;
+              return (
+                <button
+                  key={value}
+                  onClick={() => setSelectedSide(value)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold border transition-all"
+                  style={{
+                    borderColor: color,
+                    color: active ? "#fff" : color,
+                    backgroundColor: active ? color : "transparent",
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={handleConfirm}
+            disabled={!selectedSide}
+          >
+            Send invite
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -81,6 +150,11 @@ function IncomingGameInviteRow({
   onAccept: () => void;
   onDecline: () => void;
 }) {
+  // The invitee plays the opposite side from the inviter.
+  const inviteeSide = inv.inviter_side === "red" ? "blue" : "red";
+  const sideColor = inviteeSide === "red" ? "#d93737" : "#3b5ee5";
+  const sideLabel = inviteeSide.toUpperCase();
+
   return (
     <div className="flex items-center gap-3 py-3 border-b border-white/5 last:border-0">
       <div className="w-10 h-10 rounded-full bg-red-team/30 flex items-center justify-center font-bold text-white text-sm shrink-0">
@@ -88,7 +162,9 @@ function IncomingGameInviteRow({
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-white text-sm font-bold truncate">{inv.other_username}</p>
-        <p className="text-text-muted text-xs">Wants to battle</p>
+        <p className="text-[11px] font-semibold mt-0.5" style={{ color: sideColor }}>
+          You play as {sideLabel}
+        </p>
       </div>
       <div className="flex gap-2 shrink-0">
         <Button size="sm" variant="secondary" onClick={onAccept}>
@@ -181,10 +257,10 @@ export default function FriendsPage() {
     );
   }, [invitesDeduped, userId]);
 
-  const handleInvite = async (userId: string) => {
+  const handleInvite = async (userId: string, side: InviteSide) => {
     setInviteActionError(null);
     try {
-      const res = await createInvite(userId);
+      const res = await createInvite(userId, side);
       await refreshInvites();
       router.push(
         `/play/lobby?mode=pvp&inviteId=${res.invite_id}&gameId=${res.game_id}`

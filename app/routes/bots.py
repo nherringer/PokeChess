@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from ..auth import Db
+from ..personas import get_persona
 from ..schemas import BotOut
 
 router = APIRouter(prefix="/bots", tags=["bots"])
@@ -12,12 +13,22 @@ router = APIRouter(prefix="/bots", tags=["bots"])
 async def list_bots(db: Db):
     rows = await db.fetch(
         """
-        SELECT id, name,
-               params->>'label'        AS label,
-               params->>'flavor'       AS flavor,
-               (params->>'time_budget')::float AS time_budget
+        SELECT id, name, (params->>'time_budget')::float AS time_budget
         FROM bots
         ORDER BY (params->>'time_budget')::float ASC
         """
     )
-    return [BotOut(**dict(r)) for r in rows]
+    result = []
+    for r in rows:
+        p = get_persona(r["name"])
+        result.append(BotOut(
+            id=r["id"],
+            name=r["name"],
+            stars=p.stars,
+            flavor=p.flavor,
+            forced_player_side=p.forced_player_side,
+            accent_color=p.accent_color,
+            trainer_sprite=p.trainer_sprite,
+            time_budget=r["time_budget"],
+        ))
+    return result

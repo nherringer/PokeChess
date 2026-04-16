@@ -146,6 +146,10 @@ async def initialize_pvp_game(
     Called when a PvP invite is accepted. Builds initial state, injects piece UUIDs,
     writes state to the games row, creates game_pokemon_map entries.
 
+    red_player_id and blue_player_id are read from the game row (set correctly at
+    invite-creation time based on the inviter's chosen side). Do not derive them
+    from inviter/invitee ordering — that ordering is no longer meaningful.
+
     Caller must wrap this in a transaction.
     """
     red_roster = await ensure_roster(db, red_player_id, "red")
