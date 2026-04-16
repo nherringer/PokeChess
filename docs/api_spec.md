@@ -133,7 +133,7 @@ User routes are mounted under the **`/users`** prefix (`app/routes/users.py`). A
 |--------|------|--------------|------------------|
 | `GET` | `/bots` | — | **200** JSON array of `BotOut` |
 
-**`BotOut`:** `id`, `name`, `label`, `flavor`, `time_budget` (from `bots.params`, ordered ascending by `time_budget` in the list query).
+**`BotOut`:** `id`, `name`, `stars` (1–5 difficulty indicator), `flavor`, `forced_player_side` (`"red" | "blue" | null`), `accent_color` (CSS hex), `trainer_sprite` (filename), `time_budget` (seconds; from `bots.params`, ordered ascending in the list query).
 
 ---
 
@@ -175,16 +175,17 @@ Bearer required.
 | `GET` | `/game-invites` | — | **200** JSON array of `InviteOut` |
 | `POST` | `/game-invites` | `SendInviteRequest` | **201** `InviteActionResponse` |
 | `PUT` | `/game-invites/{invite_id}` | `InviteActionRequest` | **200** `InviteActionResponse` |
+| `DELETE` | `/game-invites/{invite_id}` | — | **200** `InviteActionResponse` (inviter-only cancel) |
 
-**`SendInviteRequest`:** `invitee_id` (UUID). Invitee must already be an **accepted friend** (otherwise 404 `Invitee is not a friend`).
+**`SendInviteRequest`:** `invitee_id` (UUID), `player_side` — **`"red"`**, **`"blue"`**, or **`"random"`** (inviter's chosen team; `"random"` is resolved to a concrete side at creation time). Invitee must already be an **accepted friend** (otherwise 404 `Invitee is not a friend`).
 
 **`InviteActionRequest`:** `action` — **`"accept"`** or **`"reject"`**.
 
-**`InviteOut`:** `id`, `from_user_id`, `from_username`, `game_id`, `created_at`.
+**`InviteOut`:** `id`, `game_id`, `created_at`, `direction` (`"incoming" | "outgoing"`), `other_user_id`, `other_username`, `inviter_id`, `invitee_id`, `inviter_side` (`"red" | "blue"` — always concrete).
 
 **`InviteActionResponse`:** `invite_id`, `status`, `game_id`.
 
-**Behavior:** `POST` creates a **pending** game row and invite. **Accept** initializes the PvP game state (roster, etc.); **reject** marks invite rejected.
+**Behavior:** `POST` creates a **pending** game row and invite. **Accept** initializes the PvP game state (roster, etc.); **reject** marks invite rejected. **DELETE** lets the inviter withdraw a still-pending invite (status becomes `rejected`).
 
 **Typical errors:**
 
@@ -193,6 +194,7 @@ Bearer required.
 | Not friends with invitee | 404 |
 | Active game already exists between pair | 409 |
 | Invite not found / not invitee / not pending | 404 / 403 / 400 |
+| `DELETE` by non-inviter / invite not pending | 403 / 400 |
 
 ---
 

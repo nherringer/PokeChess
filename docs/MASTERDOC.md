@@ -206,13 +206,14 @@ All routes are mounted from `app/main.py`. Prefixes below are **full path prefix
 | `GET` | `/users/me` | Authenticated user profile + pieces |
 | `POST` | `/users/me/starter` | Idempotent “claim starter roster” (returns pieces; register/login also seeds roster when empty) |
 | `PATCH` | `/users/me/settings` | User settings (`board_theme`, `extra_settings` JSONB with API validation) |
-| `GET` | `/bots` | List bot personalities (`BotOut`: id, name, label, flavor, `time_budget`) — **no Bearer required** |
+| `GET` | `/bots` | List bot personalities (`BotOut`: id, name, stars, flavor, `forced_player_side`, `accent_color`, `trainer_sprite`, `time_budget`) — **no Bearer required** |
 | `GET` | `/friends` | Friends + incoming/outgoing friend requests |
 | `POST` | `/friends` | Send friend request by username |
 | `PUT` | `/friends/{friendship_id}` | Accept or reject (`action` in body) |
 | `GET` | `/game-invites` | Pending invites |
-| `POST` | `/game-invites` | Create invite + pending game (must be friends) |
+| `POST` | `/game-invites` | Create invite + pending game (must be friends); body: `invitee_id`, `player_side` (`"red"`/`"blue"`/`"random"`) |
 | `PUT` | `/game-invites/{invite_id}` | Accept/reject invite |
+| `DELETE` | `/game-invites/{invite_id}` | Inviter-only cancel of a pending invite |
 | `GET` | `/games` | Active + completed lists (**GameSummary** — no heavy JSONB). Includes **`opponent_display`** and **`my_side`** for UI copy (vs opponent / whose turn). **Completed** list is capped at **10** rows (most recently updated); active games are not capped (`app/db/queries/games.py`). |
 | `POST` | `/games` | Create **PvB** game only — body requires `bot_id` and `player_side` (`CreateGameRequest`). **PvP** games are created via **`POST /game-invites`** (pending row + invite), then activated on accept — not via this endpoint. |
 | `GET` | `/games/{game_id}` | **GameDetail** — full `state` + `move_history` |

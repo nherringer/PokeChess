@@ -20,39 +20,33 @@ from engine.state import GameState, Team
 from .serialization import IdMap, state_to_dict
 
 
-# Back-rank layout: col → (role, species)
-# Matches _place_starting_pieces() in engine/state.py
-_BACK_RANK_RED = {
-    0: ("rook", "squirtle"),
-    1: ("knight", "charmander"),
-    2: ("bishop", "bulbasaur"),
-    3: ("queen", "mew"),
-    # 4: king — handled separately (pikachu for red)
-    5: ("bishop", "bulbasaur"),
-    6: ("knight", "charmander"),
-    7: ("rook", "squirtle"),
-}
-_BACK_RANK_BLUE = {
-    0: ("rook", "squirtle"),
-    1: ("knight", "charmander"),
-    2: ("bishop", "bulbasaur"),
-    3: ("queen", "mew"),
-    # 4: king — handled separately (eevee for blue)
-    5: ("bishop", "bulbasaur"),
-    6: ("knight", "charmander"),
-    7: ("rook", "squirtle"),
+# Back-rank layout: col → role. Both sides share the same layout; the king at
+# col 4 is placed separately so the caller can pick PIKACHU (red) vs EEVEE
+# (blue). Mirrors `_place_starting_pieces()` in engine/state.py — see that
+# function for which species lands on each square.
+_BACK_RANK_LAYOUT: dict[int, str] = {
+    0: "rook",
+    1: "knight",
+    2: "bishop",
+    3: "queen",
+    # 4: king — placed separately by side
+    5: "bishop",
+    6: "knight",
+    7: "rook",
 }
 
-# Full roster definition: (role, species) tuples in creation order
+# Full roster definition: (role, species) tuples in creation order.
+# Species casing matches `insert_starter_pieces` in app/db/queries/pieces.py so
+# any user seeded via either path has consistent species strings.
 _ROSTER = [
     ("king", None),    # species depends on side
-    ("queen", "mew"),
-    ("rook", "squirtle"),
-    ("rook", "squirtle"),
-    ("knight", "charmander"),
-    ("knight", "charmander"),
-    ("bishop", "bulbasaur"),
-    ("bishop", "bulbasaur"),
+    ("queen", "MEW"),
+    ("rook", "SQUIRTLE"),
+    ("rook", "SQUIRTLE"),
+    ("knight", "CHARMANDER"),
+    ("knight", "CHARMANDER"),
+    ("bishop", "BULBASAUR"),
+    ("bishop", "BULBASAUR"),
 ]
 
 
@@ -65,7 +59,7 @@ async def ensure_roster(db: asyncpg.Connection, user_id: UUID, side: str) -> lis
     if existing:
         return [dict(r) for r in existing]
 
-    king_species = "pikachu" if side == "red" else "eevee"
+    king_species = "PIKACHU" if side == "red" else "EEVEE"
     pieces = []
     for role, species in _ROSTER:
         sp = king_species if role == "king" else species
@@ -89,7 +83,6 @@ def build_id_map(roster: list[dict], side: str) -> IdMap:
     left-to-right for duplicates (sorted by creation order = insert order).
     """
     back_row = 0 if side == "red" else 7
-    layout = _BACK_RANK_RED if side == "red" else _BACK_RANK_BLUE
 
     # Group roster pieces by role
     by_role: dict[str, list[dict]] = {}
@@ -104,7 +97,7 @@ def build_id_map(roster: list[dict], side: str) -> IdMap:
         id_map[(back_row, 4)] = str(kings[0]["id"])
 
     # Non-king named pieces from the layout
-    for col, (role, _species) in layout.items():
+    for col, role in _BACK_RANK_LAYOUT.items():
         pieces = by_role.get(role, [])
         if not pieces:
             continue
