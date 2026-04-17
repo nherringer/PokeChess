@@ -112,7 +112,7 @@ User routes are mounted under the **`/users`** prefix (`app/routes/users.py`). A
 
 **`UserProfile`:** `id`, `username`, `email`, `created_at`, `pieces` (list of `PieceOut`).
 
-**`PieceOut`:** `id`, `role`, `species`, `xp`, `evolution_stage`.
+**`PieceOut`:** `id`, `role`, `species`, `set_side` (`"red"` or `"blue"`), `xp`, `evolution_stage`.
 
 **`StarterResponse`:** `pieces` (list of `PieceOut`). **Idempotent** — if the user already has roster rows, returns existing pieces with **201**.
 
@@ -136,7 +136,7 @@ User routes are mounted under the **`/users`** prefix (`app/routes/users.py`). A
 |--------|------|--------------|------------------|
 | `GET` | `/bots` | — | **200** JSON array of `BotOut` |
 
-**`BotOut`:** `id`, `name`, `stars` (1–5 difficulty indicator), `flavor`, `forced_player_side` (`"red" | "blue" | null`), `accent_color` (CSS hex), `trainer_sprite` (filename), `time_budget` (seconds; from `bots.params`, ordered ascending in the list query).
+**`BotOut`:** `id`, `name`, `stars` (1–6 difficulty indicator; 6 = METALLIC), `flavor`, `forced_player_side` (`"red" | "blue" | null`), `accent_color` (CSS hex), `trainer_sprite` (filename), `time_budget` (seconds; from `bots.params`, ordered ascending in the list query; `null` if not set in the row).
 
 ---
 

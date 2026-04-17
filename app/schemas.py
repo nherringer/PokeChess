@@ -202,7 +202,7 @@ class BotOut(BaseModel):
     forced_player_side: str | None  # "red" | "blue" | None
     accent_color: str               # CSS hex string, e.g. "#be2d2d"
     trainer_sprite: str             # filename, e.g. "teamrocket.png"
-    time_budget: float
+    time_budget: float | None = None
 
 
 # ---------------------------------------------------------------------------

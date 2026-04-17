@@ -30,8 +30,8 @@ async def register(request: Request, body: RegisterRequest, response: Response, 
         raise AppError(409, "conflict", "Username or email already exists")
 
     await settings_q.create_default_settings(db, user["id"])
-    if not await pieces_q.has_roster(db, user["id"]):
-        await pieces_q.insert_starter_pieces(db, user["id"])
+    # User was just created — no race possible, insert unconditionally.
+    await pieces_q.insert_starter_pieces(db, user["id"])
 
     access = create_access_token(user["id"])
     refresh = create_refresh_token(user["id"])
@@ -54,8 +54,10 @@ async def login(request: Request, body: LoginRequest, response: Response, db: Db
     if user is None or not verify_password(body.password, user["password_hash"]):
         raise AppError(401, "unauthorized", "Invalid email or password")
 
-    if not await pieces_q.has_roster(db, user["id"]):
-        await pieces_q.insert_starter_pieces(db, user["id"])
+    async with db.transaction():
+        await db.fetchrow("SELECT id FROM users WHERE id = $1 FOR UPDATE", user["id"])
+        if not await pieces_q.has_roster(db, user["id"]):
+            await pieces_q.insert_starter_pieces(db, user["id"])
 
     access = create_access_token(user["id"])
     refresh = create_refresh_token(user["id"])

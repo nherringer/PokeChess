@@ -65,11 +65,13 @@ function PvPLobby({ inviteId, gameId }: { inviteId: string; gameId: string }) {
         if (g.status === "active") {
           router.replace(`/game/${gameId}`);
         } else {
-          router.replace("/");
+          // Invite was declined or expired — send inviter back to the play screen.
+          router.replace("/play");
         }
       })
       .catch(() => {
-        router.replace("/");
+        // gameId missing or fetch failed — fall back to play screen.
+        router.replace("/play");
       });
   }, [invitesLoading, invites, inviteId, gameId, router]);
 

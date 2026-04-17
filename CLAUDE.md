@@ -72,7 +72,7 @@ docs/       Design docs, API spec, local testing runbook
 
 | Variable | Default | Notes |
 |---|---|---|
-| `DATABASE_URL` | `postgresql+asyncpg://pokechess:pokechess@localhost:5432/pokechess` | Matches compose service — no export needed locally |
+| `DATABASE_URL` | _(unset — required)_ | App raises `RuntimeError` on startup if missing; set in `.env` or Compose |
 | `JWT_SECRET_KEY` | _(unset)_ | JWT signing secret; must be set (≥32 chars) always |
 | `BOT_API_SECRET` | _(unset)_ | Shared secret for app→bot auth; must be set (≥32 chars) always |
 | `ENGINE_URL` | `http://localhost:5001` | Same locally and in ECS (network_mode=host) |

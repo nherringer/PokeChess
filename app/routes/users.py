@@ -26,10 +26,12 @@ async def get_me(user: CurrentUser, db: Db):
 async def claim_starter(user: CurrentUser, db: Db):
     """Seed the authenticated user's first PokeChess set. Idempotent — returns
     existing pieces if already claimed."""
-    if await pieces_q.has_roster(db, user["id"]):
-        existing = await pieces_q.get_pieces(db, user["id"])
-        return StarterResponse(pieces=[PieceOut(**p) for p in existing])
-    inserted = await pieces_q.insert_starter_pieces(db, user["id"])
+    async with db.transaction():
+        await db.fetchrow("SELECT id FROM users WHERE id = $1 FOR UPDATE", user["id"])
+        if await pieces_q.has_roster(db, user["id"]):
+            existing = await pieces_q.get_pieces(db, user["id"])
+            return StarterResponse(pieces=[PieceOut(**p) for p in existing])
+        inserted = await pieces_q.insert_starter_pieces(db, user["id"])
     return StarterResponse(pieces=[PieceOut(**p) for p in inserted])
 
 

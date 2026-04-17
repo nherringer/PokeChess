@@ -13,9 +13,10 @@ router = APIRouter(prefix="/bots", tags=["bots"])
 async def list_bots(db: Db):
     rows = await db.fetch(
         """
-        SELECT id, name, (params->>'time_budget')::float AS time_budget
+        SELECT id, name,
+               COALESCE((params->>'time_budget')::float, 3.0) AS time_budget
         FROM bots
-        ORDER BY (params->>'time_budget')::float ASC
+        ORDER BY COALESCE((params->>'time_budget')::float, 3.0) ASC
         """
     )
     result = []
