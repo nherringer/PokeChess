@@ -87,6 +87,8 @@ Unexpected internal failures may return **500** without the `AppError` shape.
 
 **Cookies on register/login:** Sets `refresh_token` as described in §1.2.
 
+**Rate limiting:** Auth routes use **SlowAPI** with per-client-IP limits (`app/routes/auth.py`): `POST /auth/register` **3/minute**, `POST /auth/login` **10/minute**, `POST /auth/refresh` **20/minute**. When exceeded, the response is **429 Too Many Requests** (SlowAPI default error body).
+
 **Typical errors:**
 
 | Condition | Status | Notes |
@@ -94,6 +96,7 @@ Unexpected internal failures may return **500** without the `AppError` shape.
 | Duplicate username/email on register | 409 | `conflict` |
 | Bad login credentials | 401 | `unauthorized` |
 | Missing/invalid refresh cookie or token | 401 | `unauthorized` |
+| Rate limit exceeded (auth routes) | 429 | SlowAPI |
 
 ---
 

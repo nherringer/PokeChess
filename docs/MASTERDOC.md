@@ -2,7 +2,7 @@
 
 **Purpose:** This document is the **primary reference** for the PokeChess codebase and product: how the monorepo is organized, how requests and game state flow through the system, what the HTTP API exposes, how data is stored, how the bot and load-aware budgeting work, what the planned frontend must do, and how target deployment fits. Other files under `docs/` add depth (full SQL, exhaustive JSON examples, game rules prose, UX mockups). **If you read one file, read this one**; use the links when you need the full detail of a subsystem.
 
-**Last updated:** April 2026
+**Last updated:** 16 April 2026
 
 ---
 
@@ -229,10 +229,14 @@ All routes are mounted from `app/main.py`. Prefixes below are **full path prefix
 - **Access token:** JWT in `Authorization: Bearer` for API calls.
 - **Refresh token:** HttpOnly cookie (`refresh_token`) on register/login; `/auth/refresh` rotates access.
 - **Config:** `JWT_SECRET_KEY`, `BOT_API_SECRET`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `ENVIRONMENT`, `CORS_ORIGINS` — see `app/config.py`. `JWT_SECRET_KEY` and `BOT_API_SECRET` must always be set (≥ 32 chars); the app raises `RuntimeError` at startup if either is missing.
+- **Rate limiting (app):** **SlowAPI** in `app/main.py` applies per-client-IP limits on auth routes in `app/routes/auth.py`: `POST /auth/register` **3/minute**, `POST /auth/login` **10/minute**, `POST /auth/refresh` **20/minute**. When exceeded, responses are **429**; clients should back off. **Reverse-proxy** or **WAF** limits in front of the app remain a good extra layer; app limits are not a substitute for volumetric DDoS protection.
+- **Registration password:** `RegisterRequest` enforces a minimum password length (**8** characters) via Pydantic — see `app/schemas.py`.
 
 ### 5.3 Engine `POST /move` — **code is canonical**
 
-The app sends (`app/engine_client.py`):
+The app calls the engine over HTTP (`app/engine_client.py`). **`POST /move`** must include header **`X-Bot-Api-Secret`** with the same value as **`BOT_API_SECRET`** in config; **`bot/server.py`** compares it to the engine process’s **`BOT_API_SECRET`** (constant-time) and returns **401** if missing or wrong. **`GET /health`** is **not** authenticated — for liveness only. App and engine containers must share one secret (e.g. identical env in compose or matching secrets in ECS).
+
+JSON body:
 
 ```json
 {
@@ -265,7 +269,7 @@ The engine must return a **flat** JSON object the app can pass into `Move(...)`:
 | `DATABASE_URL` | AsyncPG DSN (see `config.asyncpg_dsn()`) |
 | `ENGINE_URL` | Base URL for engine (default `http://localhost:5001`) |
 | `JWT_SECRET_KEY` | JWT signing — required, ≥ 32 chars |
-| `BOT_API_SECRET` | Shared secret for app→bot auth — required, ≥ 32 chars |
+| `BOT_API_SECRET` | Same value on app and engine; app sends `X-Bot-Api-Secret` on `POST /move` — required, ≥ 32 chars |
 | `ENVIRONMENT` | `development` vs `production` checks (defaults to `production`) |
 | `CORS_ORIGINS` | Comma-separated origins — required, no wildcard default |
 | `BOT_ACTIVE_WINDOW_MINUTES` | Sliding window for load-aware bot budgeting (default 22) |
@@ -446,13 +450,14 @@ Use **git history** on `docs/` (e.g. `git log -- docs/`) to see what changed rec
 
 ## 14. Near-term engineering tasks (pre-production)
 
-Items that are known, scoped, and should be resolved before the service sees real traffic. These are not blockers for local development or PvP, but are important before public launch.
+Items that are known, scoped, and should be resolved before the service sees real traffic. **Auth routes already have per-IP rate limits** (§5.2); the table below lists **remaining** pre-production gaps. These are not blockers for local development or PvP, but are important before public launch.
 
 | Priority | Task | Detail |
 |----------|------|---------|
-| **High** | **Add auth rate limiting** | `/auth/login` and `/auth/register` have no rate limiting or lockout. Add `slowapi` middleware or configure reverse-proxy limits before exposing to the public internet. Credential stuffing and registration spam are the primary risks. |
+| **High** | **SES email verification on registration** | Verify new users’ email via **Amazon SES** (or equivalent) before treating the account as fully active or before allowing login. Requires SES identity, templates, and handling bounces/complaints — see AWS SES docs when implementing. |
+| **High** | **Persist refresh tokens in the database** | Today refresh tokens are **JWTs** in HttpOnly cookies with no server-side session rows (`app/routes/auth.py` only decodes the JWT and checks the user exists). Store **hashed** refresh token records per device/session to support **revocation**, **rotation**, and **audit** (e.g. logout-all, compromised token). |
 | **High** | **Resolve `FOR UPDATE` lock across engine HTTP** | See §13. Splitting `POST /games/{id}/move` into two transactions removes the scalability risk. Requires careful re-validation between transactions to handle concurrent resigns. |
-| **Medium** | **Document first-run DB setup** | `docker compose up` does not apply `app/db/schema.sql`. Add an explicit copy-paste `psql` command to `app/README.md` and/or a Compose init container so new contributors aren't blocked. |
+| **Medium** | **Document local testing setup** | One place (e.g. `app/README.md` or a short `docs/` note linked from MASTERDOC) should walk through **local** runs: required env vars (`DATABASE_URL`, `ENGINE_URL`, `JWT_SECRET_KEY`, `BOT_API_SECRET`, `CORS_ORIGINS`, …), bringing up app + engine (e.g. Compose), and **applying `app/db/schema.sql` to Postgres** — `docker compose up` alone does not load the schema, which blocks DB-backed flows until migrations or a manual `psql` apply. Optional: Compose init service or documented one-liner. |
 
 ---
 
