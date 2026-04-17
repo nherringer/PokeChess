@@ -57,11 +57,9 @@ When a player's Pokemon moves through the tall grass and reaches a square occupi
 ### Mew Catch Rates
 | HP State | Catch Rate |
 |---|---|
-| Full health | 10% |
-| Above 75% health | 25% |
-| Above 50% health | 40% |
-| Above 25% health | 60% |
-| 25% health or below | 75% |
+| Full health (100%) | 20% |
+| 50% ≤ HP < 100% | 40% |
+| HP < 50% | 60% |
 
 ### Capture Outcome
 - On a **successful capture**, the WP is removed from the board and its held item appears on the **starting square corresponding to that pokepiece type** (e.g. a captured Rook WP places its item on a1 or h1).
