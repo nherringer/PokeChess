@@ -2,10 +2,11 @@
 Roster creation and piece-UUID injection for new games.
 
 Each user's persistent roster (pokemon_pieces table):
-  1 king, 1 queen, 2 rooks, 2 knights, 2 bishops = 8 pieces.
+  16 pieces total — 8 red (Pikachu king) + 8 blue (Eevee king).
+  Each set: 1 king, 1 queen, 2 rooks, 2 knights, 2 bishops.
 
-The roster is created at first game. UUIDs are injected into the starting
-board's named pieces; pawns (pokeball/safetyball) get id=None.
+UUIDs are injected into the starting board's named pieces;
+pawns (pokeball/safetyball) get id=None.
 """
 
 from __future__ import annotations
@@ -35,44 +36,51 @@ _BACK_RANK_LAYOUT: dict[int, str] = {
     7: "rook",
 }
 
-# Full roster definition: (role, species) tuples in creation order.
+# Both rosters: (set_side, role, species). Red set first, blue set second.
 # Species casing matches `insert_starter_pieces` in app/db/queries/pieces.py so
 # any user seeded via either path has consistent species strings.
-_ROSTER = [
-    ("king", None),    # species depends on side
-    ("queen", "MEW"),
-    ("rook", "SQUIRTLE"),
-    ("rook", "SQUIRTLE"),
-    ("knight", "CHARMANDER"),
-    ("knight", "CHARMANDER"),
-    ("bishop", "BULBASAUR"),
-    ("bishop", "BULBASAUR"),
+_BOTH_ROSTERS = [
+    ("red",  "king",   "PIKACHU"),
+    ("red",  "queen",  "MEW"),
+    ("red",  "rook",   "SQUIRTLE"),
+    ("red",  "rook",   "SQUIRTLE"),
+    ("red",  "knight", "CHARMANDER"),
+    ("red",  "knight", "CHARMANDER"),
+    ("red",  "bishop", "BULBASAUR"),
+    ("red",  "bishop", "BULBASAUR"),
+    ("blue", "king",   "EEVEE"),
+    ("blue", "queen",  "MEW"),
+    ("blue", "rook",   "SQUIRTLE"),
+    ("blue", "rook",   "SQUIRTLE"),
+    ("blue", "knight", "CHARMANDER"),
+    ("blue", "knight", "CHARMANDER"),
+    ("blue", "bishop", "BULBASAUR"),
+    ("blue", "bishop", "BULBASAUR"),
 ]
 
 
 async def ensure_roster(db: asyncpg.Connection, user_id: UUID, side: str) -> list[dict]:
-    """Create the user's pokemon_pieces if they don't exist yet. Return the roster."""
+    """Return the 8-piece set for the given side, creating all 16 pieces if needed."""
     existing = await db.fetch(
-        "SELECT id, role, species FROM pokemon_pieces WHERE owner_id = $1 ORDER BY created_at FOR UPDATE",
-        user_id,
+        "SELECT id, role, species FROM pokemon_pieces WHERE owner_id = $1 AND set_side = $2 ORDER BY created_at FOR UPDATE",
+        user_id, side,
     )
     if existing:
         return [dict(r) for r in existing]
 
-    king_species = "PIKACHU" if side == "red" else "EEVEE"
-    pieces = []
-    for role, species in _ROSTER:
-        sp = king_species if role == "king" else species
+    side_pieces = []
+    for set_color, role, species in _BOTH_ROSTERS:
         row = await db.fetchrow(
             """
-            INSERT INTO pokemon_pieces (owner_id, role, species)
-            VALUES ($1, $2, $3)
+            INSERT INTO pokemon_pieces (owner_id, role, species, set_side)
+            VALUES ($1, $2, $3, $4)
             RETURNING id, role, species
             """,
-            user_id, role, sp,
+            user_id, role, species, set_color,
         )
-        pieces.append(dict(row))
-    return pieces
+        if set_color == side:
+            side_pieces.append(dict(row))
+    return side_pieces
 
 
 def build_id_map(roster: list[dict], side: str) -> IdMap:

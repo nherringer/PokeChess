@@ -71,6 +71,7 @@ class PieceOut(BaseModel):
     id: UUID
     role: str
     species: str
+    set_side: str
     xp: int
     evolution_stage: int
 

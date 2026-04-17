@@ -117,6 +117,7 @@ CREATE TABLE pokemon_pieces (
     species          VARCHAR     NOT NULL,
     xp               INT         NOT NULL DEFAULT 0,
     evolution_stage   INT         NOT NULL DEFAULT 0,
+    set_side         VARCHAR     NOT NULL CHECK (set_side IN ('red', 'blue')),
     created_at       TIMESTAMP   NOT NULL DEFAULT now(),
 
     CONSTRAINT piece_role CHECK (role IN ('king', 'queen', 'rook', 'bishop', 'knight'))
