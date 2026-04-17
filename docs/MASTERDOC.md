@@ -2,7 +2,7 @@
 
 **Purpose:** This document is the **primary reference** for the PokeChess codebase and product: how the monorepo is organized, how requests and game state flow through the system, what the HTTP API exposes, how data is stored, how the bot and load-aware budgeting work, what the planned frontend must do, and how target deployment fits. Other files under `docs/` add depth (full SQL, exhaustive JSON examples, game rules prose, UX mockups). **If you read one file, read this one**; use the links when you need the full detail of a subsystem.
 
-**Last updated:** 16 April 2026
+**Last updated:** 17 April 2026
 
 ---
 
@@ -275,11 +275,15 @@ The engine must return a **flat** JSON object the app can pass into `Move(...)`:
 | `BOT_ACTIVE_WINDOW_MINUTES` | Sliding window for load-aware bot budgeting (default 22) |
 | `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS` | Token lifetimes |
 
+**`.env.example` and Compose:** The repo **`.env.example`** lists `DATABASE_URL` and `ENGINE_URL` so the full app surface is visible. For **`docker compose`**, **`docker-compose.yml`** still sets `DATABASE_URL` and `ENGINE_URL` on `pokechess-app` (from `POSTGRES_*` and service names), so you can leave those lines empty in `.env` when using Compose only. For **production** (e.g. ECS) or **running the app without Compose**, set `DATABASE_URL` to your Postgres DSN and `ENGINE_URL` to the engine base URL as needed.
+
 ---
 
 ## 6. Data model (concise reference)
 
 **Full DDL and examples:** `app/db/schema.sql` and [pokechess_data_model.md](pokechess_data_model.md).
+
+**Production DB and schema changes:** There is **no Alembic** (or other migration runner) in this repo — see [implementation_roadmap.md](implementation_roadmap.md). **New** databases: apply **`app/db/schema.sql`** once (e.g. `psql $DATABASE_URL -f app/db/schema.sql`). **Existing** production or staging databases must be upgraded with **manual** `ALTER TABLE` / data backfill steps whenever `schema.sql` changes; plan upgrades by diffing the file against your live DDL. Optional future work: versioned migrations — not required for the current codebase.
 
 ### 6.1 Core tables
 
