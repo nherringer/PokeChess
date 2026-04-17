@@ -64,14 +64,16 @@ interface RankCellProps {
   fileLabel: string;
   sameSpeCount: number;
   pieceIndex: number;
+  side: "red" | "blue";
 }
 
-function RankCell({ piece, fileLabel, sameSpeCount, pieceIndex }: RankCellProps) {
+function RankCell({ piece, fileLabel, sameSpeCount, pieceIndex, side }: RankCellProps) {
   const sk = piece.species.toUpperCase();
   const emoji = PIECE_TYPE_EMOJIS[sk] ?? "?";
   const label = PIECE_TYPE_LABELS[sk] ?? piece.species;
   const type = POKEMON_TYPE_FOR_PIECE[sk];
   const threshold = getXpThreshold(piece.evolution_stage);
+  const borderColor = side === "red" ? "border-red-team" : "border-poke-blue";
 
   return (
     <div className="flex w-[4.5rem] shrink-0 flex-col items-center gap-1">
@@ -81,7 +83,7 @@ function RankCell({ piece, fileLabel, sameSpeCount, pieceIndex }: RankCellProps)
           speciesOrPieceType={piece.species}
           emojiFallback={emoji}
           sizePx={56}
-          className="border-2 border-poke-blue"
+          className={`border-2 ${borderColor}`}
         />
         <span className="mt-1.5 text-center font-display text-[11px] font-bold leading-tight text-white line-clamp-2">
           {label}
@@ -108,63 +110,50 @@ function RankCell({ piece, fileLabel, sameSpeCount, pieceIndex }: RankCellProps)
   );
 }
 
-/** e-file: Red king (Pikachu) vs Blue king (Eevee); XP follows your stored king row. */
-function KingsRankCell({
-  kingPiece,
-  fileLabel,
-  sameSpeCount,
-  pieceIndex,
-}: {
-  kingPiece: PieceOut;
-  fileLabel: string;
-  sameSpeCount: number;
-  pieceIndex: number;
-}) {
-  const sk = kingPiece.species.toUpperCase();
-  const threshold = getXpThreshold(kingPiece.evolution_stage);
-  const storedLabel = PIECE_TYPE_LABELS[sk] ?? kingPiece.species;
+interface SetRowProps {
+  pieces: PieceOut[];
+  side: "red" | "blue";
+}
+
+function SetRow({ pieces, side }: SetRowProps) {
+  const ordered = useMemo(() => orderBackRank(pieces), [pieces]);
+
+  const speciesCounts = useMemo(
+    () =>
+      ordered.reduce<Record<string, number>>((acc, p) => {
+        acc[p.species] = (acc[p.species] ?? 0) + 1;
+        return acc;
+      }, {}),
+    [ordered]
+  );
+
+  const speciesSeen: Record<string, number> = {};
+  const pieceIndexes = ordered.map((p) => {
+    const count = speciesSeen[p.species] ?? 0;
+    speciesSeen[p.species] = count + 1;
+    return count;
+  });
+
+  const labelColor = side === "red" ? "text-red-team" : "text-poke-blue";
+  const label = side === "red" ? "Red Set — Pikachu" : "Blue Set — Eevee";
 
   return (
-    <div className="flex w-[8.5rem] shrink-0 flex-col items-center gap-1">
-      <span className="text-[10px] font-mono text-text-muted/80">{fileLabel}</span>
-      <div className="w-full rounded-lg border border-white/10 bg-bg-deep/80 px-1.5 py-2">
-        <p className="mb-1.5 text-center text-[10px] font-bold uppercase tracking-wide text-text-muted">
-          Kings
-        </p>
-        <div className="flex items-start justify-center gap-2">
-          <div className="flex flex-col items-center">
-            <PokemonSpriteAvatar
-              speciesOrPieceType="PIKACHU"
-              emojiFallback={PIECE_TYPE_EMOJIS.PIKACHU ?? "⚡"}
-              sizePx={44}
-              className="border-2 border-red-team"
+    <div>
+      <p className={`mb-2 text-center text-xs font-bold uppercase tracking-widest ${labelColor}`}>
+        {label}
+      </p>
+      <div className="overflow-x-auto pb-2 [-webkit-overflow-scrolling:touch]">
+        <div className="mx-auto flex w-min min-w-full justify-center gap-1.5 px-1 sm:gap-2">
+          {ordered.map((piece, i) => (
+            <RankCell
+              key={piece.id}
+              piece={piece}
+              fileLabel={FILE_LABELS[i] ?? `${i + 1}`}
+              sameSpeCount={speciesCounts[piece.species] ?? 1}
+              pieceIndex={pieceIndexes[i]}
+              side={side}
             />
-            <span className="mt-0.5 text-[9px] font-bold text-red-team">Red</span>
-          </div>
-          <div className="flex flex-col items-center">
-            <PokemonSpriteAvatar
-              speciesOrPieceType="EEVEE"
-              emojiFallback={PIECE_TYPE_EMOJIS.EEVEE ?? "🌟"}
-              sizePx={44}
-              className="border-2 border-poke-blue"
-            />
-            <span className="mt-0.5 text-[9px] font-bold text-poke-blue">Blue</span>
-          </div>
-        </div>
-        <p className="mt-2 text-[9px] leading-snug text-text-muted text-center px-0.5">
-          In PvP you play as <span className="text-red-team font-semibold">Red (Pikachu)</span> or{" "}
-          <span className="text-poke-blue font-semibold">Blue (Eevee)</span>. Your roster king row is{" "}
-          <span className="text-white font-semibold">{storedLabel}</span>
-          {sameSpeCount > 1 && <span className="text-white/35"> #{pieceIndex + 1}</span>}.
-        </p>
-        <div className="mt-2 w-full px-0.5">
-          <div className="mb-0.5 flex justify-between text-[9px] text-text-muted">
-            <span>XP</span>
-            <span>
-              {kingPiece.xp}/{threshold}
-            </span>
-          </div>
-          <XpBar current={kingPiece.xp} max={threshold} color="#FFD700" className="h-1.5" />
+          ))}
         </div>
       </div>
     </div>
@@ -183,23 +172,9 @@ export default function MyPokemonPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const speciesCounts = useMemo(
-    () =>
-      pieces.reduce<Record<string, number>>((acc, p) => {
-        acc[p.species] = (acc[p.species] ?? 0) + 1;
-        return acc;
-      }, {}),
-    [pieces]
-  );
-
-  const speciesSeen: Record<string, number> = {};
-  const ordered = useMemo(() => orderBackRank(pieces), [pieces]);
-
-  const pieceIndexes = ordered.map((p) => {
-    const count = speciesSeen[p.species] ?? 0;
-    speciesSeen[p.species] = count + 1;
-    return count;
-  });
+  const redPieces = useMemo(() => pieces.filter((p) => p.set_side === "red"), [pieces]);
+  const bluePieces = useMemo(() => pieces.filter((p) => p.set_side === "blue"), [pieces]);
+  const hasAnyPieces = redPieces.length > 0 || bluePieces.length > 0;
 
   return (
     <PageShell title="My Pokémon" showBack={false}>
@@ -212,44 +187,18 @@ export default function MyPokemonPage() {
         {error && (
           <div className="py-8 text-center text-sm text-red-team">{error}</div>
         )}
-        {!loading && !error && pieces.length === 0 && (
+        {!loading && !error && !hasAnyPieces && (
           <div className="py-16 text-center text-text-muted">
             No Pokémon yet. Start a game!
           </div>
         )}
-        {!loading && !error && ordered.length > 0 && (
-          <div>
-            <p className="mb-3 text-center text-xs text-text-muted">
-              Back rank: Squirtle · Charmander · Bulbasaur · Mew · Kings · Bulbasaur · Charmander · Squirtle
+        {!loading && !error && hasAnyPieces && (
+          <div className="flex flex-col gap-6">
+            <p className="text-center text-xs text-text-muted">
+              Back rank: Squirtle · Charmander · Bulbasaur · Mew · King · Bulbasaur · Charmander · Squirtle
             </p>
-            <div className="overflow-x-auto pb-2 [-webkit-overflow-scrolling:touch]">
-              <div className="mx-auto flex w-min min-w-full justify-center gap-1.5 px-1 sm:gap-2">
-                {ordered.map((piece, i) => {
-                  const file = FILE_LABELS[i] ?? `${i + 1}`;
-                  const isEFileKing = i === 4 && normRole(piece.role) === "king";
-                  if (isEFileKing) {
-                    return (
-                      <KingsRankCell
-                        key={piece.id}
-                        kingPiece={piece}
-                        fileLabel={file}
-                        sameSpeCount={speciesCounts[piece.species] ?? 1}
-                        pieceIndex={pieceIndexes[i]}
-                      />
-                    );
-                  }
-                  return (
-                    <RankCell
-                      key={piece.id}
-                      piece={piece}
-                      fileLabel={file}
-                      sameSpeCount={speciesCounts[piece.species] ?? 1}
-                      pieceIndex={pieceIndexes[i]}
-                    />
-                  );
-                })}
-              </div>
-            </div>
+            {redPieces.length > 0 && <SetRow pieces={redPieces} side="red" />}
+            {bluePieces.length > 0 && <SetRow pieces={bluePieces} side="blue" />}
           </div>
         )}
       </div>

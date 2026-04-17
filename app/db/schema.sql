@@ -120,7 +120,12 @@ CREATE TABLE pokemon_pieces (
     set_side         VARCHAR     NOT NULL CHECK (set_side IN ('red', 'blue')),
     created_at       TIMESTAMP   NOT NULL DEFAULT now(),
 
-    CONSTRAINT piece_role CHECK (role IN ('king', 'queen', 'rook', 'bishop', 'knight'))
+    CONSTRAINT piece_role CHECK (role IN ('king', 'queen', 'rook', 'bishop', 'knight')),
+    CONSTRAINT king_side_species CHECK (
+        role != 'king'
+        OR (set_side = 'red'  AND species = 'PIKACHU')
+        OR (set_side = 'blue' AND species = 'EEVEE')
+    )
 );
 
 -- ===== game_pokemon_map =====

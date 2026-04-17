@@ -9,6 +9,7 @@ export interface PieceOut {
   id: string;
   role: string;
   species: string;
+  set_side: "red" | "blue";
   xp: number;
   evolution_stage: number;
 }
