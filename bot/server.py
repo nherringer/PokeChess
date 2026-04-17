@@ -16,10 +16,11 @@ from __future__ import annotations
 import atexit
 import logging
 import os
+import secrets
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
 from bot.mcts import MCTS
@@ -40,6 +41,19 @@ _BIAS_BONUS_MAX = 3.0
 # Module-level process state (initialised in lifespan)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Service-to-service authentication
+# ---------------------------------------------------------------------------
+
+_BOT_API_SECRET: str = os.environ.get("BOT_API_SECRET", "")
+
+
+def _verify_bot_api_secret(x_bot_api_secret: str = Header(default="")) -> None:
+    if not secrets.compare_digest(x_bot_api_secret, _BOT_API_SECRET):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+# ---------------------------------------------------------------------------
 # Read desired slot count from env.  Default 1M (16 MB) is safe for dev/tests.
 # Set POKECHESS_TT_SIZE=67108864 (64M, ~1 GB) in production.
 _tt_size: int = int(os.environ.get("POKECHESS_TT_SIZE", 1 << 20))
@@ -75,6 +89,12 @@ class _NoOpStore:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global global_tt, sync_queue
+
+    if not _BOT_API_SECRET:
+        raise RuntimeError(
+            "BOT_API_SECRET is not set. "
+            "Set it via environment variable or .env file before starting the engine."
+        )
 
     local_path = os.environ.get("POKECHESS_TT_LOCAL_PATH", "transposition_table.bin")
     bucket = os.environ.get("POKECHESS_TT_BUCKET", "")
@@ -152,7 +172,7 @@ async def health():
     return {"status": "ok"}
 
 
-@app.post("/move")
+@app.post("/move", dependencies=[Depends(_verify_bot_api_secret)])
 async def get_move(body: MoveRequest):
     global request_count
 

@@ -27,10 +27,9 @@ export function HpHalo({ pieceType, currentHp }: HpHaloProps) {
 
   return (
     <svg
-      width={size}
-      height={size}
       viewBox={`0 0 ${size} ${size}`}
-      className="absolute inset-0 pointer-events-none"
+      preserveAspectRatio="xMidYMid meet"
+      className="absolute inset-0 h-full w-full pointer-events-none"
       style={{ transform: "rotate(-90deg)" }}
     >
       {/* Background track */}

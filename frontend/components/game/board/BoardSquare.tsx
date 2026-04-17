@@ -34,7 +34,7 @@ export function BoardSquare({
 
   return (
     <div
-      className="relative aspect-square flex items-center justify-center cursor-pointer select-none"
+      className="relative min-h-0 min-w-0 h-full w-full flex items-center justify-center cursor-pointer select-none"
       style={{
         backgroundColor: baseBg,
         outline: isSelected ? "3px solid #64A0FF" : undefined,
@@ -56,9 +56,9 @@ export function BoardSquare({
       {/* Foresight glow */}
       {hasForesight && <ForesightGlow />}
 
-      {/* Piece */}
+      {/* Piece — wrapper fills the square so PieceChip % widths resolve to the cell, not shrink-to-fit 0 */}
       {piece && (
-        <div className="relative z-10">
+        <div className="relative z-10 flex h-full w-full min-h-0 min-w-0 items-center justify-center p-[5%] pointer-events-none">
           <PieceChip piece={piece} isSelected={isSelected} />
           {/* Safetyball stored piece badge */}
           {(piece.piece_type === "SAFETYBALL" ||

@@ -107,9 +107,9 @@ No local `psql` required — schema is applied via `docker compose exec`.
 |--------|-------------|------------|
 | `DATABASE_URL` | `postgresql+asyncpg://pokechess:pokechess@localhost:5432/pokechess` (default — matches compose service, no export needed) | RDS endpoint + Secrets Manager credentials |
 | `ENGINE_URL` | `http://localhost:5001` | `http://localhost:5001` — **same**: ECS uses `network_mode=host` |
-| `SECRET_KEY` | dev default (hardcoded, warns on startup) | Secrets Manager injected via ECS task env |
+| `JWT_SECRET_KEY` / `BOT_API_SECRET` | Set in `.env` (≥ 32 chars each — app raises `RuntimeError` if missing) | Secrets Manager injected via ECS task env |
 | `CORS_ORIGINS` | `*` (allowed when `ENVIRONMENT=development`) | Must be explicit domain — app raises `RuntimeError` if `*` and not development |
-| `ENVIRONMENT` | `development` (default) | Must be set to `production` to enforce CORS + `Secure` cookie flag |
+| `ENVIRONMENT` | _(unset — defaults to `production`)_ | **Must be set to `development` locally** to disable `Secure` cookie flag (required for HTTP) and enable OpenAPI docs |
 | `POKECHESS_TT_BUCKET` / `AWS_DEFAULT_REGION` | Not needed — engine skips TT backup | Set in ECS task def for the engine container |
 
 **Specific gotchas:**
@@ -122,7 +122,7 @@ No local `psql` required — schema is applied via `docker compose exec`.
 
 4. **DB schema is not auto-applied.** Must be run manually after first `docker compose up`, both locally and on RDS after provisioning.
 
-5. **Bot UUID is random on each schema apply.** `app/db/schema.sql` seeds `Metallic` with `gen_random_uuid()`. The frontend hardcodes bot IDs in `lib/constants.ts` (all empty). Until a `GET /bots` endpoint ships, you must look up the UUID after applying the schema and fill in `BOT_IDS` manually (see `make bot-id`).
+5. **Bot UUID is random on each schema apply.** `app/db/schema.sql` seeds the bots with `gen_random_uuid()`. The frontend fetches the bot catalog from `GET /bots` (public, no auth required) — no manual UUID lookup or `BOT_IDS` constant is needed.
 
 ---
 

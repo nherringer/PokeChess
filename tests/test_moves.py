@@ -229,6 +229,15 @@ class TestMewMoves:
         assert {m.move_slot for m in atk} == {0, 1, 2}
         assert all(m.target_row == 3 and m.target_col == 6 for m in atk)
 
+    def test_attack_stealball_single_slot_per_target(self):
+        state = empty_state()
+        place(state, PieceType.MEW, Team.RED, 3, 3)
+        place(state, PieceType.POKEBALL, Team.BLUE, 3, 6)
+        atk = moves_of_type(get_legal_moves(state), ActionType.ATTACK)
+        assert len(atk) == 1
+        assert atk[0].move_slot == 0
+        assert atk[0].target_row == 3 and atk[0].target_col == 6
+
     def test_attack_slots_for_multiple_enemies(self):
         state = empty_state()
         place(state, PieceType.MEW, Team.RED, 3, 3)

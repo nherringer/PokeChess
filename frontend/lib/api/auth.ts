@@ -5,11 +5,9 @@ export async function login(
   email: string,
   password: string
 ): Promise<TokenResponse> {
-  const body = new URLSearchParams({ username: email, password });
   return apiFetch<TokenResponse>("/auth/login", {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
+    body: JSON.stringify({ email, password }),
   });
 }
 

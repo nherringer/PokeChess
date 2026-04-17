@@ -9,6 +9,7 @@ export interface PieceOut {
   id: string;
   role: string;
   species: string;
+  set_side: "red" | "blue";
   xp: number;
   evolution_stage: number;
 }
@@ -45,13 +46,18 @@ export interface FriendActionResponse {
   status: string;
 }
 
-// Invites
+// Invites (GET /game-invites — pending incoming + outgoing)
 export interface InviteOut {
   id: string;
-  from_user_id: string;
-  from_username: string;
   game_id: string;
   created_at: string;
+  direction: "incoming" | "outgoing";
+  other_user_id: string;
+  other_username: string;
+  inviter_id: string;
+  invitee_id: string;
+  /** Concrete side the inviter chose — always "red" or "blue" (random resolved server-side). */
+  inviter_side: "red" | "blue";
 }
 
 export interface InviteActionResponse {
@@ -113,6 +119,10 @@ export interface GameSummary {
   blue_player_id: string | null;
   winner: "red" | "blue" | "draw" | null;
   updated_at: string;
+  /** Human opponent username or bot name (from GET /games list). */
+  opponent_display?: string | null;
+  /** Current user's team — compare to whose_turn for "your turn" (red | blue). */
+  my_side?: "red" | "blue" | null;
 }
 
 export interface GameDetail extends GameSummary {

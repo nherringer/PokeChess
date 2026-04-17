@@ -49,10 +49,10 @@ async def insert_user(
 async def get_user_pieces(db: asyncpg.Connection, user_id: UUID) -> list[dict]:
     rows = await db.fetch(
         """
-        SELECT id, role, species, xp, evolution_stage
+        SELECT id, role, species, set_side, xp, evolution_stage
         FROM pokemon_pieces
         WHERE owner_id = $1
-        ORDER BY created_at
+        ORDER BY set_side, created_at
         """,
         user_id,
     )

@@ -4,8 +4,8 @@ from fastapi import APIRouter
 
 from ..auth import Db, CurrentUser
 from ..main import AppError
-from ..schemas import UserProfile, PieceOut, SettingsUpdate, SettingsOut
-from ..db.queries import users as user_q, settings as settings_q
+from ..schemas import UserProfile, PieceOut, SettingsUpdate, SettingsOut, StarterResponse
+from ..db.queries import users as user_q, settings as settings_q, pieces as pieces_q
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -20,6 +20,19 @@ async def get_me(user: CurrentUser, db: Db):
         created_at=user["created_at"],
         pieces=[PieceOut(**p) for p in pieces],
     )
+
+
+@router.post("/me/starter", response_model=StarterResponse, status_code=201)
+async def claim_starter(user: CurrentUser, db: Db):
+    """Seed the authenticated user's first PokeChess set. Idempotent — returns
+    existing pieces if already claimed."""
+    async with db.transaction():
+        await db.fetchrow("SELECT id FROM users WHERE id = $1 FOR UPDATE", user["id"])
+        if await pieces_q.has_roster(db, user["id"]):
+            existing = await pieces_q.get_pieces(db, user["id"])
+            return StarterResponse(pieces=[PieceOut(**p) for p in existing])
+        inserted = await pieces_q.insert_starter_pieces(db, user["id"])
+    return StarterResponse(pieces=[PieceOut(**p) for p in inserted])
 
 
 @router.patch("/me/settings", response_model=SettingsOut)

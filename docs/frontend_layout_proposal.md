@@ -2,7 +2,45 @@
 
 **Audience:** 8–15 year olds  
 **Target platform:** Tablet and phone (portrait and landscape). Desktop will work but is not the primary design target.  
-**Last updated:** April 2026 (aligned with backend implementation)  
+**Last updated:** April 2026 — wireframes below are the **design intent**; the **Implementation snapshot** subsection documents what the Next.js app actually routes today.
+
+---
+
+## Implementation snapshot (Next.js `frontend/`)
+
+This is a concise map of **routes and shell behavior** on current development branches. Use it together with the page wireframes in §§1–8.
+
+### App shell and auth
+
+- **Root layout:** Dark full-height column, global styles from `globals.css`, Tailwind tokens in `tailwind.config.ts` (see §Design Foundation — note **`bg-deep` is `#0d0f1a` in code** vs `#12141E` in the table; treat as close cousins until unified).
+- **`AuthInitializer`:** Hydrates the access token from `localStorage`; **redirects to `/login`** for any path that is not public (`/`, `/login`, `/register`) when logged out.
+- **`AuthNav`:** Shown when authenticated — sticky top bar with small **PokeChess** logo (home → **`/my-pokemon`**), text links **My Pokémon**, **My Games**, **Play vs Bot**, **Friends**, and **Log out**. There is **no Settings link** in the nav yet (wireframe §1 still mentions Settings).
+
+### Route map (App Router)
+
+| Path | Purpose |
+|------|---------|
+| `/` | Guest **landing**: logo, starfield, Pikachu/Eevee art, **Register** / **Sign In**. If already logged in, **redirects to `/my-pokemon`** (differs from the single “home with Play vs Bot” wireframe). |
+| `/login`, `/register` | Email/password auth; refresh cookie + Bearer token stored client-side. |
+| `/my-pokemon` | Primary **post-login hub**: roster from `GET /users/me`, pieces shown as cards (back-rank ordering, sprites, type, XP). |
+| `/roster` | Alternate roster view (role-ordered cards; same API data, different layout). |
+| `/my-games` | **`GET /games`** — Active + Recent completed lists using **`GameListCard`**; linked from **AuthNav**. |
+| `/games` | Same games list pattern as `/my-games` (secondary entry; may use `PageShell` with back). |
+| `/play` | **PvB difficulty chooser**: `GET /bots`, then **`POST /games`** with `{ bot_id, player_side: "red" }` → navigates to **`/game/[id]`**. |
+| `/play/lobby` | **PvB** short “setting up…” splash, or **PvP** inviter wait — query params `gameId` / `inviteId`; polls **`GET /game-invites`** until the game is active or invite ends. |
+| `/friends` | Friends list, friend requests, **and** incoming game invites (challenge flow + invite accept — social hub). |
+| `/game/[id]` | **Gameplay**: `GameBoard`, `TeamBanner` ×2, `BottomDrawer` (selected piece, legend, last move), disambiguation pickers (Mew / Pikachu / Eevee), `BotThinkingOverlay`, Pokeball wiggle, resign. Polls **`GET /games/{id}`** on a ~2.5s interval. |
+| `/game/over` | **Game over** screen (`?gameId=`): team result, XP-style rows derived from move history client-side for display. |
+
+### Divergences from wireframes (intentional or pending)
+
+| Wireframe | Current app |
+|-----------|-------------|
+| §1 Single home with four CTAs | Split: **guest** landing (`/`) vs **authenticated** hub (`/my-pokemon`) + **AuthNav** for Play / Games / Friends. |
+| §1 Settings | Not a dedicated routed page in nav yet. |
+| §5 `GET /bots` “until implemented” | **`GET /bots` is implemented**; `/play` uses live bot rows (label, flavor, `time_budget`). |
+| §6 Lobby | Exists as **`/play/lobby`**; PvB may transition quickly to the game route. |
+| §8 Game over overlay | Also implemented as a **dedicated `/game/over`** route after terminal state. |
 
 ---
 
@@ -189,7 +227,7 @@ Each difficulty corresponds to a **separate bot row** in the `bots` table. The `
 | Expert | 5.0s | Metallic is scary | `Metallic (Expert)` |
 | Master | 10.0s | Good luck... | `Metallic (Master)` |
 
-On app startup the client should call `GET /bots` (or equivalent discovery endpoint) to retrieve `bot_id` values per difficulty name. **Until that endpoint is implemented**, bot UUIDs may be hardcoded at build time from the DB seed. Tapping a difficulty immediately creates the game (no extra confirm step). Metallic is the name of the PvB bot — Team Alpha's artificial intelligence.
+On app startup the client calls **`GET /bots`** to retrieve `bot_id`, `label`, `flavor`, and `time_budget` for each row (the Next.js **`/play`** page does this). Tapping a difficulty immediately creates the game (no extra confirm step). Metallic is the seeded PvB personality — copy may reference Team Alpha’s AI.
 
 ---
 
@@ -473,6 +511,8 @@ Key conventions for frontend ↔ backend communication:
 | Topic | Rule |
 |---|---|
 | **Auth** | Access token in `Authorization: Bearer <token>` header. Refresh token in httpOnly cookie; call `POST /auth/refresh` to rotate. |
+| **Profile / roster** | `GET /users/me` — user + `pieces` (not `GET /me`). |
+| **PvB bot list** | `GET /bots` — public; `bot_id` for `POST /games`. |
 | **`whose_turn`** | Lowercase `"red"` \| `"blue"` in `GameDetail`. Compare to local player's side string to determine turn. |
 | **`active_player` in state** | Uppercase `"RED"` \| `"BLUE"` — same value, different casing. These two fields are in sync but formatted differently. |
 | **Move submission `action_type`** | Send uppercase engine enum names: `"MOVE"`, `"ATTACK"`, `"QUICK_ATTACK"`, `"POKEBALL_ATTACK"`, `"MASTERBALL_ATTACK"`, `"FORESIGHT"`, `"TRADE"`, `"EVOLVE"`, `"RELEASE"`. |

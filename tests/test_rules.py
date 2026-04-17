@@ -447,18 +447,19 @@ class TestTradeAction:
         [(ns, _)] = apply_move(state, make_move(PieceType.SQUIRTLE, 3, 3, ActionType.TRADE, 3, 4))
         assert ns.has_traded[Team.RED] is True
 
-    def test_eevee_trade_auto_evolves_and_advances_turn(self):
-        # Trading a Waterstone to Eevee triggers auto-evolution and ends the turn
+    def test_eevee_trade_receives_stone_but_does_not_auto_evolve(self):
+        # Eevee receiving an evolution stone via TRADE now holds it as a held item.
+        # Auto-evolution was removed — the player must trigger EVOLVE explicitly.
         state = empty_state(active=Team.BLUE)
-        squirtle = place(state, PieceType.SQUIRTLE, Team.BLUE, 3, 3)  # WATERSTONE
-        eevee    = place(state, PieceType.EEVEE,    Team.BLUE, 3, 4)  # NONE
+        place(state, PieceType.SQUIRTLE, Team.BLUE, 3, 3)  # holds WATERSTONE
+        place(state, PieceType.EEVEE,    Team.BLUE, 3, 4)  # holds NONE
         [(ns, _)] = apply_move(state, make_move(PieceType.SQUIRTLE, 3, 3, ActionType.TRADE, 3, 4))
-        # Eevee should have evolved to Vaporeon
-        assert ns.board[3][4].piece_type == PieceType.VAPOREON
-        # Stone consumed
-        assert ns.board[3][4].held_item == Item.NONE
-        # Turn should have advanced
-        assert ns.active_player == Team.RED
+        # Eevee still Eevee — no auto-evolution
+        assert ns.board[3][4].piece_type == PieceType.EEVEE
+        # Eevee now holds the Waterstone (stone not consumed)
+        assert ns.board[3][4].held_item == Item.WATERSTONE
+        # Trade is a free action — turn does NOT advance (still BLUE's turn)
+        assert ns.active_player == Team.BLUE
 
 
 # ---------------------------------------------------------------------------

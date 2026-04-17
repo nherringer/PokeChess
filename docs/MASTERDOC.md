@@ -2,7 +2,7 @@
 
 **Purpose:** This document is the **primary reference** for the PokeChess codebase and product: how the monorepo is organized, how requests and game state flow through the system, what the HTTP API exposes, how data is stored, how the bot and load-aware budgeting work, what the planned frontend must do, and how target deployment fits. Other files under `docs/` add depth (full SQL, exhaustive JSON examples, game rules prose, UX mockups). **If you read one file, read this one**; use the links when you need the full detail of a subsystem.
 
-**Last updated:** April 2026
+**Last updated:** 17 April 2026
 
 ---
 
@@ -27,7 +27,7 @@
 - **Modes:** **PvP** — two human accounts (friends + game invites). **PvB** — one human vs one of **six bot personalities** (Bonnie → METALLIC, Kalos-themed difficulty tiers); the app calls a separate **engine** service only for the bot’s move choice.
 - **Code:** **One monorepo**: `engine/` (pure rules), `app/` (FastAPI + Postgres), `bot/` + `cpp/` (MCTS + optional C++ rollout in the engine image). **Two Docker images** (`Dockerfile.app`, `Dockerfile.engine`) built from the same repo.
 - **Truth for HTTP:** **[api_spec.md](api_spec.md)** (methods, bodies, status codes, errors); **`app/schemas.py`** (Pydantic field types); **`app/routes/`** (handler behavior); **[pokechess_data_model.md](pokechess_data_model.md)** (`games.state` / `move_history` JSON). At runtime, **`/openapi.json`** and **`/docs`** (Swagger UI).
-- **Local dev:** `docker-compose.yml` + env (`DATABASE_URL`, `ENGINE_URL`, `SECRET_KEY`, etc.). **Target production:** two ECS services on one small EC2 instance ([architecture_design_plan.md](architecture_design_plan.md)).
+- **Local dev:** `docker-compose.yml` + env (`DATABASE_URL`, `ENGINE_URL`, `JWT_SECRET_KEY`, etc.). **Target production:** two ECS services on one small EC2 instance ([architecture_design_plan.md](architecture_design_plan.md)).
 - **Engine HTTP container:** `bot/server.py` exists and is functional. `Dockerfile.engine` wires to `uvicorn bot.server:app`. The engine image builds and runs. PvB bot moves are unblocked end-to-end — see [implementation_roadmap.md](implementation_roadmap.md) for remaining polish items.
 
 ---
@@ -57,7 +57,7 @@ pokechess/                    ← single repo (may still be named PokeChess-engi
     zobrist.py                # transposition hashing (engine-side search)
   bot/
     mcts.py, ucb.py, transposition.py
-    # bot/server.py — FastAPI HTTP wrapper (required for production PvB; see roadmap)
+    # bot/server.py — FastAPI HTTP wrapper; POST /move + GET /health
   cpp/                        # optional C++ rollout; pybind11 bridge
   app/
     main.py                   # FastAPI, lifespan, DB pool, httpx engine client
@@ -112,7 +112,7 @@ Each user owns **named** pieces (king, queen, rooks, knights, bishops) stored in
 
 ### 3.4 Client application
 
-There is **no shipped production frontend** yet. [frontend_layout_proposal.md](frontend_layout_proposal.md) is the **v1 UX specification** (tablet/phone-first, dark Pokémon-inspired UI). The backend is designed to support polling (`GET /games/{id}` every 1–3s) and clear move payloads for a future client.
+A **Next.js** client lives under **`frontend/`** on this branch (local development; not necessarily production-deployed). It uses the same polling pattern the API was designed for (`GET /games/{id}` on a ~2.5s interval in code) and the REST contracts below. [frontend_layout_proposal.md](frontend_layout_proposal.md) remains the **v1 UX specification** (tablet/phone-first, dark Pokémon-inspired UI); the implementation may lag or diverge in details.
 
 ### 3.5 Future: solo campaign
 
@@ -203,15 +203,18 @@ All routes are mounted from `app/main.py`. Prefixes below are **full path prefix
 | `POST` | `/auth/register` | Create user, default settings, return access token; sets httpOnly refresh cookie |
 | `POST` | `/auth/login` | Login; tokens + refresh cookie |
 | `POST` | `/auth/refresh` | New access token from refresh cookie |
-| `GET` | `/me` | Authenticated user profile + pieces |
-| `PATCH` | `/me/settings` | User settings (`board_theme`, `extra_settings` JSONB with API validation) |
+| `GET` | `/users/me` | Authenticated user profile + pieces |
+| `POST` | `/users/me/starter` | Idempotent “claim starter roster” (returns pieces; register/login also seeds roster when empty) |
+| `PATCH` | `/users/me/settings` | User settings (`board_theme`, `extra_settings` JSONB with API validation) |
+| `GET` | `/bots` | List bot personalities (`BotOut`: id, name, stars, flavor, `forced_player_side`, `accent_color`, `trainer_sprite`, `time_budget`) — **no Bearer required** |
 | `GET` | `/friends` | Friends + incoming/outgoing friend requests |
 | `POST` | `/friends` | Send friend request by username |
 | `PUT` | `/friends/{friendship_id}` | Accept or reject (`action` in body) |
 | `GET` | `/game-invites` | Pending invites |
-| `POST` | `/game-invites` | Create invite + pending game (must be friends) |
+| `POST` | `/game-invites` | Create invite + pending game (must be friends); body: `invitee_id`, `player_side` (`"red"`/`"blue"`/`"random"`) |
 | `PUT` | `/game-invites/{invite_id}` | Accept/reject invite |
-| `GET` | `/games` | Active + completed lists (**GameSummary** — no heavy JSONB). **Completed** list is capped at **10** rows (most recently updated); active games are not capped (`app/db/queries/games.py`). |
+| `DELETE` | `/game-invites/{invite_id}` | Inviter-only cancel of a pending invite |
+| `GET` | `/games` | Active + completed lists (**GameSummary** — no heavy JSONB). Includes **`opponent_display`** and **`my_side`** for UI copy (vs opponent / whose turn). **Completed** list is capped at **10** rows (most recently updated); active games are not capped (`app/db/queries/games.py`). |
 | `POST` | `/games` | Create **PvB** game only — body requires `bot_id` and `player_side` (`CreateGameRequest`). **PvP** games are created via **`POST /game-invites`** (pending row + invite), then activated on accept — not via this endpoint. |
 | `GET` | `/games/{game_id}` | **GameDetail** — full `state` + `move_history` |
 | `POST` | `/games/{game_id}/resign` | Resign |
@@ -225,11 +228,15 @@ All routes are mounted from `app/main.py`. Prefixes below are **full path prefix
 
 - **Access token:** JWT in `Authorization: Bearer` for API calls.
 - **Refresh token:** HttpOnly cookie (`refresh_token`) on register/login; `/auth/refresh` rotates access.
-- **Config:** `SECRET_KEY`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `ENVIRONMENT`, `CORS_ORIGINS` — see `app/config.py`. Production must not use the default `SECRET_KEY`.
+- **Config:** `JWT_SECRET_KEY`, `BOT_API_SECRET`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `ENVIRONMENT`, `CORS_ORIGINS` — see `app/config.py`. `JWT_SECRET_KEY` and `BOT_API_SECRET` must always be set (≥ 32 chars); the app raises `RuntimeError` at startup if either is missing.
+- **Rate limiting (app):** **SlowAPI** in `app/main.py` applies per-client-IP limits on auth routes in `app/routes/auth.py`: `POST /auth/register` **3/minute**, `POST /auth/login` **10/minute**, `POST /auth/refresh` **20/minute**. When exceeded, responses are **429**; clients should back off. **Reverse-proxy** or **WAF** limits in front of the app remain a good extra layer; app limits are not a substitute for volumetric DDoS protection.
+- **Registration password:** `RegisterRequest` enforces a minimum password length (**8** characters) via Pydantic — see `app/schemas.py`.
 
 ### 5.3 Engine `POST /move` — **code is canonical**
 
-The app sends (`app/engine_client.py`):
+The app calls the engine over HTTP (`app/engine_client.py`). **`POST /move`** must include header **`X-Bot-Api-Secret`** with the same value as **`BOT_API_SECRET`** in config; **`bot/server.py`** compares it to the engine process’s **`BOT_API_SECRET`** (constant-time) and returns **401** if missing or wrong. **`GET /health`** is **not** authenticated — for liveness only. App and engine containers must share one secret (e.g. identical env in compose or matching secrets in ECS).
+
+JSON body:
 
 ```json
 {
@@ -261,17 +268,22 @@ The engine must return a **flat** JSON object the app can pass into `Move(...)`:
 |----------|------|
 | `DATABASE_URL` | AsyncPG DSN (see `config.asyncpg_dsn()`) |
 | `ENGINE_URL` | Base URL for engine (default `http://localhost:5001`) |
-| `SECRET_KEY` | JWT signing |
-| `ENVIRONMENT` | `development` vs production checks |
-| `CORS_ORIGINS` | Comma-separated origins; `*` handled specially for credentialed CORS |
+| `JWT_SECRET_KEY` | JWT signing — required, ≥ 32 chars |
+| `BOT_API_SECRET` | Same value on app and engine; app sends `X-Bot-Api-Secret` on `POST /move` — required, ≥ 32 chars |
+| `ENVIRONMENT` | `development` vs `production` checks (defaults to `production`) |
+| `CORS_ORIGINS` | Comma-separated origins — required, no wildcard default |
 | `BOT_ACTIVE_WINDOW_MINUTES` | Sliding window for load-aware bot budgeting (default 22) |
 | `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS` | Token lifetimes |
+
+**`.env.example` and Compose:** The repo **`.env.example`** lists `DATABASE_URL` and `ENGINE_URL` so the full app surface is visible. For **`docker compose`**, **`docker-compose.yml`** still sets `DATABASE_URL` and `ENGINE_URL` on `pokechess-app` (from `POSTGRES_*` and service names), so you can leave those lines empty in `.env` when using Compose only. For **production** (e.g. ECS) or **running the app without Compose**, set `DATABASE_URL` to your Postgres DSN and `ENGINE_URL` to the engine base URL as needed.
 
 ---
 
 ## 6. Data model (concise reference)
 
 **Full DDL and examples:** `app/db/schema.sql` and [pokechess_data_model.md](pokechess_data_model.md).
+
+**Production DB and schema changes:** There is **no Alembic** (or other migration runner) in this repo — see [implementation_roadmap.md](implementation_roadmap.md). **New** databases: apply **`app/db/schema.sql`** once (e.g. `psql $DATABASE_URL -f app/db/schema.sql`). **Existing** production or staging databases must be upgraded with **manual** `ALTER TABLE` / data backfill steps whenever `schema.sql` changes; plan upgrades by diffing the file against your live DDL. Optional future work: versioned migrations — not required for the current codebase.
 
 ### 6.1 Core tables
 
@@ -305,7 +317,7 @@ Append-only list of turns. **Snake_case `action_type`** strings in history (`att
 
 - **XP earned (v1):** Sum of **`damage`** from `move_history` entries attributed to that **named** piece (attacks, foresight resolve, etc.). Pokéball captures without damage do not add XP. Implemented in a dedicated helper (e.g. `compute_xp`) so the formula can change.
 - **`xp_earned` vs `xp_applied`:** Raw earned vs what business rules apply to `pokemon_pieces.xp` (e.g. wins only — see data model).
-- **Kings / queen:** `pokemon_pieces.species` for king and queen is **immutable** (`pikachu`, `eevee`, `mew`). Mid-game evolutions (Raichu, Eeveelutions) exist **only** in engine state for that game. **Rooks, knights, bishops** can change species/evolution stage **post-game** via XP thresholds; those updates happen at game completion, not mid-game ([implementation_roadmap.md](implementation_roadmap.md) Q6).
+- **Kings / queen:** `pokemon_pieces.species` for king and queen is **immutable** (`PIKACHU`, `EEVEE`, `MEW` — stored uppercase to match the engine's `PieceType` enum member names). Mid-game evolutions (Raichu, Eeveelutions) exist **only** in engine state for that game. **Rooks, knights, bishops** can change species/evolution stage **post-game** via XP thresholds; those updates happen at game completion, not mid-game ([implementation_roadmap.md](implementation_roadmap.md) Q6).
 
 ### 6.5 Important indexes
 
@@ -333,7 +345,7 @@ Append-only list of turns. **Snake_case `action_type`** strings in history (`att
 
 ## 8. Frontend specification (planned client)
 
-**Source:** [frontend_layout_proposal.md](frontend_layout_proposal.md). **Status:** specification only; **not implemented** in this repo.
+**Source:** [frontend_layout_proposal.md](frontend_layout_proposal.md). **Status:** UX spec + reference layout; a **Next.js app** under **`frontend/`** implements much of the flow on active branches (see §3.4). Treat the proposal as the design target, not a line-by-line match to the current UI.
 
 **Audience / platform:** Roughly 8–15 years old; **tablet and phone** primary (portrait primary, landscape secondary).
 
@@ -410,7 +422,7 @@ This is the **intended** production shape, not a guarantee about your current la
 | [app_and_engine_communication.md](app_and_engine_communication.md) | App ↔ engine contract, RDS vs bot-local persistence, queue model — aligned with **`engine_client.py`** |
 | [bot_personas.md](bot_personas.md) | Six bot personas — difficulty tiers, parameter tables, UCB1 bias design |
 | [load_aware_budgeting.md](load_aware_budgeting.md) | Load-aware MCTS budgeting |
-| [frontend_layout_proposal.md](frontend_layout_proposal.md) | v1 UI/UX spec (no frontend implemented) |
+| [frontend_layout_proposal.md](frontend_layout_proposal.md) | v1 UI/UX spec; **`frontend/`** holds the Next.js client (see §3.4, §8) |
 | [Rules.md](Rules.md) | Full game rules |
 | [CampaignDesign.md](CampaignDesign.md) | **Future** solo campaign — not current build |
 | [task_log.md](task_log.md) | Historical ML task log |
@@ -442,13 +454,14 @@ Use **git history** on `docs/` (e.g. `git log -- docs/`) to see what changed rec
 
 ## 14. Near-term engineering tasks (pre-production)
 
-Items that are known, scoped, and should be resolved before the service sees real traffic. These are not blockers for local development or PvP, but are important before public launch.
+Items that are known, scoped, and should be resolved before the service sees real traffic. **Auth routes already have per-IP rate limits** (§5.2); the table below lists **remaining** pre-production gaps. These are not blockers for local development or PvP, but are important before public launch.
 
 | Priority | Task | Detail |
 |----------|------|---------|
-| **High** | **Add auth rate limiting** | `/auth/login` and `/auth/register` have no rate limiting or lockout. Add `slowapi` middleware or configure reverse-proxy limits before exposing to the public internet. Credential stuffing and registration spam are the primary risks. |
+| **High** | **SES email verification on registration** | Verify new users’ email via **Amazon SES** (or equivalent) before treating the account as fully active or before allowing login. Requires SES identity, templates, and handling bounces/complaints — see AWS SES docs when implementing. |
+| **High** | **Persist refresh tokens in the database** | Today refresh tokens are **JWTs** in HttpOnly cookies with no server-side session rows (`app/routes/auth.py` only decodes the JWT and checks the user exists). Store **hashed** refresh token records per device/session to support **revocation**, **rotation**, and **audit** (e.g. logout-all, compromised token). |
 | **High** | **Resolve `FOR UPDATE` lock across engine HTTP** | See §13. Splitting `POST /games/{id}/move` into two transactions removes the scalability risk. Requires careful re-validation between transactions to handle concurrent resigns. |
-| **Medium** | **Document first-run DB setup** | `docker compose up` does not apply `app/db/schema.sql`. Add an explicit copy-paste `psql` command to `app/README.md` and/or a Compose init container so new contributors aren't blocked. |
+| **Medium** | **Document local testing setup** | One place (e.g. `app/README.md` or a short `docs/` note linked from MASTERDOC) should walk through **local** runs: required env vars (`DATABASE_URL`, `ENGINE_URL`, `JWT_SECRET_KEY`, `BOT_API_SECRET`, `CORS_ORIGINS`, …), bringing up app + engine (e.g. Compose), and **applying `app/db/schema.sql` to Postgres** — `docker compose up` alone does not load the schema, which blocks DB-backed flows until migrations or a manual `psql` apply. Optional: Compose init service or documented one-liner. |
 
 ---
 

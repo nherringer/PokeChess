@@ -38,20 +38,22 @@ CREATE INDEX idx_friendships_b ON friendships (user_b_id);
 -- ===== bots =====
 CREATE TABLE bots (
     id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    name        VARCHAR     NOT NULL,
+    name        VARCHAR     UNIQUE NOT NULL,
     params      JSONB       NOT NULL DEFAULT '{}',
     created_at  TIMESTAMP   NOT NULL DEFAULT now()
 );
 
 -- ===== game_invites =====
 CREATE TABLE game_invites (
-    id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    inviter_id  UUID        NOT NULL REFERENCES users(id),
-    invitee_id  UUID        NOT NULL REFERENCES users(id),
-    status      VARCHAR     NOT NULL DEFAULT 'pending',
-    created_at  TIMESTAMP   NOT NULL DEFAULT now(),
+    id           UUID      PRIMARY KEY DEFAULT gen_random_uuid(),
+    inviter_id   UUID      NOT NULL REFERENCES users(id),
+    invitee_id   UUID      NOT NULL REFERENCES users(id),
+    inviter_side VARCHAR   NOT NULL DEFAULT 'red',
+    status       VARCHAR   NOT NULL DEFAULT 'pending',
+    created_at   TIMESTAMP NOT NULL DEFAULT now(),
 
-    CONSTRAINT invite_status CHECK (status IN ('pending', 'accepted', 'rejected', 'expired'))
+    CONSTRAINT invite_status     CHECK (status IN ('pending', 'accepted', 'rejected', 'expired')),
+    CONSTRAINT invite_side_valid CHECK (inviter_side IN ('red', 'blue'))
 );
 
 -- ===== games =====
@@ -115,9 +117,15 @@ CREATE TABLE pokemon_pieces (
     species          VARCHAR     NOT NULL,
     xp               INT         NOT NULL DEFAULT 0,
     evolution_stage   INT         NOT NULL DEFAULT 0,
+    set_side         VARCHAR     NOT NULL CHECK (set_side IN ('red', 'blue')),
     created_at       TIMESTAMP   NOT NULL DEFAULT now(),
 
-    CONSTRAINT piece_role CHECK (role IN ('king', 'queen', 'rook', 'bishop', 'knight'))
+    CONSTRAINT piece_role CHECK (role IN ('king', 'queen', 'rook', 'bishop', 'knight')),
+    CONSTRAINT king_side_species CHECK (
+        role != 'king'
+        OR (set_side = 'red'  AND species = 'PIKACHU')
+        OR (set_side = 'blue' AND species = 'EEVEE')
+    )
 );
 
 -- ===== game_pokemon_map =====
@@ -158,4 +166,5 @@ INSERT INTO bots (name, params) VALUES
     ('Serena',      '{"time_budget": 1.0,  "exploration_c": 1.4142135623730951,  "use_transposition": true}'::jsonb),
     ('Clemont',     '{"time_budget": 2.0,  "exploration_c": 1.4142135623730951,  "use_transposition": true,  "move_bias": "prefer_pikachu_raichu", "bias_bonus": 0.15}'::jsonb),
     ('Diantha',     '{"time_budget": 3.5,  "exploration_c": 1.0,                 "use_transposition": true}'::jsonb),
-    ('METALLIC',    '{"time_budget": 6.0,  "exploration_c": 0.5,                 "use_transposition": true}'::jsonb);
+    ('METALLIC',    '{"time_budget": 6.0,  "exploration_c": 0.5,                 "use_transposition": true}'::jsonb)
+ON CONFLICT (name) DO NOTHING;

@@ -79,26 +79,37 @@ async def get_game_for_move(db: asyncpg.Connection, game_id: UUID) -> dict | Non
 
 
 async def list_games_for_user(db: asyncpg.Connection, user_id: UUID) -> dict:
+    # opponent_display: other human's username, or bot name for PvB.
+    # my_side: 'red' | 'blue' for the requesting user (for turn copy in clients).
+    _list_sql = """
+        SELECT g.id, g.status, g.whose_turn, g.turn_number, g.is_bot_game, g.bot_side,
+               g.red_player_id, g.blue_player_id, g.winner, g.updated_at,
+               CASE
+                   WHEN g.is_bot_game THEN b.name
+                   WHEN g.red_player_id = $1 THEN u_blue.username
+                   ELSE u_red.username
+               END AS opponent_display,
+               CASE
+                   WHEN g.red_player_id = $1 THEN 'red'
+                   WHEN g.blue_player_id = $1 THEN 'blue'
+                   ELSE NULL
+               END AS my_side
+        FROM games g
+        LEFT JOIN users u_red ON u_red.id = g.red_player_id
+        LEFT JOIN users u_blue ON u_blue.id = g.blue_player_id
+        LEFT JOIN bots b ON b.id = g.bot_id
+        WHERE (g.red_player_id = $1 OR g.blue_player_id = $1) AND g.status = $2
+        ORDER BY g.updated_at DESC
+    """
     active = await db.fetch(
-        """
-        SELECT id, status, whose_turn, turn_number, is_bot_game, bot_side,
-               red_player_id, blue_player_id, winner, updated_at
-        FROM games
-        WHERE (red_player_id = $1 OR blue_player_id = $1) AND status = 'active'
-        ORDER BY updated_at DESC
-        """,
+        _list_sql,
         user_id,
+        "active",
     )
     completed = await db.fetch(
-        """
-        SELECT id, status, whose_turn, turn_number, is_bot_game, bot_side,
-               red_player_id, blue_player_id, winner, updated_at
-        FROM games
-        WHERE (red_player_id = $1 OR blue_player_id = $1) AND status = 'complete'
-        ORDER BY updated_at DESC
-        LIMIT 10
-        """,
+        _list_sql + "\nLIMIT 10",
         user_id,
+        "complete",
     )
     return {
         "active": [dict(r) for r in active],
