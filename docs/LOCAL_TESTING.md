@@ -107,7 +107,7 @@ No local `psql` required — schema is applied via `docker compose exec`.
 |--------|-------------|------------|
 | `DATABASE_URL` | `postgresql+asyncpg://pokechess:pokechess@localhost:5432/pokechess` (default — matches compose service, no export needed) | RDS endpoint + Secrets Manager credentials |
 | `ENGINE_URL` | `http://localhost:5001` | `http://localhost:5001` — **same**: ECS uses `network_mode=host` |
-| `SECRET_KEY` | dev default (hardcoded, warns on startup) | Secrets Manager injected via ECS task env |
+| `JWT_SECRET_KEY` / `BOT_API_SECRET` | Set in `.env` (≥ 32 chars each — app raises `RuntimeError` if missing) | Secrets Manager injected via ECS task env |
 | `CORS_ORIGINS` | `*` (allowed when `ENVIRONMENT=development`) | Must be explicit domain — app raises `RuntimeError` if `*` and not development |
 | `ENVIRONMENT` | `development` (default) | Must be set to `production` to enforce CORS + `Secure` cookie flag |
 | `POKECHESS_TT_BUCKET` / `AWS_DEFAULT_REGION` | Not needed — engine skips TT backup | Set in ECS task def for the engine container |

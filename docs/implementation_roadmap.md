@@ -155,7 +155,7 @@ See `docs/pokechess_data_model.md` for full JSON examples.
 
 2. ~~**Write `Dockerfile.app`**~~ ✓ Done — `Dockerfile.app` at repo root.
 
-3. ~~**Write `docker-compose.yml`**~~ ✓ Done — `docker-compose.yml` at repo root. Set `SECRET_KEY`, **`DATABASE_URL`** (RDS / Postgres for the app), and **`ENGINE_URL`** for production.
+3. ~~**Write `docker-compose.yml`**~~ ✓ Done — `docker-compose.yml` at repo root. Set `JWT_SECRET_KEY`, `BOT_API_SECRET`, **`DATABASE_URL`** (RDS / Postgres for the app), and **`ENGINE_URL`** for production.
 
 4. ~~**Database schema**~~ ✓ Done — `app/db/schema.sql`: all tables from the data model plus **`bot_player_activity`** (load-aware MCTS budgeting; see `docs/load_aware_budgeting.md`). Seed bot **Metallic** included (`INSERT` at end of file). *Versioned migration tool (e.g. Alembic) is still optional* if you want repeatable upgrades beyond “apply `schema.sql`”.
 

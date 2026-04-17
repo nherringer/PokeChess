@@ -50,7 +50,7 @@ bot/        MCTS bot HTTP service — deployed as the engine container
 
 app/        FastAPI application layer — deployed as the app container
   main.py         App factory (create_app), CORS, error handler, lifespan
-  config.py       Settings from env vars (DATABASE_URL, SECRET_KEY, ENGINE_URL, …)
+  config.py       Settings from env vars (DATABASE_URL, JWT_SECRET_KEY, ENGINE_URL, …)
   auth.py         JWT helpers, bcrypt, FastAPI dependencies (get_current_user, Db)
   schemas.py      Pydantic request/response models
   routes/         HTTP route handlers (auth, users, friends, invites, games, moves)
@@ -76,7 +76,7 @@ docs/       Design docs, API spec, local testing runbook
 | `JWT_SECRET_KEY` | _(unset)_ | JWT signing secret; must be set (≥32 chars) always |
 | `BOT_API_SECRET` | _(unset)_ | Shared secret for app→bot auth; must be set (≥32 chars) always |
 | `ENGINE_URL` | `http://localhost:5001` | Same locally and in ECS (network_mode=host) |
-| `ENVIRONMENT` | `development` | Set to `production` in ECS to enforce guards |
+| `ENVIRONMENT` | `production` | Set to `development` in `.env` for local dev (disables Secure cookie, enables OpenAPI docs) |
 | `POKECHESS_TT_BUCKET` | _(unset)_ | S3 bucket for TT backups; omit to disable |
 | `POKECHESS_TT_SIZE` | `1048576` | TT slot count; use `67108864` in prod |
 

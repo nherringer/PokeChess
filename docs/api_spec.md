@@ -36,7 +36,7 @@ If the header is missing or invalid, FastAPI’s `HTTPBearer` dependency typical
 
 ### 1.3 Config (environment)
 
-Relevant variables: `SECRET_KEY`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `ENVIRONMENT`, `CORS_ORIGINS` — see `app/config.py`.
+Relevant variables: `JWT_SECRET_KEY`, `BOT_API_SECRET`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `ENVIRONMENT`, `CORS_ORIGINS` — see `app/config.py`.
 
 ---
 
