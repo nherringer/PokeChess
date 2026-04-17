@@ -2,8 +2,13 @@ PYTHON   := .venv/bin/python
 UVICORN  := .venv/bin/uvicorn
 PYTEST   := .venv/bin/pytest
 
-DB_USER  := pokechess
-DB_NAME  := pokechess
+# Load KEY=value pairs into Make and export to recipe shells (uvicorn, pytest, etc.)
+-include .env
+export
+
+# Same names as docker-compose / .env; fall back if unset or empty
+DB_USER := $(or $(POSTGRES_USER),pokechess)
+DB_NAME := $(or $(POSTGRES_DB),pokechess)
 
 .PHONY: partial full app frontend schema bot-id test test-v down reset
 
