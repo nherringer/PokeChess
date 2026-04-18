@@ -14,6 +14,9 @@ ENVIRONMENT: str = os.environ.get("ENVIRONMENT", "production")
 # The app divides the bot's base time_budget by the count of active players to
 # share MCTS compute fairly under load.  See docs/load_aware_budgeting.md.
 BOT_ACTIVE_WINDOW_MINUTES: int = int(os.environ.get("BOT_ACTIVE_WINDOW_MINUTES", "22"))
+# TEMP: registration gate — remove for public launch
+REGISTRATION_ACCESS_CODE: str = os.environ.get("REGISTRATION_ACCESS_CODE", "")
+# END TEMP
 
 CORS_ORIGINS: list[str] = [
     o.strip()

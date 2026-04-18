@@ -18,6 +18,7 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [accessCode, setAccessCode] = useState(""); // TEMP: registration gate — remove for public launch
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmError, setConfirmError] = useState<string | null>(null);
@@ -32,12 +33,14 @@ export default function RegisterPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await register(username, email, password);
+      const res = await register(username, email, password, accessCode || undefined);
       setAuth(res.access_token, res.user_id);
       router.push("/");
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setError("An account with that username or email already exists. Try signing in instead.");
+      } else if (err instanceof ApiError && err.status === 403) {
+        setError("Invalid access code.");
       } else {
         setError(err instanceof Error ? err.message : "Registration failed");
       }
@@ -121,6 +124,16 @@ export default function RegisterPage() {
               {confirmError && (
                 <p className="mt-1 text-xs text-red-team">{confirmError}</p>
               )}
+            </div>
+            <div>
+              <label className="text-white/60 text-sm block mb-1.5">Access Code</label>
+              <input
+                type="text"
+                value={accessCode}
+                onChange={(e) => setAccessCode(e.target.value)}
+                className="w-full bg-bg-card border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/20 focus:outline-none focus:border-poke-blue transition-colors"
+                placeholder="Enter your access code"
+              />
             </div>
             <Button type="submit" variant="primary" size="lg" fullWidth loading={loading}>
               Begin My Journey

@@ -14,11 +14,13 @@ export async function login(
 export async function register(
   username: string,
   email: string,
-  password: string
+  password: string,
+  accessCode?: string // TEMP: registration gate — remove param for public launch
 ): Promise<TokenResponse> {
   return apiFetch<TokenResponse>("/auth/register", {
     method: "POST",
-    body: JSON.stringify({ username, email, password }),
+    // TEMP: registration gate — remove access_code from body for public launch
+    body: JSON.stringify({ username, email, password, access_code: accessCode }),
   });
 }
 

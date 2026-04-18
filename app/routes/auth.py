@@ -23,6 +23,10 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/register", status_code=201, response_model=TokenResponse)
 @limiter.limit("3/minute")
 async def register(request: Request, body: RegisterRequest, response: Response, db: Db):
+    # TEMP: registration gate — remove block for public launch
+    if config.REGISTRATION_ACCESS_CODE and body.access_code != config.REGISTRATION_ACCESS_CODE:
+        raise AppError(403, "forbidden", "Invalid access code")
+    # END TEMP
     pw_hash = hash_password(body.password)
     try:
         user = await user_q.insert_user(db, body.username, body.email, pw_hash)
