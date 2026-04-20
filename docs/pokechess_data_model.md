@@ -248,27 +248,35 @@ CREATE TABLE pokemon_pieces (
     id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_id         UUID        NOT NULL REFERENCES users(id),
     role             VARCHAR     NOT NULL,   -- 'king' | 'queen' | 'rook' | 'bishop' | 'knight'
-    species          VARCHAR     NOT NULL,   -- immutable for kings ('pikachu'/'eevee') and queen ('mew')
+    species          VARCHAR     NOT NULL,   -- immutable for kings ('PIKACHU'/'EEVEE') and queen ('MEW'); uppercase matches engine PieceType enum
                                              -- mutable for rooks/knights/bishops on post-game evolution
     xp               INT         NOT NULL DEFAULT 0,
     evolution_stage  INT         NOT NULL DEFAULT 0,  -- not used for kings or queen (always 0)
+    set_side         VARCHAR     NOT NULL CHECK (set_side IN ('red', 'blue')),
     created_at       TIMESTAMP   NOT NULL DEFAULT now(),
 
-    CONSTRAINT piece_role CHECK (role IN ('king', 'queen', 'rook', 'bishop', 'knight'))
+    CONSTRAINT piece_role CHECK (role IN ('king', 'queen', 'rook', 'bishop', 'knight')),
+    CONSTRAINT king_side_species CHECK (
+        role != 'king'
+        OR (set_side = 'red'  AND species = 'PIKACHU')
+        OR (set_side = 'blue' AND species = 'EEVEE')
+    )
 );
 ```
 
-**Each user's persistent roster (created at first game):**
+**Each user's persistent roster (seeded at register and login):**
+
+Species values are stored as **uppercase** strings matching the engine's `PieceType` enum member names (e.g. `PIKACHU`, not `pikachu`).
 
 | Role | Species | Notes |
 |---|---|---|
-| King | `pikachu` (Red) / `eevee` (Blue) | Immutable species. Evolves in-game only, never persisted. |
-| Queen | `mew` | Immutable species. Mew has no evolution. |
-| Rook × 2 | `squirtle` | Mutable. Evolves post-game via XP threshold. |
-| Knight × 2 | `charmander` | Mutable. Evolves post-game via XP threshold. |
-| Bishop × 2 | `bulbasaur` | Mutable. Evolves post-game via XP threshold. |
+| King | `PIKACHU` (Red) / `EEVEE` (Blue) | Immutable species. Evolves in-game only, never persisted. |
+| Queen | `MEW` | Immutable species. Mew has no evolution. |
+| Rook × 2 | `SQUIRTLE` | Mutable. Evolves post-game via XP threshold. |
+| Knight × 2 | `CHARMANDER` | Mutable. Evolves post-game via XP threshold. |
+| Bishop × 2 | `BULBASAUR` | Mutable. Evolves post-game via XP threshold. |
 
-The full roster is created when the user plays their first game. Each role is represented once per team slot (2 rooks, 2 knights, 2 bishops per user).
+The full roster (16 pieces — 8 red + 8 blue) is seeded during `POST /auth/register` and backfilled on `POST /auth/login` for any legacy account that lacks one. Each role is represented once per side (2 rooks, 2 knights, 2 bishops per side).
 
 ---
 

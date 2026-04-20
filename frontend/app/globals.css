@@ -1,13 +1,19 @@
-@import url("https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Fredoka+One&family=Black+Ops+One&family=Nunito:wght@400;600;700;800&family=Press+Start+2P&display=swap");
 
 @import "tailwindcss";
 
 @theme {
-  --color-bg-deep: #12141E;
-  --color-bg-panel: #191B26;
+  --color-bg-deep: #0d0f1a;
+  --color-bg-surface: #161829;
+  --color-bg-panel: #161829;
   --color-bg-card: #232638;
   --color-red-team: #E03737;
   --color-blue-team: #3C72E0;
+  --color-poke-blue: #3B5EE5;
+  --color-poke-yellow: #FFCB05;
+  --color-chess-white: #F0EAD6;
+  --color-chess-black: #1A1A1A;
+  --color-text-muted: #8A8FAA;
   --color-hl-select: #64A0FF;
   --color-hl-move: #F5E028;
   --color-hl-attack: #F55A19;
@@ -24,11 +30,13 @@
   --color-board-dark: #6E8F52;
 
   --font-display: "Fredoka One", Nunito, sans-serif;
+  --font-chess: "Black Ops One", sans-serif;
   --font-body: Nunito, sans-serif;
+  --font-pixel: "Press Start 2P", monospace;
 }
 
 body {
-  background: #12141E;
+  background: #0d0f1a;
   color: white;
   font-family: Nunito, sans-serif;
 }
@@ -124,6 +132,24 @@ body {
   }
 }
 
+@keyframes bolt-flash {
+  0% { opacity: 0.4; }
+  40% { opacity: 1; }
+  65% { opacity: 0.7; }
+  100% { opacity: 1; }
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .animate-blink {
   animation: blink 0.8s ease-in-out infinite;
 }
@@ -150,4 +176,12 @@ body {
 
 .animate-fade-in-up {
   animation: fade-in-up 0.4s ease-out forwards;
+}
+
+.animate-bolt-flash {
+  animation: bolt-flash 0.6s ease-out forwards;
+}
+
+.animate-page-enter {
+  animation: page-enter 0.2s ease-out forwards;
 }

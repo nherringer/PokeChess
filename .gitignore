@@ -8,6 +8,12 @@ build/
 dist/
 *.egg-info/
 .cursor/
+# Local secrets — copy .env.example → .env and fill in values.
+# .env matches at any depth; .env.* covers .env.local, .env.production, etc.
+.env
+.env.*
+!.env.example
+
 # Runtime / session files
 transposition_table.bin
 resume_claude_session.txt

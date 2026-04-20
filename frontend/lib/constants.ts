@@ -1,47 +1,5 @@
 export const POLL_INTERVAL_MS = 2500;
 
-export const DIFFICULTY_CONFIG = [
-  {
-    label: "Easy",
-    flavor: "Metallic is sleepy",
-    timebudget: 0.5,
-    botName: "Metallic (Easy)",
-  },
-  {
-    label: "Medium",
-    flavor: "Metallic woke up",
-    timebudget: 1.5,
-    botName: "Metallic (Medium)",
-  },
-  {
-    label: "Hard",
-    flavor: "Metallic means it",
-    timebudget: 3.0,
-    botName: "Metallic (Hard)",
-  },
-  {
-    label: "Expert",
-    flavor: "Metallic is scary",
-    timebudget: 5.0,
-    botName: "Metallic (Expert)",
-  },
-  {
-    label: "Master",
-    flavor: "Good luck...",
-    timebudget: 10.0,
-    botName: "Metallic (Master)",
-  },
-];
-
-// Bot IDs are seeded in the DB. These must be updated after the first migration.
-// When GET /bots ships, replace this with a fetch call.
-export const BOT_IDS: Record<string, string> = {
-  "Metallic (Easy)": "",
-  "Metallic (Medium)": "",
-  "Metallic (Hard)": "",
-  "Metallic (Expert)": "",
-  "Metallic (Master)": "",
-};
 
 export const PIECE_TYPE_LABELS: Record<string, string> = {
   SQUIRTLE: "Squirtle",

@@ -38,7 +38,7 @@ def create_access_token(user_id: UUID) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=config.ACCESS_TOKEN_EXPIRE_MINUTES)
     return jwt.encode(
         {"sub": str(user_id), "exp": expire, "type": "access"},
-        config.SECRET_KEY,
+        config.JWT_SECRET_KEY,
         algorithm=config.ALGORITHM,
     )
 
@@ -47,14 +47,14 @@ def create_refresh_token(user_id: UUID) -> str:
     expire = datetime.now(timezone.utc) + timedelta(days=config.REFRESH_TOKEN_EXPIRE_DAYS)
     return jwt.encode(
         {"sub": str(user_id), "exp": expire, "type": "refresh"},
-        config.SECRET_KEY,
+        config.JWT_SECRET_KEY,
         algorithm=config.ALGORITHM,
     )
 
 
 def decode_token(token: str) -> dict:
     try:
-        return jwt.decode(token, config.SECRET_KEY, algorithms=[config.ALGORITHM])
+        return jwt.decode(token, config.JWT_SECRET_KEY, algorithms=[config.ALGORITHM])
     except JWTError:
         raise AppError(401, "unauthorized", "Invalid or expired token")
 

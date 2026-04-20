@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, field_validator, model_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 # Limits merged JSON patch size for user_settings.extra_settings (abuse / accidental huge payloads).
 _MAX_EXTRA_SETTINGS_BYTES = 16_384
@@ -44,7 +44,7 @@ def _validate_extra_settings_dict(value: dict) -> dict:
 class RegisterRequest(BaseModel):
     username: str
     email: EmailStr
-    password: str
+    password: str = Field(min_length=8)
 
 
 class LoginRequest(BaseModel):
@@ -71,6 +71,7 @@ class PieceOut(BaseModel):
     id: UUID
     role: str
     species: str
+    set_side: str
     xp: int
     evolution_stage: int
 
@@ -99,6 +100,10 @@ class SettingsOut(BaseModel):
     board_theme: str
     extra_settings: dict
     updated_at: datetime | None
+
+
+class StarterResponse(BaseModel):
+    pieces: list[PieceOut]
 
 
 # ---------------------------------------------------------------------------
@@ -151,14 +156,28 @@ class FriendActionResponse(BaseModel):
 
 class SendInviteRequest(BaseModel):
     invitee_id: UUID
+    player_side: str  # "red" | "blue" | "random"
+
+    @field_validator("player_side")
+    @classmethod
+    def _valid_player_side(cls, v: str) -> str:
+        if v not in ("red", "blue", "random"):
+            raise ValueError("player_side must be 'red', 'blue', or 'random'")
+        return v
 
 
 class InviteOut(BaseModel):
+    """Pending PvP invite for the current user (incoming or outgoing)."""
+
     id: UUID
-    from_user_id: UUID
-    from_username: str
     game_id: UUID
     created_at: datetime
+    direction: str  # "incoming" | "outgoing"
+    other_user_id: UUID
+    other_username: str
+    inviter_id: UUID
+    invitee_id: UUID
+    inviter_side: str  # "red" | "blue" — always concrete (random resolved at creation)
 
 
 class InviteActionRequest(BaseModel):
@@ -169,6 +188,21 @@ class InviteActionResponse(BaseModel):
     invite_id: UUID
     status: str
     game_id: UUID
+
+
+# ---------------------------------------------------------------------------
+# Bots
+# ---------------------------------------------------------------------------
+
+class BotOut(BaseModel):
+    id: UUID
+    name: str
+    stars: int
+    flavor: str
+    forced_player_side: str | None  # "red" | "blue" | None
+    accent_color: str               # CSS hex string, e.g. "#be2d2d"
+    trainer_sprite: str             # filename, e.g. "teamrocket.png"
+    time_budget: float | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +225,9 @@ class GameSummary(BaseModel):
     blue_player_id: UUID | None
     winner: str | None
     updated_at: datetime
+    # Populated by GET /games list query (joined users / bots)
+    opponent_display: str | None = None
+    my_side: str | None = None  # "red" | "blue" — requesting user's team
 
 
 class GameDetail(BaseModel):

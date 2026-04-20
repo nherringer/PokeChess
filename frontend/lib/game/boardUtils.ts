@@ -1,7 +1,7 @@
 import type { GameStateData, BoardPieceData, FloorItemData } from "@/lib/types/api";
 
 export function flipRow(row: number, localSide: "red" | "blue"): number {
-  return localSide === "blue" ? 7 - row : row;
+  return localSide === "red" ? 7 - row : row;
 }
 
 export function apiToDisplay(

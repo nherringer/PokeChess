@@ -2,10 +2,11 @@
 Roster creation and piece-UUID injection for new games.
 
 Each user's persistent roster (pokemon_pieces table):
-  1 king, 1 queen, 2 rooks, 2 knights, 2 bishops = 8 pieces.
+  16 pieces total — 8 red (Pikachu king) + 8 blue (Eevee king).
+  Each set: 1 king, 1 queen, 2 rooks, 2 knights, 2 bishops.
 
-The roster is created at first game. UUIDs are injected into the starting
-board's named pieces; pawns (pokeball/safetyball) get id=None.
+UUIDs are injected into the starting board's named pieces;
+pawns (pokeball/safetyball) get id=None.
 """
 
 from __future__ import annotations
@@ -20,65 +21,71 @@ from engine.state import GameState, Team
 from .serialization import IdMap, state_to_dict
 
 
-# Back-rank layout: col → (role, species)
-# Matches _place_starting_pieces() in engine/state.py
-_BACK_RANK_RED = {
-    0: ("rook", "squirtle"),
-    1: ("knight", "charmander"),
-    2: ("bishop", "bulbasaur"),
-    3: ("queen", "mew"),
-    # 4: king — handled separately (pikachu for red)
-    5: ("bishop", "bulbasaur"),
-    6: ("knight", "charmander"),
-    7: ("rook", "squirtle"),
-}
-_BACK_RANK_BLUE = {
-    0: ("rook", "squirtle"),
-    1: ("knight", "charmander"),
-    2: ("bishop", "bulbasaur"),
-    3: ("queen", "mew"),
-    # 4: king — handled separately (eevee for blue)
-    5: ("bishop", "bulbasaur"),
-    6: ("knight", "charmander"),
-    7: ("rook", "squirtle"),
+# Back-rank layout: col → role. Both sides share the same layout; the king at
+# col 4 is placed separately so the caller can pick PIKACHU (red) vs EEVEE
+# (blue). Mirrors `_place_starting_pieces()` in engine/state.py — see that
+# function for which species lands on each square.
+_BACK_RANK_LAYOUT: dict[int, str] = {
+    0: "rook",
+    1: "knight",
+    2: "bishop",
+    3: "queen",
+    # 4: king — placed separately by side
+    5: "bishop",
+    6: "knight",
+    7: "rook",
 }
 
-# Full roster definition: (role, species) tuples in creation order
-_ROSTER = [
-    ("king", None),    # species depends on side
-    ("queen", "mew"),
-    ("rook", "squirtle"),
-    ("rook", "squirtle"),
-    ("knight", "charmander"),
-    ("knight", "charmander"),
-    ("bishop", "bulbasaur"),
-    ("bishop", "bulbasaur"),
+# Both rosters: (set_side, role, species). Red set first, blue set second.
+# Species casing matches `insert_starter_pieces` in app/db/queries/pieces.py so
+# any user seeded via either path has consistent species strings.
+_BOTH_ROSTERS = [
+    ("red",  "king",   "PIKACHU"),
+    ("red",  "queen",  "MEW"),
+    ("red",  "rook",   "SQUIRTLE"),
+    ("red",  "rook",   "SQUIRTLE"),
+    ("red",  "knight", "CHARMANDER"),
+    ("red",  "knight", "CHARMANDER"),
+    ("red",  "bishop", "BULBASAUR"),
+    ("red",  "bishop", "BULBASAUR"),
+    ("blue", "king",   "EEVEE"),
+    ("blue", "queen",  "MEW"),
+    ("blue", "rook",   "SQUIRTLE"),
+    ("blue", "rook",   "SQUIRTLE"),
+    ("blue", "knight", "CHARMANDER"),
+    ("blue", "knight", "CHARMANDER"),
+    ("blue", "bishop", "BULBASAUR"),
+    ("blue", "bishop", "BULBASAUR"),
 ]
 
 
 async def ensure_roster(db: asyncpg.Connection, user_id: UUID, side: str) -> list[dict]:
-    """Create the user's pokemon_pieces if they don't exist yet. Return the roster."""
+    """Return the 8-piece set for the given side, creating all 16 pieces if needed.
+
+    Caller must be inside a transaction. The FOR UPDATE on the users row serialises
+    concurrent first-seed calls so only one inserts the full 16-piece set.
+    """
+    await db.fetchrow("SELECT id FROM users WHERE id = $1 FOR UPDATE", user_id)
     existing = await db.fetch(
-        "SELECT id, role, species FROM pokemon_pieces WHERE owner_id = $1 ORDER BY created_at FOR UPDATE",
-        user_id,
+        "SELECT id, role, species FROM pokemon_pieces WHERE owner_id = $1 AND set_side = $2 ORDER BY created_at",
+        user_id, side,
     )
     if existing:
         return [dict(r) for r in existing]
 
-    king_species = "pikachu" if side == "red" else "eevee"
-    pieces = []
-    for role, species in _ROSTER:
-        sp = king_species if role == "king" else species
+    side_pieces = []
+    for set_color, role, species in _BOTH_ROSTERS:
         row = await db.fetchrow(
             """
-            INSERT INTO pokemon_pieces (owner_id, role, species)
-            VALUES ($1, $2, $3)
+            INSERT INTO pokemon_pieces (owner_id, role, species, set_side)
+            VALUES ($1, $2, $3, $4)
             RETURNING id, role, species
             """,
-            user_id, role, sp,
+            user_id, role, species, set_color,
         )
-        pieces.append(dict(row))
-    return pieces
+        if set_color == side:
+            side_pieces.append(dict(row))
+    return side_pieces
 
 
 def build_id_map(roster: list[dict], side: str) -> IdMap:
@@ -89,7 +96,6 @@ def build_id_map(roster: list[dict], side: str) -> IdMap:
     left-to-right for duplicates (sorted by creation order = insert order).
     """
     back_row = 0 if side == "red" else 7
-    layout = _BACK_RANK_RED if side == "red" else _BACK_RANK_BLUE
 
     # Group roster pieces by role
     by_role: dict[str, list[dict]] = {}
@@ -104,7 +110,7 @@ def build_id_map(roster: list[dict], side: str) -> IdMap:
         id_map[(back_row, 4)] = str(kings[0]["id"])
 
     # Non-king named pieces from the layout
-    for col, (role, _species) in layout.items():
+    for col, role in _BACK_RANK_LAYOUT.items():
         pieces = by_role.get(role, [])
         if not pieces:
             continue
@@ -145,6 +151,10 @@ async def initialize_pvp_game(
     """
     Called when a PvP invite is accepted. Builds initial state, injects piece UUIDs,
     writes state to the games row, creates game_pokemon_map entries.
+
+    red_player_id and blue_player_id are read from the game row (set correctly at
+    invite-creation time based on the inviter's chosen side). Do not derive them
+    from inviter/invitee ordering — that ordering is no longer meaningful.
 
     Caller must wrap this in a transaction.
     """

@@ -41,10 +41,7 @@ export function GameBoard({
   });
 
   return (
-    <div
-      className="w-full aspect-square grid grid-cols-8"
-      style={{ touchAction: "none" }}
-    >
+    <div className="h-full w-full touch-none grid grid-cols-8 grid-rows-8 [grid-template-columns:repeat(8,minmax(0,1fr))] [grid-template-rows:repeat(8,minmax(0,1fr))]">
       {grid.map((rowArr, rowIdx) =>
         rowArr.map((piece, colIdx) => {
           const key = `${rowIdx},${colIdx}`;

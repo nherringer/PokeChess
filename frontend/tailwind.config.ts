@@ -11,11 +11,17 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        "bg-deep": "#12141E",
-        "bg-panel": "#191B26",
+        "bg-deep": "#0d0f1a",
+        "bg-surface": "#161829",
+        "bg-panel": "#161829",
         "bg-card": "#232638",
         "red-team": "#E03737",
         "blue-team": "#3C72E0",
+        "poke-blue": "#3B5EE5",
+        "poke-yellow": "#FFCB05",
+        "chess-white": "#F0EAD6",
+        "chess-black": "#1A1A1A",
+        "text-muted": "#8A8FAA",
         "hl-select": "#64A0FF",
         "hl-move": "#F5E028",
         "hl-attack": "#F55A19",
@@ -33,7 +39,9 @@ const config: Config = {
       },
       fontFamily: {
         display: ["Fredoka One", "Nunito", "sans-serif"],
+        chess: ["Black Ops One", "sans-serif"],
         body: ["Nunito", "sans-serif"],
+        pixel: ["Press Start 2P", "monospace"],
       },
     },
   },

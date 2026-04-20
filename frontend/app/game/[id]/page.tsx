@@ -322,10 +322,16 @@ export default function GamePage() {
         onResign={resign}
       />
 
-      {/* Board — center, dominant */}
-      <div className="relative flex-1 flex flex-col min-h-0">
-        <div className="w-full flex-1 flex items-center justify-center bg-bg-deep">
-          <div className="relative w-full max-w-[100vw]" style={{ aspectRatio: "1 / 1" }}>
+      {/* Board — square fits in remaining viewport (avoids overflow / huge cells) */}
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-bg-deep px-2 py-1">
+          <div
+            className="relative mx-auto aspect-square w-full max-w-full shrink-0"
+            style={{
+              width: "min(100%, calc(100dvh - 11rem), calc(100dvw - 1rem))",
+              maxHeight: "min(100%, calc(100dvh - 11rem))",
+            }}
+          >
             <GameBoard
               grid={grid}
               highlightMap={highlightMap}
@@ -343,14 +349,12 @@ export default function GamePage() {
               onDismiss={dismissExplorationEvent}
             />
 
-            {/* Bot thinking overlay */}
             {isBotTurn && (
-              <div className="absolute inset-0 pointer-events-none">
+              <div className="pointer-events-none absolute inset-0">
                 <BotThinkingOverlay />
               </div>
             )}
 
-            {/* Pokeball wiggle overlay */}
             {pokeballDisplayCell && (
               <div className="absolute inset-0">
                 <PokeballWiggle

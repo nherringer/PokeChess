@@ -21,6 +21,7 @@ import logging
 import httpx
 from fastapi import Request
 
+from . import config
 from .main import AppError
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,7 @@ async def request_bot_move(
         resp = await client.post(
             "/move",
             json={"state": state_dict, "persona_params": outgoing_params},
+            headers={"X-Bot-Api-Secret": config.BOT_API_SECRET},
             timeout=tb + 5.0,
         )
         resp.raise_for_status()

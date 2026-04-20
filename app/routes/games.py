@@ -9,6 +9,7 @@ from engine.state import GameState
 
 from ..auth import Db, CurrentUser
 from ..main import AppError
+from ..personas import get_persona
 from ..schemas import CreateGameRequest, GameDetail, GameSummary, GamesListResponse
 from ..game_logic.serialization import state_to_dict
 from ..game_logic.roster import ensure_roster, build_id_map, create_game_pokemon_map
@@ -62,6 +63,16 @@ async def create_game(body: CreateGameRequest, user: CurrentUser, db: Db):
     bot = await game_q.get_bot(db, body.bot_id)
     if bot is None:
         raise AppError(404, "not_found", "Bot not found")
+
+    # Enforce forced player-side for personas like Team Rocket and Clemont.
+    descriptor = get_persona(bot["name"])
+    if descriptor.forced_player_side is not None:
+        if body.player_side != descriptor.forced_player_side:
+            raise AppError(
+                400,
+                "bad_request",
+                f"This opponent requires player_side='{descriptor.forced_player_side}'",
+            )
 
     async with db.transaction():
         roster = await ensure_roster(db, user["id"], body.player_side)

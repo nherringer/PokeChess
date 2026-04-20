@@ -12,37 +12,48 @@ import {
   PIECE_TYPE_LABELS,
   POKEMON_TYPE_FOR_PIECE,
 } from "@/lib/constants";
+import { PokemonSpriteAvatar } from "@/components/ui/PokemonSpriteAvatar";
 
-const ROLE_ORDER = ["KING", "QUEEN", "ROOK", "KNIGHT", "BISHOP", "PAWN"];
-const XP_THRESHOLDS = [30, 100]; // stage 1 → 2, stage 2 → 3
+const ROLE_ORDER = ["king", "queen", "rook", "knight", "bishop", "pawn"];
+const XP_THRESHOLDS = [30, 100];
 
 function getXpThreshold(stage: number): number {
   return XP_THRESHOLDS[stage] ?? 999;
+}
+
+function sortByRole(pieces: PieceOut[]): PieceOut[] {
+  return [...pieces].sort((a, b) => {
+    const ai = ROLE_ORDER.indexOf(a.role.toLowerCase());
+    const bi = ROLE_ORDER.indexOf(b.role.toLowerCase());
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+  });
 }
 
 interface PieceCardProps {
   piece: PieceOut;
   index: number;
   sameSpeCount: number;
+  animIndex: number;
 }
 
-function PieceCard({ piece, index, sameSpeCount }: PieceCardProps) {
+function PieceCard({ piece, index, sameSpeCount, animIndex }: PieceCardProps) {
   const emoji = PIECE_TYPE_EMOJIS[piece.species] ?? "?";
   const label = PIECE_TYPE_LABELS[piece.species] ?? piece.species;
   const type = POKEMON_TYPE_FOR_PIECE[piece.species];
   const threshold = getXpThreshold(piece.evolution_stage);
+  const borderColor = piece.set_side === "red" ? "border-red-team" : "border-poke-blue";
 
   return (
     <div
       className="bg-bg-card rounded-xl p-4 flex items-start gap-4 animate-fade-in-up"
-      style={{ animationDelay: `${index * 60}ms`, animationFillMode: "both", opacity: 0 }}
+      style={{ animationDelay: `${animIndex * 60}ms`, animationFillMode: "both", opacity: 0 }}
     >
-      {/* Avatar */}
-      <div className="w-16 h-16 rounded-full bg-bg-panel flex items-center justify-center border-2 border-blue-team shrink-0">
-        <span style={{ fontSize: 32 }}>{emoji}</span>
-      </div>
-
-      {/* Details */}
+      <PokemonSpriteAvatar
+        speciesOrPieceType={piece.species}
+        emojiFallback={emoji}
+        sizePx={64}
+        className={`border-2 ${borderColor}`}
+      />
       <div className="flex-1 min-w-0">
         <p className="text-xs text-white/40 uppercase tracking-wide font-bold mb-0.5">
           {piece.role}
@@ -56,8 +67,6 @@ function PieceCard({ piece, index, sameSpeCount }: PieceCardProps) {
           </span>
           {type && <Badge type={type} />}
         </div>
-
-        {/* XP bar */}
         <div className="mt-2">
           <div className="flex justify-between text-xs text-white/40 mb-1">
             <span>XP</span>
@@ -67,6 +76,48 @@ function PieceCard({ piece, index, sameSpeCount }: PieceCardProps) {
           </div>
           <XpBar current={piece.xp} max={threshold} color="#FFD700" />
         </div>
+      </div>
+    </div>
+  );
+}
+
+interface SetGroupProps {
+  pieces: PieceOut[];
+  side: "red" | "blue";
+  animOffset: number;
+}
+
+function SetGroup({ pieces, side, animOffset }: SetGroupProps) {
+  const sorted = sortByRole(pieces);
+  const speciesCounts = pieces.reduce<Record<string, number>>((acc, p) => {
+    acc[p.species] = (acc[p.species] ?? 0) + 1;
+    return acc;
+  }, {});
+  const speciesSeen: Record<string, number> = {};
+  const pieceIndexes = sorted.map((p) => {
+    const count = speciesSeen[p.species] ?? 0;
+    speciesSeen[p.species] = count + 1;
+    return count;
+  });
+
+  const labelColor = side === "red" ? "text-red-team" : "text-poke-blue";
+  const label = side === "red" ? "Red Set — Pikachu" : "Blue Set — Eevee";
+
+  return (
+    <div>
+      <h2 className={`mb-3 text-sm font-bold uppercase tracking-widest ${labelColor} border-b border-white/10 pb-1`}>
+        {label}
+      </h2>
+      <div className="flex flex-col gap-3">
+        {sorted.map((piece, i) => (
+          <PieceCard
+            key={piece.id}
+            piece={piece}
+            index={pieceIndexes[i]}
+            sameSpeCount={speciesCounts[piece.species] ?? 1}
+            animIndex={animOffset + i}
+          />
+        ))}
       </div>
     </div>
   );
@@ -86,25 +137,9 @@ export default function RosterPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Sort by role order
-  const sorted = [...pieces].sort((a, b) => {
-    const ai = ROLE_ORDER.indexOf(a.role);
-    const bi = ROLE_ORDER.indexOf(b.role);
-    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-  });
-
-  // Count same-species occurrences for numbering
-  const speciesSeen: Record<string, number> = {};
-  const pieceIndexes = sorted.map((p) => {
-    const count = speciesSeen[p.species] ?? 0;
-    speciesSeen[p.species] = count + 1;
-    return count;
-  });
-
-  const speciesCounts = pieces.reduce<Record<string, number>>((acc, p) => {
-    acc[p.species] = (acc[p.species] ?? 0) + 1;
-    return acc;
-  }, {});
+  const redPieces = pieces.filter((p) => p.set_side === "red");
+  const bluePieces = pieces.filter((p) => p.set_side === "blue");
+  const hasAnyPieces = redPieces.length > 0 || bluePieces.length > 0;
 
   return (
     <PageShell title="My Pokémon">
@@ -117,21 +152,19 @@ export default function RosterPage() {
         {error && (
           <div className="text-center py-8 text-red-400 text-sm">{error}</div>
         )}
-        {!loading && !error && pieces.length === 0 && (
+        {!loading && !error && !hasAnyPieces && (
           <div className="text-center py-16 text-white/40">
             No Pokémon yet. Start a game!
           </div>
         )}
-        {!loading && !error && (
-          <div className="flex flex-col gap-3">
-            {sorted.map((piece, i) => (
-              <PieceCard
-                key={piece.id}
-                piece={piece}
-                index={pieceIndexes[i]}
-                sameSpeCount={speciesCounts[piece.species] ?? 1}
-              />
-            ))}
+        {!loading && !error && hasAnyPieces && (
+          <div className="flex flex-col gap-8">
+            {redPieces.length > 0 && (
+              <SetGroup pieces={redPieces} side="red" animOffset={0} />
+            )}
+            {bluePieces.length > 0 && (
+              <SetGroup pieces={bluePieces} side="blue" animOffset={redPieces.length} />
+            )}
           </div>
         )}
       </div>
