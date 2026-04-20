@@ -36,7 +36,7 @@ If the header is missing or invalid, FastAPI’s `HTTPBearer` dependency typical
 
 ### 1.3 Config (environment)
 
-Relevant variables: `JWT_SECRET_KEY`, `BOT_API_SECRET`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `ENVIRONMENT`, `CORS_ORIGINS` — see `app/config.py`.
+Relevant variables: `JWT_SECRET_KEY`, `BOT_API_SECRET`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `ENVIRONMENT`, `CORS_ORIGINS`, `TRUSTED_PROXY_IPS` — see `app/config.py`. **Temporary pre-launch:** `REGISTRATION_ACCESS_CODE` gates `POST /auth/register` when set; see §5.2 and §5.4 of MASTERDOC for details and removal plan.
 
 ---
 
@@ -89,6 +89,8 @@ Unexpected internal failures may return **500** without the `AppError` shape.
 
 **Rate limiting:** Auth routes use **SlowAPI** with per-client-IP limits (`app/routes/auth.py`): `POST /auth/register` **3/minute**, `POST /auth/login` **10/minute**, `POST /auth/refresh` **20/minute**. When exceeded, the response is **429 Too Many Requests** (SlowAPI default error body).
 
+**Temporary pre-launch registration gate:** `RegisterRequest` includes an optional `access_code: string | null` field. When the `REGISTRATION_ACCESS_CODE` environment variable is set, the server checks this field on `POST /auth/register` and returns **403** if it is missing or wrong. When `REGISTRATION_ACCESS_CODE` is unset (default), the field is ignored and registration is open. This gate will be removed before public launch.
+
 **Typical errors:**
 
 | Condition | Status | Notes |
@@ -97,6 +99,7 @@ Unexpected internal failures may return **500** without the `AppError` shape.
 | Bad login credentials | 401 | `unauthorized` |
 | Missing/invalid refresh cookie or token | 401 | `unauthorized` |
 | Rate limit exceeded (auth routes) | 429 | SlowAPI |
+| Invalid or absent `access_code` on register (when `REGISTRATION_ACCESS_CODE` set) | 403 | `forbidden` — temporary pre-launch gate |
 
 ---
 

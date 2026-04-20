@@ -46,10 +46,17 @@ def create_app() -> FastAPI:
         redoc_url=redoc_url,
         openapi_url=openapi_url,
     )
-    # Trust X-Forwarded-For from any upstream (ECS instances are shielded by security groups;
-    # only ALB reaches port 8000). Without this, get_remote_address reads the ALB's IP and all
-    # clients share a single rate-limit bucket.
-    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+    # TRUSTED_PROXY_IPS must be the ALB/VPC CIDR in production so that get_remote_address
+    # resolves to the true client IP rather than a spoofed X-Forwarded-For value.
+    # Leaving it as "*" in production would let attackers rotate XFF per request and
+    # bypass per-IP rate limits entirely. config.py documents the required value.
+    if config.ENVIRONMENT != "development" and config.TRUSTED_PROXY_IPS == "*":
+        raise RuntimeError(
+            "TRUSTED_PROXY_IPS cannot be '*' in non-development environments. "
+            "Set it to the ALB/VPC CIDR (e.g. '10.0.0.0/16') so that rate limits "
+            "cannot be bypassed via X-Forwarded-For spoofing."
+        )
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=config.TRUSTED_PROXY_IPS)
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     app.state.engine_url = config.ENGINE_URL
