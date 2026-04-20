@@ -79,6 +79,8 @@ docs/       Design docs, API spec, local testing runbook
 | `ENVIRONMENT` | `production` | Set to `development` in `.env` for local dev (disables Secure cookie, enables OpenAPI docs) |
 | `POKECHESS_TT_BUCKET` | _(unset)_ | S3 bucket for TT backups; omit to disable |
 | `POKECHESS_TT_SIZE` | `1048576` | TT slot count; use `67108864` in prod |
+| `TRUSTED_PROXY_IPS` | `*` | IPs/CIDRs trusted for `X-Forwarded-For` (rate-limit key source). Must be set to the ALB/VPC CIDR in production (e.g. `10.0.0.0/16`); app raises `RuntimeError` if `*` outside development. |
+| `REGISTRATION_ACCESS_CODE` | _(unset — optional)_ | **Temporary pre-launch gate.** When set, `POST /auth/register` returns 403 unless the request body includes a matching `access_code`. Leave unset for open registration. Will be removed before public launch. |
 
 ## Make Targets
 

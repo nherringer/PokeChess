@@ -111,6 +111,8 @@ No local `psql` required — schema is applied via `docker compose exec`.
 | `CORS_ORIGINS` | `*` (allowed when `ENVIRONMENT=development`) | Must be explicit domain — app raises `RuntimeError` if `*` and not development |
 | `ENVIRONMENT` | _(unset — defaults to `production`)_ | **Must be set to `development` locally** to disable `Secure` cookie flag (required for HTTP) and enable OpenAPI docs |
 | `POKECHESS_TT_BUCKET` / `AWS_DEFAULT_REGION` | Not needed — engine skips TT backup | Set in ECS task def for the engine container |
+| `TRUSTED_PROXY_IPS` | `"*"` — Compose hard-codes this; no ALB in local dev | Set by Terraform from the VPC CIDR — not operator-configured |
+| `REGISTRATION_ACCESS_CODE` | _(unset or set in `.env`)_ — **temporary pre-launch gate**; leave blank for open registration locally | Same — set via ECS env or Secrets Manager if gate is active; will be removed before public launch |
 
 **Specific gotchas:**
 

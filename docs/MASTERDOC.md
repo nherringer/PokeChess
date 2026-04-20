@@ -228,8 +228,8 @@ All routes are mounted from `app/main.py`. Prefixes below are **full path prefix
 
 - **Access token:** JWT in `Authorization: Bearer` for API calls.
 - **Refresh token:** HttpOnly cookie (`refresh_token`) on register/login; `/auth/refresh` rotates access.
-- **Config:** `JWT_SECRET_KEY`, `BOT_API_SECRET`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `ENVIRONMENT`, `CORS_ORIGINS` — see `app/config.py`. `JWT_SECRET_KEY` and `BOT_API_SECRET` must always be set (≥ 32 chars); the app raises `RuntimeError` at startup if either is missing.
-- **Rate limiting (app):** **SlowAPI** in `app/main.py` applies per-client-IP limits on auth routes in `app/routes/auth.py`: `POST /auth/register` **3/minute**, `POST /auth/login` **10/minute**, `POST /auth/refresh` **20/minute**. When exceeded, responses are **429**; clients should back off. **Reverse-proxy** or **WAF** limits in front of the app remain a good extra layer; app limits are not a substitute for volumetric DDoS protection.
+- **Config:** `JWT_SECRET_KEY`, `BOT_API_SECRET`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `ENVIRONMENT`, `CORS_ORIGINS`, `TRUSTED_PROXY_IPS` — see `app/config.py`. `JWT_SECRET_KEY` and `BOT_API_SECRET` must always be set (≥ 32 chars); the app raises `RuntimeError` at startup if either is missing.
+- **Rate limiting (app):** **SlowAPI** in `app/main.py` applies per-client-IP limits on auth routes in `app/routes/auth.py`: `POST /auth/register` **3/minute**, `POST /auth/login` **10/minute**, `POST /auth/refresh` **20/minute**. When exceeded, responses are **429**; clients should back off. **`TRUSTED_PROXY_IPS` must be restricted to the ALB/VPC CIDR in production**; leaving it as `*` lets clients spoof `X-Forwarded-For` and land each attempt in a fresh rate-limit bucket. **Reverse-proxy** or **WAF** limits in front of the app remain a good extra layer; app limits are not a substitute for volumetric DDoS protection.
 - **Registration password:** `RegisterRequest` enforces a minimum password length (**8** characters) via Pydantic — see `app/schemas.py`.
 
 ### 5.3 Engine `POST /move` — **code is canonical**
@@ -274,6 +274,8 @@ The engine must return a **flat** JSON object the app can pass into `Move(...)`:
 | `CORS_ORIGINS` | Comma-separated origins — required, no wildcard default |
 | `BOT_ACTIVE_WINDOW_MINUTES` | Sliding window for load-aware bot budgeting (default 22) |
 | `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS` | Token lifetimes |
+| `TRUSTED_PROXY_IPS` | IPs/CIDRs trusted for `X-Forwarded-For` (rate-limit key source). Must be ALB/VPC CIDR in production (e.g. `10.0.0.0/16`); app raises `RuntimeError` if `*` outside development. |
+| `REGISTRATION_ACCESS_CODE` | **Temporary pre-launch gate.** When set, `POST /auth/register` returns 403 unless the request body includes a matching `access_code`. Leave unset for open registration. Will be removed before public launch. |
 
 **`.env.example` and Compose:** The repo **`.env.example`** lists `DATABASE_URL` and `ENGINE_URL` so the full app surface is visible. For **`docker compose`**, **`docker-compose.yml`** still sets `DATABASE_URL` and `ENGINE_URL` on `pokechess-app` (from `POSTGRES_*` and service names), so you can leave those lines empty in `.env` when using Compose only. For **production** (e.g. ECS) or **running the app without Compose**, set `DATABASE_URL` to your Postgres DSN and `ENGINE_URL` to the engine base URL as needed.
 
