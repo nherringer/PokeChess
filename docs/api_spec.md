@@ -36,7 +36,7 @@ If the header is missing or invalid, FastAPI’s `HTTPBearer` dependency typical
 
 ### 1.3 Config (environment)
 
-Relevant variables: `JWT_SECRET_KEY`, `BOT_API_SECRET`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `ENVIRONMENT`, `CORS_ORIGINS`, `TRUSTED_PROXY_IPS` — see `app/config.py`. **Temporary pre-launch:** `REGISTRATION_ACCESS_CODE` gates `POST /auth/register` when set; see §3.2 and §5.4 of MASTERDOC for details and removal plan.
+Relevant variables: `JWT_SECRET_KEY`, `BOT_API_SECRET`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `ENVIRONMENT`, `CORS_ORIGINS`, `TRUSTED_PROXY_IPS` — see `app/config.py`. **Temporary pre-launch:** `REGISTRATION_ACCESS_CODE` gates `POST /auth/register` when set; see §5.2 and §5.4 of MASTERDOC for details and removal plan.
 
 ---
 
