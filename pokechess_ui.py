@@ -1449,7 +1449,7 @@ class PokeChessApp:
             # Check if a floor item appeared at this square (overflow drop)
             if (r, c) in new_floor and (r, c) not in old_floor:
                 dropped = new_floor[(r, c)].item.name
-                self.log_widget.add(f'  🌿 Explored ({r},{c}) — {dropped} dropped (bag full)', C_GREEN)
+                self.log_widget.add(f'  [Grass ({r},{c})] {dropped} dropped (bag full)', C_GREEN)
             else:
                 # Check if piece picked up an item by comparing held_items
                 item_found = None
@@ -1460,9 +1460,9 @@ class PokeChessApp:
                             item_found = piece.held_item.name
                             break
                 if item_found:
-                    self.log_widget.add(f'  🌿 Explored ({r},{c}) — found {item_found}!', C_GREEN)
+                    self.log_widget.add(f'  [Grass ({r},{c})] found {item_found}!', C_GREEN)
                 else:
-                    self.log_widget.add(f'  🌿 Explored ({r},{c}) — nothing here', C_DIM)
+                    self.log_widget.add(f'  [Grass ({r},{c})] nothing here', C_DIM)
 
     # ── HP and capture helpers ────────────────────────────────────────────────
 
