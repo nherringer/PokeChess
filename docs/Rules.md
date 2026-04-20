@@ -196,7 +196,8 @@ Eevee may **attack and move in the same turn**, in either order.
 The caster designates any square within its movement range as a **Foresight target**. No immediate damage occurs. At the **start of the caster's next turn**, the damage resolves against whatever piece occupies that square at that moment (if any).
 
 - Foresight **cannot be used on consecutive turns** — the caster must take at least one non-Foresight turn between uses.  
-- If the targeted square is empty when the damage resolves, nothing happens.
+- If the targeted square is empty when the damage resolves, nothing happens.  
+- **Foresight has no effect on Stealballs (including Master Stealballs).** If a Stealball occupies the target square when Foresight resolves, the effect fizzles — no damage is dealt and the Stealball is unaffected.
 
 ---
 

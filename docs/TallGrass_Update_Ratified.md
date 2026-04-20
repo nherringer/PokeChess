@@ -79,7 +79,7 @@ A Pokemon can hold **at most one item** at any time. If a Pokemon holding an ite
   - The item is **dropped on the square vacated by the KO'd Pokemon**.
   - That square is explored and visible to both players, with the item's identity visible to both players.
   - The item remains there and is **free to be picked up by either player's Pokemon**.
-- **Edge case — Foresight on a Stealball in tall grass:** Pokeballs cannot hold items, so no item interaction occurs. The vacated square remains unexplored tall grass.
+- **Edge case — Foresight targeting a Stealball:** Foresight has no effect on Stealballs. If the target square is occupied by a Stealball when Foresight resolves, the effect fizzles with no damage and no item interaction. The Stealball is unaffected. If the Stealball is in an unexplored tall grass square, the square remains unexplored.
 
 ---
 
@@ -186,10 +186,9 @@ Vaporeon, Flareon, Leafeon, and Jolteon **retain Quick Attack (QA)** in addition
 - **Type:** Psychic. **Base damage:** 80.
 - When Espeon uses Psywave, the attack radiates simultaneously along all 8 lines of queen movement (4 cardinal + 4 diagonal directions).
 - In each direction, the wave travels until it hits the first obstacle (any Pokemon, Stealball, or Healball). It does **not** pass through obstacles.
-- **Stealballs (Pokeball / Masterball):** Immediately destroyed, regardless of team. Wave stops in that direction.
 - **Non-Psychic Pokemon (any piece except Mew and Espeon):** Takes damage equal to **80 − 10×n**, where **n** is the number of empty squares between Espeon and the target. Friend and foe are affected equally. Wave stops in that direction.
 - **Psychic-type Pokemon (Mew and Espeon):** No damage. Wave stops in that direction.
-- **Healballs (Safetyball / Master Safetyball):** No damage, not destroyed. Wave stops in that direction.
+- **Stealballs (Pokeball / Masterball) and Healballs (Safetyball / Master Safetyball):** No damage, not destroyed. Wave stops in that direction. Stealballs and Healballs are treated identically — they block the wave but are otherwise unaffected.
 - **Minimum damage on this board:** 6 empty squares of separation → 80 − 60 = **20**.
 - Psywave consumes Espeon's full turn (it cannot be combined with a MOVE action).
 
@@ -251,7 +250,7 @@ Vaporeon, Flareon, Leafeon, and Jolteon **retain Quick Attack (QA)** in addition
 ### Eeveelution Movement and Abilities
 - Each eeveelution's movement is the union of standard king adjacency plus its expanded pattern (rook, bishop, knight-jump, or Raichu pattern). QA uses only the king adjacency subset of that union, except for Espeon which does not have QA.
 - **Espeon's move set:** MOVE (queen pattern), FORESIGHT, PSYWAVE, TRADE. Standard queen-range ATTACK moves are removed. Espeon cannot use Quick Attack.
-- **Espeon's Psywave:** Implement as `ActionType.PSYWAVE`. The move has no explicit target — it fires from Espeon's position in all 8 directions simultaneously. In `_do_psywave`, walk each ray until the first obstacle: destroy Stealballs, deal `max(10, 80 − 10×n)` to non-Psychic Pokemon, stop silently at Psychic-type Pokemon and Healballs.
+- **Espeon's Psywave:** Implement as `ActionType.PSYWAVE`. The move has no explicit target — it fires from Espeon's position in all 8 directions simultaneously. In `_do_psywave`, walk each ray until the first obstacle: deal `max(10, 80 − 10×n)` to non-Psychic Pokemon; stop silently at Psychic-type Pokemon, Stealballs, and Healballs (no damage or destruction for any of these).
 - **Flareon's Flare Blitz** (180 damage, FIRE type) should be implemented as a typed attack alongside QA. Apply 40 recoil damage to Flareon after the attack resolves. Knight-jump movement follows standard chess knight rules — it is not blocked by intervening pieces.
 - **Leafeon's -40 damage reduction** should be subtracted from the attacker's base damage before the type effectiveness multiplier is applied. Enforce a floor of 1 on the post-reduction base (so the multiplier is applied to at least 1).
 - **Jolteon's 2-square diagonal jumps** are unobstructed. **Raichu's 2-square cardinal slides** are also unobstructed — remove any intermediate-square obstruction check for both pieces.

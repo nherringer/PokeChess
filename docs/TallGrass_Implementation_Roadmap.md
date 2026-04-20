@@ -45,7 +45,7 @@ The implementation is complete when all of the following hold:
 ### HP Normalization and Eeveelution Changes
 17. Per-piece HP values match the spec table: Eevee 150, Vaporeon 300, Jolteon 200 (all other values are already correct).
 18. Vaporeon, Flareon, Leafeon, and Jolteon gain Quick Attack using base-Eevee movement (king adjacency only, NORMAL type, 50 base damage). **Espeon does not get QA** — its attacks are Foresight and Psywave only. Standard queen-range ATTACK moves are removed from Espeon's move generator. Jolteon gains 2-square diagonal jump moves (all four diagonal directions, unobstructed) on top of Raichu's full pattern. Raichu and Jolteon's 2-square cardinal moves are unobstructed — they jump over any intermediate pieces.
-19. Espeon's **Psywave** (`ActionType.PSYWAVE`) fires from Espeon's position along all 8 queen-movement rays simultaneously, stopping at the first obstacle per ray. Stealballs are destroyed. Non-Psychic Pokemon take `80 − 10×n` damage (n = empty squares between Espeon and target; min damage 20 on this board). Psychic-type Pokemon (Mew, Espeon) and Healballs stop the ray with no effect. Friend and foe are affected equally.
+19. Espeon's **Psywave** (`ActionType.PSYWAVE`) fires from Espeon's position along all 8 queen-movement rays simultaneously, stopping at the first obstacle per ray. Non-Psychic Pokemon take `80 − 10×n` damage (n = empty squares between Espeon and target; min damage 20 on this board), friend and foe equally. Psychic-type Pokemon (Mew, Espeon), Stealballs, and Healballs all stop the ray with no damage and no destruction. Foresight likewise has no effect on Stealballs — if a Stealball occupies the target square when Foresight resolves, the effect fizzles.
 20. Flareon's **Flare Blitz** (`ActionType.ATTACK`) deals 180 base FIRE damage and causes Flareon to take 40 recoil damage after the attack resolves. Recoil can KO Flareon. QA (`ActionType.QUICK_ATTACK`) has no recoil.
 21. Leafeon's incoming damage is reduced by 40 applied to the attacker's **base damage before type effectiveness** is calculated. The reduced base has a floor of 1 before the multiplier is applied.
 22. When the opposing player uses Foresight, the player's client shows only that **Mew or Espeon used Foresight** — the target square is not broadcast. The caster's player sees the target normally.
@@ -142,10 +142,11 @@ Low-cost structural changes that prevent painful refactoring when the Wild Pokem
 - **`attempt_capture(pokeball, target)` stub (new)**: Standalone function raising `NotImplementedError("Capture logic reserved for Wild Pokemon update")`.
 
 **Psywave — `_do_psywave(state, piece, move)` (new)**: For each of the 8 queen-movement directions, walk outward from `piece`'s square counting empty squares (`n`). On the first occupied square in that ray:
-  - `POKEBALL` or `MASTERBALL` (any team): remove from board, stop.
   - Non-Psychic Pokemon (`pokemon_type != PokemonType.PSYCHIC`, any team): deal `max(10, 80 - 10 * n)` damage; if HP ≤ 0, remove and trigger item drop. Stop.
-  - Psychic-type Pokemon or Healball (`SAFETYBALL` / `MASTER_SAFETYBALL`): stop with no effect.
+  - Psychic-type Pokemon, Stealball (`POKEBALL` / `MASTERBALL`), or Healball (`SAFETYBALL` / `MASTER_SAFETYBALL`): stop with no effect — no damage, no destruction.
   Add `PSYWAVE` to the `_apply_deterministic` dispatch table.
+
+**Foresight — Stealball immunity**: In `_resolve_foresight`, change the guard from `target.piece_type not in SAFETYBALL_TYPES` to `target.piece_type not in PAWN_TYPES`. This makes Foresight fizzle silently on both Stealballs and Healballs.
 
 **Variable Pokeball catch rates:**
 - Remove `_POKEBALL_CAPTURE_PROB = 0.5`.
