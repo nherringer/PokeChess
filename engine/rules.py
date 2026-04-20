@@ -121,7 +121,45 @@ def apply_move(state: GameState, move: Move) -> list[tuple[GameState, float]]:
 
     piece = new.board[move.piece_row][move.piece_col]
 
-    # --- Pokeball capture: the only stochastic action ---
+    # --- Pokeball capture: stochastic in both directions ---
+    # Case A: non-immune pokemon moves/attacks onto a pokeball (reverse capture attempt)
+    if (
+        move.action_type in (ActionType.MOVE, ActionType.ATTACK)
+        and piece.piece_type not in PAWN_TYPES
+        and piece.piece_type not in _POKEBALL_IMMUNE
+    ):
+        target = new.board[move.target_row][move.target_col]
+        if target is not None and target.piece_type == PieceType.POKEBALL and target.team != piece.team:
+            prob = _pokeball_catch_prob(piece)
+            # Fail branch: pokeball escapes — remove pokeball, pokemon stays; pokemon lands on pokeball's square
+            fail = state.copy()
+            _resolve_foresight(fail)
+            fail.foresight_used_last_turn[fail.active_player] = False
+            fail.has_traded[fail.active_player] = False
+            fail_piece = fail.board[move.piece_row][move.piece_col]
+            fail_target = fail.board[move.target_row][move.target_col]
+            # Drop pokeball's held item; pokeball disappears; pokemon moves to its square
+            if fail_target is not None and fail_target.held_item != Item.NONE:
+                fail.floor_items.append(FloorItem(row=move.target_row, col=move.target_col, item=fail_target.held_item))
+            fail.board[move.target_row][move.target_col] = None
+            fail.board[move.piece_row][move.piece_col] = None
+            fail_piece.row, fail_piece.col = move.target_row, move.target_col
+            fail.board[move.target_row][move.target_col] = fail_piece
+            if fail_piece.row in TALL_GRASS_ROWS and (fail_piece.row, fail_piece.col) not in fail.tall_grass_explored:
+                _explore_tall_grass(fail, fail_piece, move)
+            _discharge_unmoved_safetyballs(fail, fail_piece)
+            _advance_turn(fail)
+            # Success branch: pokemon captured — both disappear, drop pokemon's item at its square
+            if piece.held_item != Item.NONE:
+                new.floor_items.append(FloorItem(row=move.piece_row, col=move.piece_col, item=piece.held_item))
+            new.board[move.piece_row][move.piece_col] = None
+            new.board[move.target_row][move.target_col] = None
+            new.has_traded[new.active_player] = False
+            _discharge_unmoved_safetyballs(new, piece)
+            _advance_turn(new)
+            return [(new, prob), (fail, 1.0 - prob)]
+
+    # Case B: pokeball attacks a non-immune pokemon
     if move.action_type == ActionType.ATTACK and piece.piece_type == PieceType.POKEBALL:
         target = new.board[move.target_row][move.target_col]
         if target is None:
@@ -596,6 +634,8 @@ def _capture(
     state.board[target_row][target_col] = attacker
     if attacker.is_pawn:
         _check_promotion(state, attacker)
+    if not attacker.is_pawn and attacker.row in TALL_GRASS_ROWS and (attacker.row, attacker.col) not in state.tall_grass_explored:
+        _explore_tall_grass(state, attacker, move)
     if target_item != Item.NONE:
         _handle_item_encounter(state, attacker, target_item, move, from_r, from_c)
 

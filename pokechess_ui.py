@@ -114,6 +114,7 @@ ACTION_LABEL = {
     ActionType.EVOLVE:       'Evolve',
     ActionType.QUICK_ATTACK: 'Quick Attack',
     ActionType.RELEASE:      'Release',
+    ActionType.PSYWAVE:      'Psywave',
 }
 
 MEW_SLOTS  = {0: 'Fire Blast', 1: 'Hydro Pump', 2: 'Solar Beam'}
@@ -1860,12 +1861,12 @@ class PokeChessApp:
 
             if (row, col) == (sr, sc):
                 # Clicking the selected piece's own square:
-                # check for EVOLVE moves (target == piece square) before deselecting
-                evo_moves = [m for m in self.legal_for_sel
-                             if m.action_type == ActionType.EVOLVE]
-                if evo_moves:
-                    self.pending_moves = evo_moves
-                    self._build_action_buttons(evo_moves)
+                # show in-place actions (EVOLVE, PSYWAVE) before deselecting
+                inplace_moves = [m for m in self.legal_for_sel
+                                 if m.action_type in (ActionType.EVOLVE, ActionType.PSYWAVE)]
+                if inplace_moves:
+                    self.pending_moves = inplace_moves
+                    self._build_action_buttons(inplace_moves)
                 else:
                     # Deselect
                     self.selected = None
@@ -1959,9 +1960,9 @@ class PokeChessApp:
             if at == ActionType.EVOLVE:
                 lbl = f'Evolve → {EVO_SLOTS.get(m.move_slot, "?")}'
             if at == ActionType.QUICK_ATTACK:
-                target = s.board[m.secondary_row][m.secondary_col]
-                t_name = PIECE_LABEL.get(target.piece_type, '?') if target else '?'
-                lbl = f'QA via ({m.target_row},{m.target_col}) → {t_name}'
+                atk_target = s.board[m.target_row][m.target_col]
+                t_name = PIECE_LABEL.get(atk_target.piece_type, '?') if atk_target else '?'
+                lbl = f'QA: atk {t_name} → ({m.secondary_row},{m.secondary_col})'
             if m.overflow_keep == 'existing':
                 piece_on_sq = s.board[m.piece_row][m.piece_col]
                 existing_name = piece_on_sq.held_item.name if piece_on_sq else '?'

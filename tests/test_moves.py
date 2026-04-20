@@ -691,16 +691,24 @@ class TestKingMoves:
 # ---------------------------------------------------------------------------
 
 class TestPikachuMoves:
-    def test_always_has_evolve(self):
+    def test_evolve_requires_thunderstone(self):
         state = empty_state()
-        place(state, PieceType.PIKACHU, Team.RED, 4, 4)
+        pika = place(state, PieceType.PIKACHU, Team.RED, 4, 4)
+        # No item — evolve should not be offered
+        assert moves_of_type(get_legal_moves(state), ActionType.EVOLVE) == []
+
+    def test_evolve_with_thunderstone(self):
+        state = empty_state()
+        pika = place(state, PieceType.PIKACHU, Team.RED, 4, 4)
+        pika.held_item = Item.THUNDERSTONE
         evos = moves_of_type(get_legal_moves(state), ActionType.EVOLVE)
         assert len(evos) == 1
         assert evos[0].target_row == 4 and evos[0].target_col == 4  # in-place
 
     def test_evolve_move_slot_is_none(self):
         state = empty_state()
-        place(state, PieceType.PIKACHU, Team.RED, 4, 4)
+        pika = place(state, PieceType.PIKACHU, Team.RED, 4, 4)
+        pika.held_item = Item.THUNDERSTONE
         evo = moves_of_type(get_legal_moves(state), ActionType.EVOLVE)[0]
         assert evo.move_slot is None
 

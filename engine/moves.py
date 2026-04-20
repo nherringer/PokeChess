@@ -139,6 +139,10 @@ def _is_unexplored_grass(state: 'GameState', row: int, col: int) -> bool:
     return row in TALL_GRASS_ROWS and (row, col) not in state.tall_grass_explored
 
 
+def _has_hidden_item(state: 'GameState', row: int, col: int) -> bool:
+    return any(hi.row == row and hi.col == col for hi in state.hidden_items)
+
+
 def _floor_item_at(state: 'GameState', row: int, col: int) -> Optional[Item]:
     for fi in state.floor_items:
         if fi.row == row and fi.col == col:
@@ -234,7 +238,8 @@ def _expand_overflow_moves(piece: 'Piece', state: 'GameState', moves: list[Move]
     for m in moves:
         if m.action_type == ActionType.MOVE:
             needs_overflow = (
-                _is_unexplored_grass(state, m.target_row, m.target_col)
+                (_is_unexplored_grass(state, m.target_row, m.target_col)
+                 and _has_hidden_item(state, m.target_row, m.target_col))
                 or _floor_item_at(state, m.target_row, m.target_col) is not None
             )
             if needs_overflow:
@@ -337,25 +342,29 @@ def _forward(team: Team) -> int:
 
 def _forward_healball_entry(piece: 'Piece', state: 'GameState') -> list[Move]:
     """
-    Return a MOVE into the Healball directly ahead of piece, if valid.
+    Return MOVE moves into a Healball ahead of piece (directly and diagonally), if valid.
     Valid when: square has a friendly empty Healball, piece is injured, not Pikachu,
     and storing leaves at least one other piece on the board.
     """
-    fwd_row = piece.row + _forward(piece.team)
-    if not _in_bounds(fwd_row, piece.col):
+    if piece.piece_type == PieceType.PIKACHU or piece.current_hp >= piece.max_hp:
         return []
-    target = state.board[fwd_row][piece.col]
-    if (
-        target is not None
-        and target.piece_type in SAFETYBALL_TYPES
-        and target.team == piece.team
-        and target.stored_piece is None
-        and piece.current_hp < piece.max_hp
-        and piece.piece_type != PieceType.PIKACHU
-        and len(state.all_pieces(piece.team)) >= 3
-    ):
-        return [Move(piece.row, piece.col, ActionType.MOVE, fwd_row, piece.col)]
-    return []
+    if len(state.all_pieces(piece.team)) < 3:
+        return []
+    fwd_row = piece.row + _forward(piece.team)
+    moves = []
+    for dc in (-1, 0, 1):
+        tc = piece.col + dc
+        if not _in_bounds(fwd_row, tc):
+            continue
+        target = state.board[fwd_row][tc]
+        if (
+            target is not None
+            and target.piece_type in SAFETYBALL_TYPES
+            and target.team == piece.team
+            and target.stored_piece is None
+        ):
+            moves.append(Move(piece.row, piece.col, ActionType.MOVE, fwd_row, tc))
+    return moves
 
 
 def _squirtle_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
@@ -399,11 +408,16 @@ def _bulbasaur_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
 def _mew_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
     empties, enemies = _sliding_squares(piece, state, _QUEEN_DIRS)
     moves = [Move(piece.row, piece.col, ActionType.MOVE, r, c) for r, c in empties]
+    foresight_targets = list(empties)
     for r, c in enemies:
-        for slot in _MEW_SLOTS:
-            moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c, move_slot=slot))
+        if state.board[r][c].piece_type == PieceType.POKEBALL:
+            moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
+        else:
+            for slot in _MEW_SLOTS:
+                moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c, move_slot=slot))
+            foresight_targets.append((r, c))
     if not state.foresight_used_last_turn[piece.team]:
-        for r, c in empties + enemies:
+        for r, c in foresight_targets:
             moves.append(Move(piece.row, piece.col, ActionType.FORESIGHT, r, c))
     moves += _forward_healball_entry(piece, state)
     moves += _trade_moves(piece, state)
@@ -532,7 +546,8 @@ def _pikachu_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
         elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
             moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
-    moves.append(Move(piece.row, piece.col, ActionType.EVOLVE, piece.row, piece.col))
+    if piece.held_item == Item.THUNDERSTONE:
+        moves.append(Move(piece.row, piece.col, ActionType.EVOLVE, piece.row, piece.col))
     moves += _trade_moves(piece, state)
     return _expand_overflow_moves(piece, state, moves)
 
@@ -780,8 +795,15 @@ def _espeon_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
     moves = adj_moves
     moves += [Move(piece.row, piece.col, ActionType.MOVE, r, c)
               for r, c in empties if (r, c) not in adj_targets]
+    # Pokeball enemies → MOVE (in ray order, matching C++ gen_espeon)
+    foresight_targets = list(empties)
+    for r, c in enemies:
+        if state.board[r][c].piece_type == PieceType.POKEBALL:
+            moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
+        else:
+            foresight_targets.append((r, c))
     if not state.foresight_used_last_turn[piece.team]:
-        for r, c in empties + enemies:
+        for r, c in foresight_targets:
             moves.append(Move(piece.row, piece.col, ActionType.FORESIGHT, r, c))
     moves.append(Move(piece.row, piece.col, ActionType.PSYWAVE, piece.row, piece.col))
     moves += _forward_healball_entry(piece, state)

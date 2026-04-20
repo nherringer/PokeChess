@@ -498,18 +498,21 @@ static inline bool is_adj(const Piece& p, int r, int c) {
 // Forward Healball entry: non-pawn, non-Pikachu, injured piece can MOVE into
 // the friendly empty Safetyball directly ahead.
 static void forward_healball_entry(State& s, Piece& p, Move* mv, int& n) {
-    int fr = (int)p.row + fwd(p.team);
-    if (!in_bounds(fr, p.col)) return;
     int16_t mhp = MAX_HP[p.type];
     if (p.hp >= mhp) return; // not injured
-    int8_t fidx = idx_at(s, fr, p.col);
-    if (fidx < 0) return;
-    Piece& fwd_p = s.pieces[fidx];
-    if (!is_safetyball(fwd_p.type)) return;
-    if (fwd_p.team != p.team) return;
-    if (fwd_p.stored.type != PT_NONE) return;
     if (count_team(s, p.team) < 3) return;
-    add_mv(mv, n, p.row, p.col, ACT_MOVE, (uint8_t)fr, p.col);
+    int fr = (int)p.row + fwd(p.team);
+    for (int dc = -1; dc <= 1; dc++) {
+        int fc = (int)p.col + dc;
+        if (!in_bounds(fr, fc)) continue;
+        int8_t fidx = idx_at(s, fr, fc);
+        if (fidx < 0) continue;
+        Piece& fwd_p = s.pieces[fidx];
+        if (!is_safetyball(fwd_p.type)) continue;
+        if (fwd_p.team != p.team) continue;
+        if (fwd_p.stored.type != PT_NONE) continue;
+        add_mv(mv, n, p.row, p.col, ACT_MOVE, (uint8_t)fr, (uint8_t)fc);
+    }
 }
 
 static void gen_squirtle(State& s, Piece& p, Move* mv, int& n) {
@@ -548,14 +551,22 @@ static void gen_mew(State& s, Piece& p, Move* mv, int& n) {
     collect_sliding(s, p, emp, ne, atk, na, DIRS, 8);
     for (int i = 0; i < ne; i++) mv[n++] = emp[i];
     for (int i = 0; i < na; i++) {
-        for (int slot = 0; slot < 3; slot++)
-            add_mv(mv,n, atk[i].pr,atk[i].pc, ACT_ATTACK, atk[i].tr,atk[i].tc, 0,0, (int8_t)slot);
+        int8_t tidx = idx_at(s, atk[i].tr, atk[i].tc);
+        if (tidx >= 0 && s.pieces[tidx].type == PT_POKEBALL) {
+            add_mv(mv,n, atk[i].pr,atk[i].pc, ACT_MOVE, atk[i].tr,atk[i].tc);
+        } else {
+            for (int slot = 0; slot < 3; slot++)
+                add_mv(mv,n, atk[i].pr,atk[i].pc, ACT_ATTACK, atk[i].tr,atk[i].tc, 0,0, (int8_t)slot);
+        }
     }
     if (!s.fs_used[ti(p.team)]) {
         for (int i = 0; i < ne; i++)
             add_mv(mv,n, emp[i].pr,emp[i].pc, ACT_FORESIGHT, emp[i].tr,emp[i].tc);
-        for (int i = 0; i < na; i++)
-            add_mv(mv,n, atk[i].pr,atk[i].pc, ACT_FORESIGHT, atk[i].tr,atk[i].tc);
+        for (int i = 0; i < na; i++) {
+            int8_t tidx = idx_at(s, atk[i].tr, atk[i].tc);
+            if (tidx < 0 || s.pieces[tidx].type != PT_POKEBALL)
+                add_mv(mv,n, atk[i].pr,atk[i].pc, ACT_FORESIGHT, atk[i].tr,atk[i].tc);
+        }
     }
     forward_healball_entry(s,p,mv,n);
     trades(s,p,mv,n);
@@ -592,7 +603,8 @@ static void gen_pikachu(State& s, Piece& p, Move* mv, int& n) {
         {3,1},{3,-1},{-3,1},{-3,-1},{1,3},{1,-3},{-1,3},{-1,-3}
     };
     jumps<8>(s,p,mv,n,EXT);
-    add_mv(mv,n, p.row,p.col, ACT_EVOLVE, p.row,p.col); // → Raichu
+    if (p.item == ITEM_THUNDERSTONE)
+        add_mv(mv,n, p.row,p.col, ACT_EVOLVE, p.row,p.col); // → Raichu
     trades(s,p,mv,n);
 }
 static void gen_raichu(State& s, Piece& p, Move* mv, int& n) {
@@ -720,12 +732,20 @@ static void gen_espeon(State& s, Piece& p, Move* mv, int& n) {
     Move emp[64], atk[32]; int ne = 0, na = 0;
     collect_sliding(s, p, emp, ne, atk, na, DIRS, 8);
     for (int i = 0; i < ne; i++) if (!is_adj(p, emp[i].tr, emp[i].tc)) mv[n++] = emp[i];
-    // no ATTACK slides added
+    // Pokeball attack targets → MOVE (no ATTACK for Espeon)
+    for (int i = 0; i < na; i++) {
+        int8_t tidx = idx_at(s, atk[i].tr, atk[i].tc);
+        if (tidx >= 0 && s.pieces[tidx].type == PT_POKEBALL)
+            add_mv(mv,n, atk[i].pr,atk[i].pc, ACT_MOVE, atk[i].tr,atk[i].tc);
+    }
     if (!s.fs_used[ti(p.team)]) {
         for (int i = 0; i < ne; i++)
             add_mv(mv,n, emp[i].pr,emp[i].pc, ACT_FORESIGHT, emp[i].tr,emp[i].tc);
-        for (int i = 0; i < na; i++)
-            add_mv(mv,n, atk[i].pr,atk[i].pc, ACT_FORESIGHT, atk[i].tr,atk[i].tc);
+        for (int i = 0; i < na; i++) {
+            int8_t tidx = idx_at(s, atk[i].tr, atk[i].tc);
+            if (tidx < 0 || s.pieces[tidx].type != PT_POKEBALL)
+                add_mv(mv,n, atk[i].pr,atk[i].pc, ACT_FORESIGHT, atk[i].tr,atk[i].tc);
+        }
     }
     // PSYWAVE: no explicit target — encode as Espeon's own square (sentinel)
     add_mv(mv,n, p.row,p.col, ACT_PSYWAVE, p.row,p.col);
@@ -892,6 +912,31 @@ static void apply_move(State& s, const Move& mv, float roll) {
     // Used by discharge_unmoved_safetyballs to determine if a safetyball was moved.
     const uint8_t moved_type = p.type;
 
+    // ── Reverse pokeball capture: non-immune non-pawn attacks a pokeball ────
+    if (mv.action == ACT_ATTACK && !is_pawn(p.type) && p.type != PT_PIKACHU) {
+        int8_t t8 = idx_at(s, mv.tr, mv.tc);
+        if (t8 >= 0 && s.pieces[t8].type == PT_POKEBALL) {
+            int16_t mhp = MAX_HP[p.type];
+            float ratio = (mhp > 0) ? (float)p.hp / (float)mhp : 1.0f;
+            float prob = (p.type == PT_MEW)
+                ? ((ratio >= 1.0f) ? 0.20f : (ratio >= 0.5f) ? 0.40f : 0.60f)
+                : ((ratio >= 1.0f) ? 0.25f : (ratio >= 0.5f) ? 0.50f : 0.75f);
+            if (roll < prob) {
+                // Capture: pokemon captured — both disappear
+                kill_piece(s, pidx);
+                kill_piece(s, (int)t8);
+            } else {
+                // Fail: pokeball escapes — pokeball disappears, pokemon moves to its square
+                int tr = mv.tr, tc = mv.tc;
+                kill_piece(s, (int)t8);
+                move_piece(s, pidx, tr, tc);
+            }
+            s.has_traded[ti(s.active)] = 0;
+            discharge_unmoved_safetyballs(s, moved_type);
+            advance_turn(s); return;
+        }
+    }
+
     // ── POKEBALL stochastic ──────────────────────────────────────────────────
     if (mv.action == ACT_ATTACK && p.type == PT_POKEBALL) {
         int8_t t8 = idx_at(s, mv.tr, mv.tc);
@@ -1027,6 +1072,27 @@ static void apply_move(State& s, const Move& mv, float roll) {
                 advance_turn(s); return;
             }
         }
+        // Moving onto an enemy Pokeball — stochastic reverse capture
+        if (!is_pawn(p.type) && p.type != PT_PIKACHU && old_tidx >= 0) {
+            Piece& pb = s.pieces[old_tidx];
+            if (pb.type == PT_POKEBALL && pb.team != p.team) {
+                int16_t mhp = MAX_HP[p.type];
+                float ratio = (mhp > 0) ? (float)p.hp / (float)mhp : 1.0f;
+                float prob = (p.type == PT_MEW)
+                    ? ((ratio >= 1.0f) ? 0.20f : (ratio >= 0.5f) ? 0.40f : 0.60f)
+                    : ((ratio >= 1.0f) ? 0.25f : (ratio >= 0.5f) ? 0.50f : 0.75f);
+                if (roll < prob) {
+                    kill_piece(s, pidx);
+                    kill_piece(s, (int)old_tidx);
+                } else {
+                    kill_piece(s, (int)old_tidx);
+                    move_piece(s, pidx, mv.tr, mv.tc);
+                }
+                s.has_traded[ti(s.active)] = 0;
+                discharge_unmoved_safetyballs(s, moved_type);
+                advance_turn(s); return;
+            }
+        }
         move_piece(s, pidx, mv.tr, mv.tc);
         if (is_pawn(p.type)) check_promotion(p);
         if (is_safetyball(p.type)) {
@@ -1112,6 +1178,32 @@ static void apply_move(State& s, const Move& mv, float roll) {
         }
         // Secondary move (always present for QUICK_ATTACK)
         move_piece(s, pidx, mv.sr, mv.sc);
+        s.has_traded[ti(s.active)] = 0;
+        discharge_unmoved_safetyballs(s, moved_type);
+        advance_turn(s); return;
+    }
+
+    // ── PSYWAVE ──────────────────────────────────────────────────────────────
+    if (mv.action == ACT_PSYWAVE) {
+        static const int DIRS[8][2] = {{0,1},{0,-1},{1,0},{-1,0},{1,1},{1,-1},{-1,1},{-1,-1}};
+        for (auto& d : DIRS) {
+            int n_empty = 0;
+            int r = p.row + d[0], c = p.col + d[1];
+            while (in_bounds(r, c)) {
+                int8_t tidx = idx_at(s, r, c);
+                if (tidx >= 0) {
+                    Piece& tgt = s.pieces[tidx];
+                    if (!is_pawn(tgt.type) && POKE_TYPE[tgt.type] != PTYPE_PSYCHIC) {
+                        int dmg = std::max(10, 80 - 10 * n_empty);
+                        tgt.hp -= (int16_t)dmg;
+                        if (tgt.hp <= 0) kill_piece(s, (int)tidx);
+                    }
+                    break;
+                }
+                n_empty++;
+                r += d[0]; c += d[1];
+            }
+        }
         s.has_traded[ti(s.active)] = 0;
         discharge_unmoved_safetyballs(s, moved_type);
         advance_turn(s); return;
