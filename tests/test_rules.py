@@ -251,13 +251,14 @@ class TestPokeballCapture:
         results = apply_move(state, make_move(PieceType.POKEBALL, 3, 3, ActionType.ATTACK, 3, 4))
         assert abs(sum(p for _, p in results) - 1.0) < 1e-9
 
-    def test_each_probability_is_half(self):
+    def test_probability_at_full_hp(self):
+        # At full HP, non-Mew catch rate is 25% (variable rate: 25/50/75% by HP bin)
         state = empty_state()
         place(state, PieceType.POKEBALL, Team.RED, 3, 3)
         place(state, PieceType.SQUIRTLE, Team.BLUE, 3, 4)
         results = apply_move(state, make_move(PieceType.POKEBALL, 3, 3, ActionType.ATTACK, 3, 4))
         probs = sorted(p for _, p in results)
-        assert probs == [0.5, 0.5]
+        assert probs == [0.25, 0.75]
 
     def test_capture_state_both_removed(self):
         state = empty_state()
@@ -304,9 +305,9 @@ class TestPokeballCapture:
         place(state, PieceType.POKEBALL, Team.RED, 3, 3)
         place(state, PieceType.RAICHU, Team.BLUE, 3, 4)
         results = apply_move(state, make_move(PieceType.POKEBALL, 3, 3, ActionType.ATTACK, 3, 4))
-        assert len(results) == 2  # stochastic: 50% catch, 50% fail
+        assert len(results) == 2  # stochastic: 25% catch at full HP
         probs = sorted(p for _, p in results)
-        assert probs == [0.5, 0.5]
+        assert probs == [0.25, 0.75]
 
 
 # ---------------------------------------------------------------------------
@@ -416,8 +417,10 @@ class TestForesight:
 class TestTradeAction:
     def test_items_swapped(self):
         state = empty_state()
-        a = place(state, PieceType.SQUIRTLE,   Team.RED, 3, 3)  # WATERSTONE
-        b = place(state, PieceType.CHARMANDER, Team.RED, 3, 4)  # FIRESTONE
+        a = place(state, PieceType.SQUIRTLE,   Team.RED, 3, 3)
+        a.held_item = Item.WATERSTONE
+        b = place(state, PieceType.CHARMANDER, Team.RED, 3, 4)
+        b.held_item = Item.FIRESTONE
         [(ns, _)] = apply_move(state, make_move(PieceType.SQUIRTLE, 3, 3, ActionType.TRADE, 3, 4))
         pa = ns.board[3][3]
         pb = ns.board[3][4]
@@ -447,18 +450,19 @@ class TestTradeAction:
         [(ns, _)] = apply_move(state, make_move(PieceType.SQUIRTLE, 3, 3, ActionType.TRADE, 3, 4))
         assert ns.has_traded[Team.RED] is True
 
-    def test_eevee_trade_auto_evolves_and_advances_turn(self):
-        # Trading a Waterstone to Eevee triggers auto-evolution and ends the turn
+    def test_eevee_receives_stone_via_trade_and_holds_it(self):
+        # Trade gives Eevee the Waterstone — Eevee holds it (no auto-evolution on trade)
         state = empty_state(active=Team.BLUE)
-        squirtle = place(state, PieceType.SQUIRTLE, Team.BLUE, 3, 3)  # WATERSTONE
-        eevee    = place(state, PieceType.EEVEE,    Team.BLUE, 3, 4)  # NONE
+        squirtle = place(state, PieceType.SQUIRTLE, Team.BLUE, 3, 3)
+        squirtle.held_item = Item.WATERSTONE
+        eevee    = place(state, PieceType.EEVEE,    Team.BLUE, 3, 4)
         [(ns, _)] = apply_move(state, make_move(PieceType.SQUIRTLE, 3, 3, ActionType.TRADE, 3, 4))
-        # Eevee should have evolved to Vaporeon
-        assert ns.board[3][4].piece_type == PieceType.VAPOREON
-        # Stone consumed
-        assert ns.board[3][4].held_item == Item.NONE
-        # Turn should have advanced
-        assert ns.active_player == Team.RED
+        # Eevee still Eevee (player must use EVOLVE explicitly)
+        assert ns.board[3][4].piece_type == PieceType.EEVEE
+        # Eevee holds the stone
+        assert ns.board[3][4].held_item == Item.WATERSTONE
+        # Trade is a free action — turn stays with BLUE
+        assert ns.active_player == Team.BLUE
 
 
 # ---------------------------------------------------------------------------

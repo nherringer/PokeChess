@@ -1,9 +1,10 @@
 "use client";
 
 import React from "react";
-import type { BoardPieceData } from "@/lib/types/api";
+import type { BoardPieceData, FloorItemData } from "@/lib/types/api";
 import type { HighlightType } from "@/lib/game/highlightUtils";
 import { HIGHLIGHT_COLORS } from "@/lib/game/highlightUtils";
+import { ITEM_EMOJIS } from "@/lib/constants";
 import { PieceChip } from "./PieceChip";
 import { ForesightGlow } from "./ForesightGlow";
 import { SafetyballBadge } from "./SafetyballBadge";
@@ -15,6 +16,8 @@ interface BoardSquareProps {
   highlight: HighlightType | null;
   isSelected: boolean;
   hasForesight: boolean;
+  isUnexploredGrass: boolean;
+  floorItem: FloorItemData | null;
   onClick: () => void;
 }
 
@@ -25,6 +28,8 @@ export function BoardSquare({
   highlight,
   isSelected,
   hasForesight,
+  isUnexploredGrass,
+  floorItem,
   onClick,
 }: BoardSquareProps) {
   const isLight = (row + col) % 2 === 0;
@@ -45,6 +50,14 @@ export function BoardSquare({
         onClick();
       }}
     >
+      {/* Unexplored tall grass overlay */}
+      {isUnexploredGrass && (
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{ backgroundColor: "rgba(0,0,0,0.45)" }}
+        />
+      )}
+
       {/* Highlight overlay */}
       {highlightColor && (
         <div
@@ -55,6 +68,18 @@ export function BoardSquare({
 
       {/* Foresight glow */}
       {hasForesight && <ForesightGlow />}
+
+      {/* Floor item on empty square */}
+      {!piece && floorItem && (
+        <span
+          className="relative z-10 pointer-events-none"
+          style={{ fontSize: 18, opacity: 0.85 }}
+          role="img"
+          aria-label={floorItem.item}
+        >
+          {ITEM_EMOJIS[floorItem.item] ?? "❓"}
+        </span>
+      )}
 
       {/* Piece */}
       {piece && (
@@ -70,7 +95,7 @@ export function BoardSquare({
       )}
 
       {/* Dot indicator for empty highlight squares */}
-      {!piece && highlight && highlight !== "select" && (
+      {!piece && !floorItem && highlight && highlight !== "select" && (
         <div
           className="w-3 h-3 rounded-full opacity-80 pointer-events-none"
           style={{ backgroundColor: highlightColor ?? undefined }}

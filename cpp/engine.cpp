@@ -68,6 +68,7 @@ static constexpr uint8_t ACT_TRADE        = 4;
 static constexpr uint8_t ACT_EVOLVE       = 5;
 static constexpr uint8_t ACT_QUICK_ATTACK = 6;
 static constexpr uint8_t ACT_RELEASE      = 7;
+static constexpr uint8_t ACT_PSYWAVE      = 8;
 
 // Result codes
 static constexpr int WIN_NONE = 0;
@@ -93,8 +94,8 @@ static const int16_t MAX_HP[17] = {
     200, 200, 200, 250,  // 1-4
     0, 0, 0, 0,          // 5-8
     200, 250,            // 9-10 Pikachu, Raichu
-    120,                 // 11 Eevee
-    220, 220, 220, 220, 220, // 12-16 evolutions
+    150,                 // 11 Eevee
+    300, 220, 220, 200, 220, // 12-16 Vaporeon/Flareon/Leafeon/Jolteon/Espeon
 };
 
 static const int16_t BASE_DAMAGE[17] = {
@@ -103,7 +104,7 @@ static const int16_t BASE_DAMAGE[17] = {
     0, 0, 0, 0,          // 5-8
     100, 100,            // 9-10
     50,                  // 11 Eevee
-    100, 100, 100, 100, 80, // 12-16 (Espeon=80)
+    100, 180, 100, 100, 80, // 12-16 (Flareon=180, Espeon=80)
 };
 
 static inline uint8_t eevee_evo(uint8_t item) {
@@ -128,7 +129,7 @@ static const int16_t MATCHUP_INT[8][8] = {
     {0,  5,  5, 20, 10, 10, 10, 10},  // [2] FIRE   (beats GRASS)
     {0, 20,  5,  5, 10, 10, 10, 10},  // [3] GRASS  (beats WATER)
     {0, 10, 10, 10, 10, 10, 10, 10},  // [4] PSYCHIC
-    {0, 10, 10, 10, 10, 10, 10, 10},  // [5] ELECTRIC
+    {0, 20, 10, 10, 10, 10, 10, 10},  // [5] ELECTRIC (beats WATER)
     {0, 10, 10, 10, 10, 10, 10, 10},  // [6] NORMAL
     {0, 10, 10, 10, 10, 10, 10, 10},  // [7] NONE
 };
@@ -169,6 +170,7 @@ static int calc_damage(uint8_t atk_pt, uint8_t def_pt, int slot) {
         base = BASE_DAMAGE[atk_pt];
         atk_ptype = POKE_TYPE[atk_pt];
     }
+    if (def_pt == PT_LEAFEON) base = base - 40 < 1 ? 1 : base - 40;
     int def_ptype = POKE_TYPE[def_pt];
     int m = MATCHUP_INT[atk_ptype][def_ptype]; // 5, 10, or 20
     // raw = base * (m/10). We want round(raw / 10) * 10 with banker's rounding.
@@ -335,7 +337,7 @@ static void resolve_foresight(State& s) {
     int8_t tidx = idx_at(s, fx.row, fx.col);
     if (tidx >= 0) {
         Piece& t = s.pieces[tidx];
-        if (!is_safetyball(t.type)) {
+        if (!is_pawn(t.type)) {
             t.hp -= fx.damage;
             if (t.hp <= 0) {
                 s.board[fx.row][fx.col] = -1;
@@ -420,11 +422,11 @@ static void trades(State& s, Piece& p, Move* mv, int& n) {
 }
 
 static void raichu_cardinals(State& s, Piece& p, Move* mv, int& n) {
+    // Unobstructed 2-square cardinal jumps — intermediate square is leaped over.
     static const int D[4][2] = {{2,0},{-2,0},{0,2},{0,-2}};
     for (auto& d : D) {
-        int mr = p.row + d[0]/2, mc = p.col + d[1]/2;
-        int dr = p.row + d[0],   dc = p.col + d[1];
-        if (!in_bounds(dr, dc) || idx_at(s, mr, mc) >= 0) continue;
+        int dr = p.row + d[0], dc = p.col + d[1];
+        if (!in_bounds(dr, dc)) continue;
         int8_t oidx = idx_at(s, dr, dc);
         if (oidx < 0) add_mv(mv, n, p.row, p.col, ACT_MOVE, dr, dc);
         else {
@@ -493,12 +495,30 @@ static inline bool is_adj(const Piece& p, int r, int c) {
 // Per-type generators
 // ---------------------------------------------------------------------------
 
+// Forward Healball entry: non-pawn, non-Pikachu, injured piece can MOVE into
+// the friendly empty Safetyball directly ahead.
+static void forward_healball_entry(State& s, Piece& p, Move* mv, int& n) {
+    int fr = (int)p.row + fwd(p.team);
+    if (!in_bounds(fr, p.col)) return;
+    int16_t mhp = MAX_HP[p.type];
+    if (p.hp >= mhp) return; // not injured
+    int8_t fidx = idx_at(s, fr, p.col);
+    if (fidx < 0) return;
+    Piece& fwd_p = s.pieces[fidx];
+    if (!is_safetyball(fwd_p.type)) return;
+    if (fwd_p.team != p.team) return;
+    if (fwd_p.stored.type != PT_NONE) return;
+    if (count_team(s, p.team) < 3) return;
+    add_mv(mv, n, p.row, p.col, ACT_MOVE, (uint8_t)fr, p.col);
+}
+
 static void gen_squirtle(State& s, Piece& p, Move* mv, int& n) {
     // Python: [all MOVEs] then [all ATTACKs]
     static const int DIRS[4][2] = {{0,1},{0,-1},{1,0},{-1,0}};
     Move atk[8]; int na = 0;
     collect_sliding(s, p, mv, n, atk, na, DIRS, 4);
     for (int i = 0; i < na; i++) mv[n++] = atk[i];
+    forward_healball_entry(s,p,mv,n);
     trades(s,p,mv,n);
 }
 static void gen_charmander(State& s, Piece& p, Move* mv, int& n) {
@@ -506,6 +526,7 @@ static void gen_charmander(State& s, Piece& p, Move* mv, int& n) {
         {2,1},{2,-1},{-2,1},{-2,-1},{1,2},{1,-2},{-1,2},{-1,-2}
     };
     jumps<8>(s,p,mv,n,J);
+    forward_healball_entry(s,p,mv,n);
     trades(s,p,mv,n);
 }
 static void gen_bulbasaur(State& s, Piece& p, Move* mv, int& n) {
@@ -514,6 +535,7 @@ static void gen_bulbasaur(State& s, Piece& p, Move* mv, int& n) {
     Move atk[8]; int na = 0;
     collect_sliding(s, p, mv, n, atk, na, DIRS, 4);
     for (int i = 0; i < na; i++) mv[n++] = atk[i];
+    forward_healball_entry(s,p,mv,n);
     trades(s,p,mv,n);
 }
 
@@ -535,6 +557,7 @@ static void gen_mew(State& s, Piece& p, Move* mv, int& n) {
         for (int i = 0; i < na; i++)
             add_mv(mv,n, atk[i].pr,atk[i].pc, ACT_FORESIGHT, atk[i].tr,atk[i].tc);
     }
+    forward_healball_entry(s,p,mv,n);
     trades(s,p,mv,n);
 }
 
@@ -579,10 +602,13 @@ static void gen_raichu(State& s, Piece& p, Move* mv, int& n) {
     };
     jumps<8>(s,p,mv,n,EXT);
     raichu_cardinals(s,p,mv,n);
+    forward_healball_entry(s,p,mv,n);
     trades(s,p,mv,n);
 }
 
-static void gen_eevee_qa(State& s, Piece& p, Move* mv, int& n) {
+static void gen_qa(State& s, Piece& p, Move* mv, int& n) {
+    // Quick Attack: attack king-adjacent enemy, then move king-range from post-attack pos.
+    // QA always uses base 50 damage with the attacker's own type (matches Python _quick_attack_moves).
     static const int K[8][2] = {
         {-1,-1},{-1,0},{-1,1},{0,-1},{0,1},{1,-1},{1,0},{1,1}
     };
@@ -594,7 +620,12 @@ static void gen_eevee_qa(State& s, Piece& p, Move* mv, int& n) {
         Piece& target = s.pieces[aidx];
         if (target.team == p.team || is_safetyball(target.type)) continue;
 
-        int dmg = calc_damage(PT_EEVEE, target.type, -1);
+        // QA base 50, use attacker's own type (matches Python _quick_attack_moves)
+        int m = MATCHUP_INT[POKE_TYPE[p.type]][POKE_TYPE[target.type]];
+        int raw100 = 50 * m;
+        int q = raw100 / 100, rem = raw100 % 100;
+        int dmg = rem < 50 ? q*10 : (rem > 50 ? (q+1)*10 : (q%2==0 ? q*10 : (q+1)*10));
+        dmg = dmg < 10 ? 10 : dmg;
         bool ko = (dmg >= target.hp);
         int post_r = ko ? ar : (int)p.row;
         int post_c = ko ? ac : (int)p.col;
@@ -611,71 +642,94 @@ static void gen_eevee_qa(State& s, Piece& p, Move* mv, int& n) {
 }
 static void gen_eevee(State& s, Piece& p, Move* mv, int& n) {
     king_sq(s,p,mv,n);
-    gen_eevee_qa(s,p,mv,n);
+    gen_qa(s,p,mv,n);
     uint8_t evo = eevee_evo(p.item);
     if (evo != PT_NONE) {
         // slot encodes which evolution (Vaporeon=0..Espeon=4)
         int8_t slot = (int8_t)(p.item - ITEM_WATERSTONE); // WATERSTONE=2→0, ..., BENTSPOON=6→4
         add_mv(mv,n, p.row,p.col, ACT_EVOLVE, p.row,p.col, 0,0, slot);
     }
+    forward_healball_entry(s,p,mv,n);
     trades(s,p,mv,n);
 }
 static void gen_vaporeon(State& s, Piece& p, Move* mv, int& n) {
-    // Python: [king] + [rook MOVEs not adj] + [rook ATTACKs not adj] + trades
+    // Python: [king] + [rook MOVEs not adj] + [rook ATTACKs not adj] + QA + forward_healball + trades
     king_sq(s,p,mv,n);
     static const int DIRS[4][2] = {{0,1},{0,-1},{1,0},{-1,0}};
     Move emp[64], atk[8]; int ne = 0, na = 0;
     collect_sliding(s, p, emp, ne, atk, na, DIRS, 4);
     for (int i = 0; i < ne; i++) if (!is_adj(p, emp[i].tr, emp[i].tc)) mv[n++] = emp[i];
     for (int i = 0; i < na; i++) if (!is_adj(p, atk[i].tr, atk[i].tc)) mv[n++] = atk[i];
+    gen_qa(s,p,mv,n);
+    forward_healball_entry(s,p,mv,n);
     trades(s,p,mv,n);
 }
 static void gen_flareon(State& s, Piece& p, Move* mv, int& n) {
-    // Python: king + knight jumps (interleaved per jump — jumps() matches)
+    // Python: king + knight jumps + QA + forward_healball + trades
     king_sq(s,p,mv,n);
     static const int J[8][2] = {
         {2,1},{2,-1},{-2,1},{-2,-1},{1,2},{1,-2},{-1,2},{-1,-2}
     };
     jumps<8>(s,p,mv,n,J);
+    gen_qa(s,p,mv,n);
+    forward_healball_entry(s,p,mv,n);
     trades(s,p,mv,n);
 }
 static void gen_leafeon(State& s, Piece& p, Move* mv, int& n) {
-    // Python: [king] + [bishop MOVEs not adj] + [bishop ATTACKs not adj] + trades
+    // Python: [king] + [bishop MOVEs not adj] + [bishop ATTACKs not adj] + QA + forward_healball + trades
     king_sq(s,p,mv,n);
     static const int DIRS[4][2] = {{1,1},{1,-1},{-1,1},{-1,-1}};
     Move emp[64], atk[8]; int ne = 0, na = 0;
     collect_sliding(s, p, emp, ne, atk, na, DIRS, 4);
     for (int i = 0; i < ne; i++) if (!is_adj(p, emp[i].tr, emp[i].tc)) mv[n++] = emp[i];
     for (int i = 0; i < na; i++) if (!is_adj(p, atk[i].tr, atk[i].tc)) mv[n++] = atk[i];
+    gen_qa(s,p,mv,n);
+    forward_healball_entry(s,p,mv,n);
     trades(s,p,mv,n);
 }
 static void gen_jolteon(State& s, Piece& p, Move* mv, int& n) {
-    // Python: king + L-jumps + 2-sq cardinals (interleaved per square — matches)
+    // Python: king + L-jumps + unobstructed 2-sq cardinal jumps + 2-sq diagonal jumps + QA + forward_healball + trades
     king_sq(s,p,mv,n);
     static const int EXT[8][2] = {
         {3,1},{3,-1},{-3,1},{-3,-1},{1,3},{1,-3},{-1,3},{-1,-3}
     };
     jumps<8>(s,p,mv,n,EXT);
     raichu_cardinals(s,p,mv,n);
+    static const int DIAG[4][2] = {{2,2},{2,-2},{-2,2},{-2,-2}};
+    jumps<4>(s,p,mv,n,DIAG);
+    gen_qa(s,p,mv,n);
+    forward_healball_entry(s,p,mv,n);
     trades(s,p,mv,n);
 }
 static void gen_espeon(State& s, Piece& p, Move* mv, int& n) {
-    // Python: [king] + [queen MOVEs not adj] + [queen ATTACKs not adj]
-    //         + [FORESIGHT on ALL queen squares (incl adj)] + trades
-    king_sq(s,p,mv,n);
+    // Python: MOVE only (no ATTACK) + FORESIGHT on all queen-range squares + PSYWAVE + trades
+    // King adjacency: MOVE only (filter out ATTACK from king_sq)
+    static const int K[8][2] = {
+        {-1,-1},{-1,0},{-1,1},{0,-1},{0,1},{1,-1},{1,0},{1,1}
+    };
+    for (auto& kd : K) {
+        int r = p.row + kd[0], c = p.col + kd[1];
+        if (!in_bounds(r,c)) continue;
+        if (idx_at(s,r,c) < 0)
+            add_mv(mv,n, p.row,p.col, ACT_MOVE, r,c);
+        // no ATTACK added for Espeon
+    }
     static const int DIRS[8][2] = {
         {0,1},{0,-1},{1,0},{-1,0},{1,1},{1,-1},{-1,1},{-1,-1}
     };
     Move emp[64], atk[32]; int ne = 0, na = 0;
     collect_sliding(s, p, emp, ne, atk, na, DIRS, 8);
     for (int i = 0; i < ne; i++) if (!is_adj(p, emp[i].tr, emp[i].tc)) mv[n++] = emp[i];
-    for (int i = 0; i < na; i++) if (!is_adj(p, atk[i].tr, atk[i].tc)) mv[n++] = atk[i];
+    // no ATTACK slides added
     if (!s.fs_used[ti(p.team)]) {
         for (int i = 0; i < ne; i++)
             add_mv(mv,n, emp[i].pr,emp[i].pc, ACT_FORESIGHT, emp[i].tr,emp[i].tc);
         for (int i = 0; i < na; i++)
             add_mv(mv,n, atk[i].pr,atk[i].pc, ACT_FORESIGHT, atk[i].tr,atk[i].tc);
     }
+    // PSYWAVE: no explicit target — encode as Espeon's own square (sentinel)
+    add_mv(mv,n, p.row,p.col, ACT_PSYWAVE, p.row,p.col);
+    forward_healball_entry(s,p,mv,n);
     trades(s,p,mv,n);
 }
 
@@ -750,7 +804,12 @@ static bool sb_heal(State& s, int pidx) {
     Piece& p = s.pieces[pidx];
     StoredPiece& st = p.stored;
     int16_t mhp = MAX_HP[st.type];
-    int16_t heal = (p.type == PT_MASTER_SAFETYBALL) ? mhp / 2 : mhp / 4;
+    if (p.type == PT_MASTER_SAFETYBALL) {
+        // Master Safetyball: instant full HP on first heal; no auto-release.
+        st.hp = mhp;
+        return false;
+    }
+    int16_t heal = mhp / 4;
     st.hp = std::min((int16_t)(st.hp + heal), mhp);
     if (st.hp >= mhp) {
         // Auto-release: stored piece takes safetyball's position; safetyball consumed.
@@ -835,13 +894,23 @@ static void apply_move(State& s, const Move& mv, float roll) {
             discharge_unmoved_safetyballs(s, moved_type);
             advance_turn(s); return;
         }
-        if (roll < 0.5f) {
-            // Capture: both disappear
-            kill_piece(s, pidx);
-            kill_piece(s, (int)t8);
-        } else {
-            // Fail: pokeball disappears only, target unchanged
-            s.board[mv.pr][mv.pc] = -1; p.type = PT_NONE;
+        {
+            int16_t mhp = MAX_HP[tgt.type];
+            float ratio = (mhp > 0) ? (float)tgt.hp / (float)mhp : 1.0f;
+            float prob;
+            if (tgt.type == PT_MEW) {
+                prob = (ratio >= 1.0f) ? 0.20f : (ratio >= 0.5f) ? 0.40f : 0.60f;
+            } else {
+                prob = (ratio >= 1.0f) ? 0.25f : (ratio >= 0.5f) ? 0.50f : 0.75f;
+            }
+            if (roll < prob) {
+                // Capture: both disappear
+                kill_piece(s, pidx);
+                kill_piece(s, (int)t8);
+            } else {
+                // Fail: pokeball disappears only, target unchanged
+                s.board[mv.pr][mv.pc] = -1; p.type = PT_NONE;
+            }
         }
         s.has_traded[ti(s.active)] = 0;
         discharge_unmoved_safetyballs(s, moved_type);
@@ -927,7 +996,22 @@ static void apply_move(State& s, const Move& mv, float roll) {
 
     // ── MOVE ────────────────────────────────────────────────────────────────
     if (mv.action == ACT_MOVE) {
-        int8_t old_tidx = idx_at(s, mv.tr, mv.tc); // may be an injured ally (safetyball)
+        int8_t old_tidx = idx_at(s, mv.tr, mv.tc); // may be an injured ally (safetyball) or safetyball
+        // Pokemon-enters-Healball: non-pawn, non-Pikachu moving into a friendly empty safetyball
+        if (!is_pawn(p.type) && p.type != PT_PIKACHU && old_tidx >= 0) {
+            Piece& tgt = s.pieces[old_tidx];
+            if (is_safetyball(tgt.type) && tgt.team == p.team && tgt.stored.type == PT_NONE) {
+                tgt.stored = {p.type, p.team, p.item, p.hp};
+                s.board[p.row][p.col] = -1;
+                p.type = PT_NONE;
+                sb_heal(s, (int)old_tidx); // initial heal
+                s.has_traded[ti(s.active)] = 0;
+                // Pass the Safetyball's type so discharge treats this as a Safetyball move,
+                // preventing the just-stored Pokemon from being immediately expelled.
+                discharge_unmoved_safetyballs(s, tgt.type);
+                advance_turn(s); return;
+            }
+        }
         move_piece(s, pidx, mv.tr, mv.tc);
         if (is_pawn(p.type)) check_promotion(p);
         if (is_safetyball(p.type)) {
@@ -980,6 +1064,14 @@ static void apply_move(State& s, const Move& mv, float roll) {
                 move_piece(s, pidx, mv.tr, mv.tc);
                 if (is_pawn(p.type)) check_promotion(p);
             }
+            // Flareon recoil after regular attack
+            if (p.type == PT_FLAREON) {
+                p.hp -= 40;
+                if (p.hp <= 0) {
+                    s.board[p.row][p.col] = -1;
+                    p.type = PT_NONE;
+                }
+            }
             // Non-lethal: attacker stays
         }
         s.has_traded[ti(s.active)] = 0;
@@ -992,7 +1084,11 @@ static void apply_move(State& s, const Move& mv, float roll) {
         int8_t t8 = idx_at(s, mv.tr, mv.tc);
         if (t8 >= 0) {
             Piece& tgt = s.pieces[t8];
-            int dmg = calc_damage(PT_EEVEE, tgt.type, -1);
+            // QA base 50, attacker's own type (matches Python rules.py _do_quick_attack)
+            int m2 = MATCHUP_INT[POKE_TYPE[p.type]][POKE_TYPE[tgt.type]];
+            int r2 = 50 * m2, q2 = r2/100, rem2 = r2%100;
+            int dmg = rem2 < 50 ? q2*10 : (rem2 > 50 ? (q2+1)*10 : (q2%2==0 ? q2*10 : (q2+1)*10));
+            if (dmg < 10) dmg = 10;
             tgt.hp -= (int16_t)dmg;
             if (tgt.hp <= 0) {
                 kill_piece(s, (int)t8);
@@ -1149,6 +1245,32 @@ static py::list debug_moves(py::bytes state_bytes) {
     return result;
 }
 
+static py::list debug_state_after_n(py::bytes state_bytes, std::vector<float> rolls, int n_steps) {
+    std::string buf(state_bytes);
+    State s = decode_state(buf.data(), (int)buf.size());
+    size_t ri = 0;
+    Move moves[1024];
+    for (int d = 0; d < n_steps; d++) {
+        if (is_terminal(s)) break;
+        int n = get_legal_moves(s, moves);
+        if (n == 0) break;
+        float mroll = ri < rolls.size() ? rolls[ri++] : 0.0f;
+        float proll = ri < rolls.size() ? rolls[ri++] : 1.0f;
+        apply_move(s, moves[(int)(mroll * n) % n], proll);
+    }
+    py::list result;
+    for (int i = 0; i < s.n_pieces; i++) {
+        const Piece& p = s.pieces[i];
+        if (p.type == PT_NONE) continue;
+        result.append(py::make_tuple(
+            (int)p.type, (int)p.team, (int)p.row, (int)p.col,
+            (int)p.hp, (int)p.item,
+            (int)p.stored.type, (int)p.stored.hp
+        ));
+    }
+    return result;
+}
+
 PYBIND11_MODULE(pokechess_cpp, m) {
     m.doc() = "PokeChess C++ rollout engine";
 
@@ -1167,4 +1289,10 @@ PYBIND11_MODULE(pokechess_cpp, m) {
           py::arg("rolls"),
           py::arg("depth_limit") = 150,
           "Deterministic rollout with pre-supplied floats. Returns 1=RED win, 0=BLUE/draw.");
+
+    m.def("debug_state_after_n", &debug_state_after_n,
+          py::arg("state_bytes"),
+          py::arg("rolls"),
+          py::arg("n_steps"),
+          "Apply n_steps from state with pre-supplied rolls. Returns list of (type,team,row,col,hp,item,stored_type,stored_hp).");
 }

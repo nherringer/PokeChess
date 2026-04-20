@@ -301,36 +301,45 @@ class TestMewMoves:
 class TestTradeMoves:
     def test_trade_with_adjacent_friendly_different_item(self):
         state = empty_state()
-        place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)    # WATERSTONE
-        place(state, PieceType.CHARMANDER, Team.RED, 3, 4)  # FIRESTONE
+        sq = place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
+        sq.held_item = Item.WATERSTONE
+        ch = place(state, PieceType.CHARMANDER, Team.RED, 3, 4)
+        ch.held_item = Item.FIRESTONE
         trades = moves_of_type(get_legal_moves(state), ActionType.TRADE)
         assert any(m.target_row == 3 and m.target_col == 4 for m in trades)
 
     def test_no_trade_with_same_item(self):
         # Two Squirtles both hold WATERSTONE
         state = empty_state()
-        place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
-        place(state, PieceType.SQUIRTLE, Team.RED, 3, 4)
+        sq1 = place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
+        sq1.held_item = Item.WATERSTONE
+        sq2 = place(state, PieceType.SQUIRTLE, Team.RED, 3, 4)
+        sq2.held_item = Item.WATERSTONE
         assert moves_of_type(get_legal_moves(state), ActionType.TRADE) == []
 
     def test_no_trade_with_enemy(self):
         state = empty_state()
-        place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
-        place(state, PieceType.CHARMANDER, Team.BLUE, 3, 4)
+        sq = place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
+        sq.held_item = Item.WATERSTONE
+        ch = place(state, PieceType.CHARMANDER, Team.BLUE, 3, 4)
+        ch.held_item = Item.FIRESTONE
         assert moves_of_type(get_legal_moves(state), ActionType.TRADE) == []
 
     def test_trade_with_diagonal_neighbor(self):
         state = empty_state()
-        place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)    # WATERSTONE
-        place(state, PieceType.CHARMANDER, Team.RED, 4, 4)  # FIRESTONE
+        sq = place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
+        sq.held_item = Item.WATERSTONE
+        ch = place(state, PieceType.CHARMANDER, Team.RED, 4, 4)
+        ch.held_item = Item.FIRESTONE
         trades = moves_of_type(get_legal_moves(state), ActionType.TRADE)
         assert any(m.target_row == 4 and m.target_col == 4 for m in trades)
 
     def test_trade_with_none_item(self):
         # Squirtle (WATERSTONE) can trade with Eevee (NONE)
         state = empty_state()
-        place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
-        place(state, PieceType.EEVEE, Team.RED, 3, 4)
+        sq = place(state, PieceType.SQUIRTLE, Team.RED, 3, 3)
+        sq.held_item = Item.WATERSTONE
+        place(state, PieceType.EEVEE, Team.RED, 3, 4)  # NONE item
         trades = moves_of_type(get_legal_moves(state), ActionType.TRADE)
         assert any(m.target_row == 3 and m.target_col == 4 for m in trades)
 
@@ -632,7 +641,8 @@ class TestKingMoves:
         PieceType.PIKACHU, PieceType.RAICHU,
         PieceType.EEVEE,
         PieceType.VAPOREON, PieceType.FLAREON,
-        PieceType.LEAFEON, PieceType.JOLTEON, PieceType.ESPEON,
+        PieceType.LEAFEON, PieceType.JOLTEON,
+        # Espeon excluded: it has no ATTACK moves (uses Foresight + Psywave instead)
     ])
     def test_attacks_adjacent_enemy(self, pt):
         state = empty_state()
@@ -640,6 +650,13 @@ class TestKingMoves:
         place(state, PieceType.SQUIRTLE, Team.BLUE, 4, 5)
         atk = moves_of_type(moves_from(get_legal_moves(state), 4, 4), ActionType.ATTACK)
         assert any(m.target_row == 4 and m.target_col == 5 for m in atk)
+
+    def test_espeon_has_no_attack_moves(self):
+        state = empty_state()
+        place(state, PieceType.ESPEON, Team.RED, 4, 4)
+        place(state, PieceType.SQUIRTLE, Team.BLUE, 4, 5)
+        atk = moves_of_type(moves_from(get_legal_moves(state), 4, 4), ActionType.ATTACK)
+        assert atk == []
 
     @pytest.mark.parametrize("pt", [
         PieceType.PIKACHU, PieceType.RAICHU,

@@ -34,11 +34,11 @@ class TestPieceStats:
             PieceType.MEW:        250,
             PieceType.PIKACHU:    200,
             PieceType.RAICHU:     250,
-            PieceType.EEVEE:      120,
-            PieceType.VAPOREON:   220,
+            PieceType.EEVEE:      150,
+            PieceType.VAPOREON:   300,
             PieceType.FLAREON:    220,
             PieceType.LEAFEON:    220,
-            PieceType.JOLTEON:    220,
+            PieceType.JOLTEON:    200,
             PieceType.ESPEON:     220,
         }
         for pt, hp in expected.items():
@@ -182,9 +182,9 @@ class TestPieceCreate:
         assert piece.current_hp == 200
         assert piece.max_hp == 200
 
-    def test_creates_with_default_item(self):
+    def test_creates_with_no_item(self):
         piece = Piece.create(PieceType.SQUIRTLE, Team.RED, 0, 0)
-        assert piece.held_item == Item.WATERSTONE
+        assert piece.held_item == Item.NONE
 
     def test_position_stored(self):
         piece = Piece.create(PieceType.MEW, Team.BLUE, 7, 3)
@@ -233,6 +233,7 @@ class TestPieceCopy:
 
     def test_copy_item_independent(self):
         piece = Piece.create(PieceType.SQUIRTLE, Team.RED, 0, 0)
+        piece.held_item = Item.WATERSTONE  # manually give it an item
         copy = piece.copy()
         copy.held_item = Item.NONE
         assert piece.held_item == Item.WATERSTONE
@@ -269,7 +270,7 @@ class TestNewGame:
         assert len(state.all_pieces(Team.BLUE)) == 16
 
     def test_each_team_has_four_pokeballs_and_four_safetyballs(self, state):
-        for team in Team:
+        for team in (Team.RED, Team.BLUE):
             stealballs = [p for p in state.all_pieces(team) if p.piece_type == PieceType.POKEBALL]
             safetyballs = [p for p in state.all_pieces(team) if p.piece_type == PieceType.SAFETYBALL]
             assert len(stealballs) == 4
@@ -335,9 +336,9 @@ class TestNewGame:
         for piece in state.all_pieces():
             assert piece.current_hp == piece.max_hp
 
-    def test_all_pieces_have_default_items(self, state):
+    def test_all_pieces_start_with_no_item(self, state):
         for piece in state.all_pieces():
-            assert piece.held_item == PIECE_STATS[piece.piece_type].default_item
+            assert piece.held_item == Item.NONE
 
 
 # ---------------------------------------------------------------------------
@@ -401,8 +402,9 @@ class TestGameStateCopy:
         assert state.board[0][0].current_hp == 200
 
     def test_mutating_piece_item_in_copy_does_not_affect_original(self, state):
+        state.board[0][0].held_item = Item.WATERSTONE  # give a known item
         copy = state.copy()
-        copy.board[0][0].held_item = Item.NONE
+        copy.board[0][0].held_item = Item.FIRESTONE
         assert state.board[0][0].held_item == Item.WATERSTONE
 
     def test_removing_piece_from_copy_does_not_affect_original(self, state):

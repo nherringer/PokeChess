@@ -1,6 +1,6 @@
 import type { LegalMoveOut } from "@/lib/types/api";
 
-export type PickerType = "mew_attack" | "pikachu_evolve" | "eevee_evolve";
+export type PickerType = "mew_attack" | "pikachu_evolve" | "eevee_evolve" | "item_overflow";
 
 export function detectDisambiguation(
   legalMoves: LegalMoveOut[],
@@ -18,6 +18,13 @@ export function detectDisambiguation(
 }
 
 export function classifyPicker(moves: LegalMoveOut[]): PickerType {
+  // Item overflow: moves differ only by overflow_keep
+  const overflowMoves = moves.filter((m) => m.overflow_keep !== null && m.overflow_keep !== undefined);
+  if (overflowMoves.length > 0) {
+    const keepValues = new Set(overflowMoves.map((m) => m.overflow_keep));
+    if (keepValues.size > 1) return "item_overflow";
+  }
+
   // If any move is EVOLVE, check what kind
   const evolveMoves = moves.filter((m) => m.action_type === "EVOLVE");
   if (evolveMoves.length > 0) {

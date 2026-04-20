@@ -1,9 +1,9 @@
 "use client";
 
 import React from "react";
-import type { BoardPieceData, ForesightEffect } from "@/lib/types/api";
+import type { BoardPieceData, ForesightEffect, FloorItemData } from "@/lib/types/api";
 import type { HighlightType } from "@/lib/game/highlightUtils";
-import { apiToDisplay } from "@/lib/game/boardUtils";
+import { apiToDisplay, isTallGrassDisplayRow } from "@/lib/game/boardUtils";
 import { BoardSquare } from "./BoardSquare";
 
 interface GameBoardProps {
@@ -13,6 +13,8 @@ interface GameBoardProps {
   onSquareClick: (row: number, col: number) => void;
   disabled: boolean;
   localSide: "red" | "blue";
+  tallGrassExplored: Set<string>;
+  floorItemGrid: (FloorItemData | null)[][];
 }
 
 export function GameBoard({
@@ -22,6 +24,8 @@ export function GameBoard({
   onSquareClick,
   disabled,
   localSide,
+  tallGrassExplored,
+  floorItemGrid,
 }: GameBoardProps) {
   // Build foresight cell set from display coordinates
   const foresightCells = new Set<string>();
@@ -46,6 +50,9 @@ export function GameBoard({
           const key = `${rowIdx},${colIdx}`;
           const highlight = highlightMap.get(key) ?? null;
           const hasForesight = foresightCells.has(key);
+          const isTallGrass = isTallGrassDisplayRow(rowIdx, localSide);
+          const isUnexploredGrass = isTallGrass && !tallGrassExplored.has(key);
+          const floorItem = floorItemGrid[rowIdx][colIdx];
 
           return (
             <BoardSquare
@@ -56,6 +63,8 @@ export function GameBoard({
               highlight={highlight}
               isSelected={highlight === "select"}
               hasForesight={hasForesight}
+              isUnexploredGrass={isUnexploredGrass}
+              floorItem={floorItem}
               onClick={() => {
                 if (!disabled) {
                   onSquareClick(rowIdx, colIdx);

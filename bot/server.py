@@ -156,11 +156,12 @@ async def health():
 async def get_move(body: MoveRequest):
     global request_count
 
-    # 1. Deserialize state
+    # 1. Deserialize state; strip hidden_items so the bot is blind to unexplored grass
     try:
         state = GameState.from_dict(body.state)
     except (KeyError, ValueError, TypeError, IndexError) as exc:
         raise HTTPException(status_code=422, detail=f"Invalid state: {exc}") from exc
+    state.hidden_items = []
 
     # 2. Extract and clamp time_budget
     time_budget = max(0.1, min(10.0, body.persona_params.time_budget))

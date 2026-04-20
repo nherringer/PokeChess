@@ -1,20 +1,24 @@
 "use client";
 
-import React, { useEffect, useCallback } from "react";
+import React, { useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useGame } from "@/lib/hooks/useGame";
 import { useGameStore } from "@/lib/store/gameStore";
 import { useAuthStore } from "@/lib/store/authStore";
 import { useLegalMoves } from "@/lib/hooks/useLegalMoves";
 import { useGameMutation } from "@/lib/hooks/useGameMutation";
-import { parseBoardGrid } from "@/lib/game/boardUtils";
+import {
+  parseBoardGrid,
+  parseFloorItemGrid,
+  parseTallGrassExplored,
+  displayToApi,
+} from "@/lib/game/boardUtils";
 import { buildHighlightMap } from "@/lib/game/highlightUtils";
 import {
   detectDisambiguation,
   classifyPicker,
   type PickerType,
 } from "@/lib/game/disambiguate";
-import { displayToApi } from "@/lib/game/boardUtils";
 import type { LegalMoveOut, MovePayload } from "@/lib/types/api";
 
 import { GameBoard } from "@/components/game/board/GameBoard";
@@ -28,6 +32,8 @@ import { QuickAttackHint } from "@/components/game/QuickAttackHint";
 import { MewAttackPicker } from "@/components/game/pickers/MewAttackPicker";
 import { PikachuEvolvePicker } from "@/components/game/pickers/PikachuEvolvePicker";
 import { EeveeEvolvePicker } from "@/components/game/pickers/EeveeEvolvePicker";
+import { ItemOverflowPicker } from "@/components/game/pickers/ItemOverflowPicker";
+import { ExplorationToast, type ExplorationEvent } from "@/components/game/ExplorationToast";
 import { PokeballWiggle } from "@/components/game/animations/PokeballWiggle";
 import { Spinner } from "@/components/ui/Spinner";
 
@@ -76,6 +82,14 @@ export default function GamePage() {
     ? parseBoardGrid(game.state, localSide)
     : Array.from({ length: 8 }, () => Array(8).fill(null));
 
+  const tallGrassExplored = game?.state?.tall_grass_explored
+    ? parseTallGrassExplored(game.state.tall_grass_explored, localSide)
+    : new Set<string>();
+
+  const floorItemGrid = game?.state?.floor_items
+    ? parseFloorItemGrid(game.state.floor_items, localSide)
+    : Array.from({ length: 8 }, () => Array(8).fill(null));
+
   const highlightMap = buildHighlightMap(
     store.legalMoves,
     store.selectedSquare,
@@ -85,6 +99,40 @@ export default function GamePage() {
   );
 
   const pendingForesight = game?.state?.pending_foresight ?? {};
+
+  // Exploration toast state
+  const [explorationEvents, setExplorationEvents] = React.useState<ExplorationEvent[]>([]);
+  const explorationIdRef = useRef(0);
+  const prevExploredRef = useRef<string>("");
+
+  useEffect(() => {
+    if (!game?.state?.tall_grass_explored) return;
+    const currentKey = JSON.stringify(game.state.tall_grass_explored);
+    if (currentKey === prevExploredRef.current) return;
+
+    if (prevExploredRef.current) {
+      const prevSet: Set<string> = new Set(
+        (JSON.parse(prevExploredRef.current) as [number, number][]).map(
+          ([r, c]) => `${r},${c}`
+        )
+      );
+      const newlyExplored = (game.state.tall_grass_explored as [number, number][]).filter(
+        ([r, c]) => !prevSet.has(`${r},${c}`)
+      );
+      if (newlyExplored.length > 0) {
+        const newEvents: ExplorationEvent[] = newlyExplored.map(() => ({
+          id: ++explorationIdRef.current,
+          item: null,
+        }));
+        setExplorationEvents((prev) => [...prev, ...newEvents]);
+      }
+    }
+    prevExploredRef.current = currentKey;
+  }, [game?.state?.tall_grass_explored]);
+
+  const dismissExplorationEvent = useCallback((id: number) => {
+    setExplorationEvents((prev) => prev.filter((e) => e.id !== id));
+  }, []);
 
   // Disambiguation state
   const disambigMoves = store.disambigMoves;
@@ -277,7 +325,7 @@ export default function GamePage() {
       {/* Board — center, dominant */}
       <div className="relative flex-1 flex flex-col min-h-0">
         <div className="w-full flex-1 flex items-center justify-center bg-bg-deep">
-          <div className="w-full max-w-[100vw]" style={{ aspectRatio: "1 / 1" }}>
+          <div className="relative w-full max-w-[100vw]" style={{ aspectRatio: "1 / 1" }}>
             <GameBoard
               grid={grid}
               highlightMap={highlightMap}
@@ -285,6 +333,14 @@ export default function GamePage() {
               onSquareClick={handleSquareClick}
               disabled={!isMyTurn || mutLoading || movesLoading}
               localSide={localSide}
+              tallGrassExplored={tallGrassExplored}
+              floorItemGrid={floorItemGrid}
+            />
+
+            {/* Exploration toasts */}
+            <ExplorationToast
+              events={explorationEvents}
+              onDismiss={dismissExplorationEvent}
             />
 
             {/* Bot thinking overlay */}
@@ -351,6 +407,20 @@ export default function GamePage() {
         <EeveeEvolvePicker
           open={pickerOpen}
           moves={disambigMoves ?? []}
+          onPick={handlePickerPick}
+          onClose={handlePickerClose}
+        />
+      )}
+      {pickerType === "item_overflow" && (
+        <ItemOverflowPicker
+          open={pickerOpen}
+          moves={disambigMoves ?? []}
+          existingItem={
+            store.selectedSquare
+              ? (grid[store.selectedSquare.row]?.[store.selectedSquare.col]?.held_item ?? "NONE")
+              : "NONE"
+          }
+          newItem="UNKNOWN"
           onPick={handlePickerPick}
           onClose={handlePickerClose}
         />

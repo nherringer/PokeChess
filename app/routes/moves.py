@@ -13,7 +13,7 @@ from engine.state import PieceType, Team
 from ..auth import Db, CurrentUser
 from ..main import AppError
 from ..schemas import GameDetail, LegalMoveOut, MovePayload
-from ..game_logic.serialization import state_from_dict, state_to_dict, IdMap
+from ..game_logic.serialization import state_from_dict, state_to_dict, player_view_of_state, IdMap
 from ..game_logic.id_map import remap_ids
 from ..game_logic.history import build_history_entry, build_foresight_resolve_entry
 from ..game_logic.xp import compute_xp
@@ -296,7 +296,7 @@ async def submit_move(
             # time_budget with the load-adjusted value.
             persona_params = {**bot_params, "time_budget": effective_time_budget}
 
-            bot_state_dict = state_to_dict(new_state, id_map)
+            bot_state_dict = player_view_of_state(new_state, new_state.active_player, id_map)
             bot_move_raw = await request_bot_move(request, bot_state_dict, persona_params)
 
             try:
