@@ -590,7 +590,7 @@ def _quick_attack_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
         target = state.board[att_r][att_c]
         if target is None or target.team == piece.team:
             continue
-        if target.piece_type in SAFETYBALL_TYPES:
+        if target.piece_type in PAWN_TYPES:
             continue
 
         type_mult = MATCHUP[piece.pokemon_type][target.pokemon_type]

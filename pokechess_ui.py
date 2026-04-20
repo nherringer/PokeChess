@@ -1446,23 +1446,16 @@ class PokeChessApp:
         old_floor = {(fi.row, fi.col): fi for fi in old_state.floor_items}
         new_floor = {(fi.row, fi.col): fi for fi in new_state.floor_items}
         for (r, c) in sorted(newly):
-            # Check if a floor item appeared at this square (overflow drop)
-            if (r, c) in new_floor and (r, c) not in old_floor:
-                dropped = new_floor[(r, c)].item.name
-                self.log_widget.add(f'  [Grass ({r},{c})] {dropped} dropped (bag full)', C_GREEN)
+            # Check what was hidden at this square before exploration
+            hidden = next((h for h in old_state.hidden_items if h.row == r and h.col == c), None)
+            if hidden is None:
+                self.log_widget.add(f'  [Grass ({r},{c})] nothing here', C_DIM)
+            elif (r, c) in new_floor and (r, c) not in old_floor:
+                # Item was dropped at this square (overflow — bag was full)
+                self.log_widget.add(f'  [Grass ({r},{c})] {hidden.item.name} dropped (bag full)', C_GREEN)
             else:
-                # Check if piece picked up an item by comparing held_items
-                item_found = None
-                for piece in new_state.all_pieces():
-                    if piece.held_item != Item.NONE:
-                        old_piece = old_state.board[piece.row][piece.col]
-                        if old_piece and old_piece.held_item == Item.NONE:
-                            item_found = piece.held_item.name
-                            break
-                if item_found:
-                    self.log_widget.add(f'  [Grass ({r},{c})] found {item_found}!', C_GREEN)
-                else:
-                    self.log_widget.add(f'  [Grass ({r},{c})] nothing here', C_DIM)
+                # Item was picked up directly
+                self.log_widget.add(f'  [Grass ({r},{c})] found {hidden.item.name}!', C_GREEN)
 
     # ── HP and capture helpers ────────────────────────────────────────────────
 
@@ -2239,7 +2232,7 @@ class PokeChessApp:
                 # Unexplored tall grass: dark overlay
                 if r in TALL_GRASS_ROWS and (r, c) not in state.tall_grass_explored:
                     grass_ol = pygame.Surface((CELL, CELL), pygame.SRCALPHA)
-                    grass_ol.fill((0, 0, 0, 115))
+                    grass_ol.fill((0, 0, 0, 230))
                     surf.blit(grass_ol, (sx, sy))
 
                 # Highlights as overlays

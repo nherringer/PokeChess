@@ -618,7 +618,7 @@ static void gen_qa(State& s, Piece& p, Move* mv, int& n) {
         int8_t aidx = idx_at(s, ar, ac);
         if (aidx < 0) continue;
         Piece& target = s.pieces[aidx];
-        if (target.team == p.team || is_safetyball(target.type)) continue;
+        if (target.team == p.team || is_pawn(target.type)) continue;
 
         // QA base 50, use attacker's own type (matches Python _quick_attack_moves)
         int m = MATCHUP_INT[POKE_TYPE[p.type]][POKE_TYPE[target.type]];
@@ -772,7 +772,7 @@ static int get_legal_moves(State& s, Move* mv) {
 
 // ---------------------------------------------------------------------------
 // apply_move — modifies state in place.
-// 'roll' is used for pokeball stochastic outcome (0..1): < 0.5 = capture.
+// 'roll' is used for pokeball stochastic outcome (0..1): < catch_prob = capture.
 // ---------------------------------------------------------------------------
 
 static void check_promotion(Piece& p) {
@@ -805,8 +805,23 @@ static bool sb_heal(State& s, int pidx) {
     StoredPiece& st = p.stored;
     int16_t mhp = MAX_HP[st.type];
     if (p.type == PT_MASTER_SAFETYBALL) {
-        // Master Safetyball: instant full HP on first heal; no auto-release.
+        bool already_full = (st.hp >= mhp);
         st.hp = mhp;
+        if (already_full) {
+            // Already at full HP (healed on entry last turn) — auto-release.
+            int new_idx = alloc_slot(s, pidx);
+            if (new_idx >= 0) {
+                Piece& np = s.pieces[new_idx];
+                np.type = st.type; np.team = st.team;
+                np.row = p.row;    np.col = p.col;
+                np.hp  = st.hp;    np.item = st.item;
+                np.stored = {};
+                s.board[p.row][p.col] = (int8_t)new_idx;
+            }
+            st.type = PT_NONE;
+            p.type  = PT_NONE;
+            return true;
+        }
         return false;
     }
     int16_t heal = mhp / 4;

@@ -454,8 +454,13 @@ def _safetyball_heal(state: GameState, piece: Piece) -> None:
     """
     stored = piece.stored_piece
     if piece.piece_type == PieceType.MASTER_SAFETYBALL:
+        already_full = stored.current_hp >= stored.max_hp
         stored.current_hp = stored.max_hp
-        # No auto-release — player must RELEASE manually or wait for discharge.
+        if already_full:
+            # Stored piece was already full (healed on entry last turn) — auto-release.
+            stored.row, stored.col = piece.row, piece.col
+            state.board[piece.row][piece.col] = stored
+            piece.stored_piece = None
     else:
         stored.current_hp = min(stored.current_hp + stored.max_hp // 4, stored.max_hp)
         if stored.current_hp >= stored.max_hp:

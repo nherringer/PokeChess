@@ -182,8 +182,8 @@ class TestMasterHealball:
         assert msb_after.stored_piece is not None
         assert msb_after.stored_piece.current_hp == PIECE_STATS[PieceType.SQUIRTLE].max_hp
 
-    def test_master_healball_does_not_auto_release_on_full_hp(self):
-        """After full-HP heal, Pokemon stays stored until explicitly released."""
+    def test_master_healball_holds_stored_piece_on_entry_turn(self):
+        """Pokemon stays stored after the entry move (released on the NEXT turn)."""
         state = empty_state(active=Team.RED)
         msb = place(state, PieceType.MASTER_SAFETYBALL, Team.RED, 2, 3)
         squirtle = place(state, PieceType.SQUIRTLE, Team.RED, 2, 1)
@@ -193,8 +193,25 @@ class TestMasterHealball:
         move = move_to(2, 3, 2, 1)
         [(ns, _)] = apply_move(state, move)
         msb_after = ns.board[2][1]
-        # Still has stored piece (not auto-released despite full HP)
+        # Still stored after entry (release happens next turn)
         assert msb_after.stored_piece is not None
+
+    def test_master_healball_auto_releases_on_next_move(self):
+        """Master Safetyball auto-releases stored Pokemon when it moves again next turn."""
+        state = empty_state(active=Team.RED)
+        msb = place(state, PieceType.MASTER_SAFETYBALL, Team.RED, 2, 3)
+        squirtle_stored = Piece.create(PieceType.SQUIRTLE, Team.RED, 2, 3)
+        squirtle_stored.current_hp = PIECE_STATS[PieceType.SQUIRTLE].max_hp  # already full
+        msb.stored_piece = squirtle_stored
+        place(state, PieceType.PIKACHU, Team.RED, 0, 4)
+        place(state, PieceType.EEVEE, Team.BLUE, 7, 4)
+        # Move the Master Safetyball — stored piece is already full → auto-release
+        move = move_to(2, 3, 2, 4)
+        [(ns, _)] = apply_move(state, move)
+        released = ns.board[2][4]
+        assert released is not None
+        assert released.piece_type == PieceType.SQUIRTLE
+        assert released.current_hp == PIECE_STATS[PieceType.SQUIRTLE].max_hp
 
     def test_master_healball_piece_can_be_manually_released(self):
         """Stored Pokemon can be RELEASEd from Master Healball."""
