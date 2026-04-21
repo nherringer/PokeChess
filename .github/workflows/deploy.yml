@@ -6,7 +6,7 @@
 #
 # Required GitHub configuration (Settings → Secrets and variables → Actions):
 #   Secrets:
-#     AWS_ROLE_ARN                 — CI app deploy role ARN       (terraform output ci_app_deploy_role_arn)
+#     AWS_BACKEND_DEPLOY_ROLE_ARN                 — CI app deploy role ARN       (terraform output ci_app_deploy_role_arn)
 #     ECR_APP_REPO                 — ECR repo URL for pokechess-app    (terraform output ecr_app_repo_url)
 #     ECR_ENGINE_REPO              — ECR repo URL for pokechess-engine  (terraform output ecr_engine_repo_url)
 #     AWS_FRONTEND_DEPLOY_ROLE_ARN — CI frontend deploy role ARN  (terraform output ci_app_frontend_deploy_role_arn)
@@ -46,7 +46,7 @@ jobs:
         if: github.event_name == 'push'
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_BACKEND_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Log in to ECR
@@ -187,7 +187,7 @@ jobs:
         if: github.event_name == 'push'
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_BACKEND_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Log in to ECR
