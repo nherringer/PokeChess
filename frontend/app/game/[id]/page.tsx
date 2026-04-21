@@ -191,8 +191,26 @@ export default function GamePage() {
         return;
       }
 
-      // Clicked same square — deselect
+      // Clicked same square — check for in-place actions (EVOLVE, PSYWAVE) before deselecting
       if (selectedSq.row === displayRow && selectedSq.col === displayCol) {
+        const { row: inPlaceApiRow, col: inPlaceApiCol } = displayToApi(
+          displayRow,
+          displayCol,
+          localSide
+        );
+        const inPlaceMoves = legalMoves.filter(
+          (m) => m.target_row === inPlaceApiRow && m.target_col === inPlaceApiCol
+        );
+        const evolveMoves = inPlaceMoves.filter((m) => m.action_type === "EVOLVE");
+        if (evolveMoves.length > 0) {
+          store.setDisambigMoves(evolveMoves);
+          return;
+        }
+        const pswaveMoves = inPlaceMoves.filter((m) => m.action_type === "PSYWAVE");
+        if (pswaveMoves.length === 1) {
+          await submitMove({ ...pswaveMoves[0] });
+          return;
+        }
         store.clearSelection();
         return;
       }

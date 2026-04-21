@@ -295,9 +295,7 @@ def _sliding_squares(
             if occupant is None:
                 empties.append((r, c))
             elif occupant.team != piece.team:
-                # Enemy Safetyballs block the ray but cannot be attacked
-                if occupant.piece_type not in SAFETYBALL_TYPES:
-                    enemies.append((r, c))
+                enemies.append((r, c))
                 break
             else:
                 break  # friendly blocks the ray
@@ -371,7 +369,9 @@ def _squirtle_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
     empties, enemies = _sliding_squares(piece, state, _ROOK_DIRS)
     moves = (
         [Move(piece.row, piece.col, ActionType.MOVE, r, c) for r, c in empties]
-        + [Move(piece.row, piece.col, ActionType.ATTACK, r, c) for r, c in enemies]
+        + [Move(piece.row, piece.col,
+                ActionType.MOVE if state.board[r][c].piece_type in PAWN_TYPES else ActionType.ATTACK,
+                r, c) for r, c in enemies]
         + _forward_healball_entry(piece, state)
         + _trade_moves(piece, state)
     )
@@ -387,8 +387,9 @@ def _charmander_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
         occupant = state.board[r][c]
         if occupant is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
-        elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
-            moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
+        elif occupant.team != piece.team:
+            action = ActionType.MOVE if occupant.piece_type in PAWN_TYPES else ActionType.ATTACK
+            moves.append(Move(piece.row, piece.col, action, r, c))
     moves += _forward_healball_entry(piece, state)
     moves += _trade_moves(piece, state)
     return _expand_overflow_moves(piece, state, moves)
@@ -398,7 +399,9 @@ def _bulbasaur_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
     empties, enemies = _sliding_squares(piece, state, _BISHOP_DIRS)
     moves = (
         [Move(piece.row, piece.col, ActionType.MOVE, r, c) for r, c in empties]
-        + [Move(piece.row, piece.col, ActionType.ATTACK, r, c) for r, c in enemies]
+        + [Move(piece.row, piece.col,
+                ActionType.MOVE if state.board[r][c].piece_type in PAWN_TYPES else ActionType.ATTACK,
+                r, c) for r, c in enemies]
         + _forward_healball_entry(piece, state)
         + _trade_moves(piece, state)
     )
@@ -408,9 +411,13 @@ def _bulbasaur_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
 def _mew_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
     empties, enemies = _sliding_squares(piece, state, _QUEEN_DIRS)
     moves = [Move(piece.row, piece.col, ActionType.MOVE, r, c) for r, c in empties]
-    foresight_targets = list(empties)
+    # Foresight targets: empties that don't have floor items or hidden items
+    foresight_targets = [
+        (r, c) for r, c in empties
+        if _floor_item_at(state, r, c) is None and not _has_hidden_item(state, r, c)
+    ]
     for r, c in enemies:
-        if state.board[r][c].piece_type == PieceType.POKEBALL:
+        if state.board[r][c].piece_type in PAWN_TYPES:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
         else:
             for slot in _MEW_SLOTS:
@@ -530,8 +537,9 @@ def _king_standard_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
         occupant = state.board[r][c]
         if occupant is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
-        elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
-            moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
+        elif occupant.team != piece.team:
+            action = ActionType.MOVE if occupant.piece_type in PAWN_TYPES else ActionType.ATTACK
+            moves.append(Move(piece.row, piece.col, action, r, c))
     return moves
 
 
@@ -544,8 +552,9 @@ def _pikachu_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
         occupant = state.board[r][c]
         if occupant is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
-        elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
-            moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
+        elif occupant.team != piece.team:
+            action = ActionType.MOVE if occupant.piece_type in PAWN_TYPES else ActionType.ATTACK
+            moves.append(Move(piece.row, piece.col, action, r, c))
     if piece.held_item == Item.THUNDERSTONE:
         moves.append(Move(piece.row, piece.col, ActionType.EVOLVE, piece.row, piece.col))
     moves += _trade_moves(piece, state)
@@ -564,8 +573,9 @@ def _raichu_extra_cardinals(piece: 'Piece', state: 'GameState', moves: list) -> 
         dest = state.board[dest_r][dest_c]
         if dest is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, dest_r, dest_c))
-        elif dest.team != piece.team and dest.piece_type not in SAFETYBALL_TYPES:
-            moves.append(Move(piece.row, piece.col, ActionType.ATTACK, dest_r, dest_c))
+        elif dest.team != piece.team:
+            action = ActionType.MOVE if dest.piece_type in PAWN_TYPES else ActionType.ATTACK
+            moves.append(Move(piece.row, piece.col, action, dest_r, dest_c))
 
 
 def _raichu_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
@@ -578,8 +588,9 @@ def _raichu_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
         occupant = state.board[r][c]
         if occupant is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
-        elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
-            moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
+        elif occupant.team != piece.team:
+            action = ActionType.MOVE if occupant.piece_type in PAWN_TYPES else ActionType.ATTACK
+            moves.append(Move(piece.row, piece.col, action, r, c))
     _raichu_extra_cardinals(piece, state, moves)
     moves += _forward_healball_entry(piece, state)
     moves += _trade_moves(piece, state)
@@ -721,7 +732,9 @@ def _vaporeon_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
     king_targets = {(m.target_row, m.target_col) for m in moves}
     moves += [Move(piece.row, piece.col, ActionType.MOVE, r, c)
               for r, c in empties if (r, c) not in king_targets]
-    moves += [Move(piece.row, piece.col, ActionType.ATTACK, r, c)
+    moves += [Move(piece.row, piece.col,
+                   ActionType.MOVE if state.board[r][c].piece_type in PAWN_TYPES else ActionType.ATTACK,
+                   r, c)
               for r, c in enemies if (r, c) not in king_targets]
     moves += _quick_attack_moves(piece, state)
     moves += _forward_healball_entry(piece, state)
@@ -738,8 +751,9 @@ def _flareon_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
         occupant = state.board[r][c]
         if occupant is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
-        elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
-            moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
+        elif occupant.team != piece.team:
+            action = ActionType.MOVE if occupant.piece_type in PAWN_TYPES else ActionType.ATTACK
+            moves.append(Move(piece.row, piece.col, action, r, c))
     moves += _quick_attack_moves(piece, state)
     moves += _forward_healball_entry(piece, state)
     return _expand_overflow_moves(piece, state, moves + _trade_moves(piece, state))
@@ -752,7 +766,9 @@ def _leafeon_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
     king_targets = {(m.target_row, m.target_col) for m in moves}
     moves += [Move(piece.row, piece.col, ActionType.MOVE, r, c)
               for r, c in empties if (r, c) not in king_targets]
-    moves += [Move(piece.row, piece.col, ActionType.ATTACK, r, c)
+    moves += [Move(piece.row, piece.col,
+                   ActionType.MOVE if state.board[r][c].piece_type in PAWN_TYPES else ActionType.ATTACK,
+                   r, c)
               for r, c in enemies if (r, c) not in king_targets]
     moves += _quick_attack_moves(piece, state)
     moves += _forward_healball_entry(piece, state)
@@ -769,8 +785,9 @@ def _jolteon_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
         occupant = state.board[r][c]
         if occupant is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
-        elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
-            moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
+        elif occupant.team != piece.team:
+            action = ActionType.MOVE if occupant.piece_type in PAWN_TYPES else ActionType.ATTACK
+            moves.append(Move(piece.row, piece.col, action, r, c))
     _raichu_extra_cardinals(piece, state, moves)
     for dr, dc in _JOLTEON_DIAG_JUMPS:
         r, c = piece.row + dr, piece.col + dc
@@ -779,8 +796,9 @@ def _jolteon_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
         dest = state.board[r][c]
         if dest is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
-        elif dest.team != piece.team and dest.piece_type not in SAFETYBALL_TYPES:
-            moves.append(Move(piece.row, piece.col, ActionType.ATTACK, r, c))
+        elif dest.team != piece.team:
+            action = ActionType.MOVE if dest.piece_type in PAWN_TYPES else ActionType.ATTACK
+            moves.append(Move(piece.row, piece.col, action, r, c))
     moves += _quick_attack_moves(piece, state)
     moves += _forward_healball_entry(piece, state)
     return _expand_overflow_moves(piece, state, moves + _trade_moves(piece, state))
@@ -795,11 +813,15 @@ def _espeon_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
     moves = adj_moves
     moves += [Move(piece.row, piece.col, ActionType.MOVE, r, c)
               for r, c in empties if (r, c) not in adj_targets]
-    # Pokeball enemies → MOVE (in ray order, matching C++ gen_espeon)
-    foresight_targets = list(empties)
+    # Pawn enemies → MOVE (in ray order, matching C++ gen_espeon); skip adjacent (already in adj_moves)
+    foresight_targets = [
+        (r, c) for r, c in empties
+        if _floor_item_at(state, r, c) is None and not _has_hidden_item(state, r, c)
+    ]
     for r, c in enemies:
-        if state.board[r][c].piece_type == PieceType.POKEBALL:
-            moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
+        if state.board[r][c].piece_type in PAWN_TYPES:
+            if (r, c) not in adj_targets:
+                moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
         else:
             foresight_targets.append((r, c))
     if not state.foresight_used_last_turn[piece.team]:

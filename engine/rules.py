@@ -129,7 +129,7 @@ def apply_move(state: GameState, move: Move) -> list[tuple[GameState, float]]:
         and piece.piece_type not in _POKEBALL_IMMUNE
     ):
         target = new.board[move.target_row][move.target_col]
-        if target is not None and target.piece_type == PieceType.POKEBALL and target.team != piece.team:
+        if target is not None and target.piece_type in PAWN_TYPES and target.team != piece.team:
             prob = _pokeball_catch_prob(piece)
             # Fail branch: pokeball escapes — remove pokeball, pokemon stays; pokemon lands on pokeball's square
             fail = state.copy()

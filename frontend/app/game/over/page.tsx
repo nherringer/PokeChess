@@ -23,7 +23,7 @@ function computeXpResults(history: MoveHistoryEntry[]): XpResult[] {
     const damage = (entry.result?.damage as number | null) ?? 0;
     if (!byPiece[entry.piece_id]) {
       byPiece[entry.piece_id] = {
-        pieceType: (entry.result?.attacker_type as string | null) ?? "UNKNOWN",
+        pieceType: entry.piece_type ?? "UNKNOWN",
         damage: 0,
       };
     }

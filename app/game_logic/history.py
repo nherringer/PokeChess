@@ -58,36 +58,40 @@ def build_history_entry(
     at = move.action_type
 
     if at == ActionType.MOVE:
-        return _build_move(old_state, piece, move, piece_id, player, turn, id_map)
+        entry = _build_move(old_state, piece, move, piece_id, player, turn, id_map)
     elif at == ActionType.ATTACK:
         if piece.piece_type == PieceType.POKEBALL:
-            return _build_pokeball_attack(
+            entry = _build_pokeball_attack(
                 old_state, piece, move, piece_id, player, turn, id_map, rng_roll, captured
             )
         elif piece.piece_type == PieceType.MASTERBALL:
-            return _build_masterball_attack(
+            entry = _build_masterball_attack(
                 old_state, piece, move, piece_id, player, turn, id_map
             )
         else:
-            return _build_attack(old_state, piece, move, piece_id, player, turn, id_map)
+            entry = _build_attack(old_state, piece, move, piece_id, player, turn, id_map)
     elif at == ActionType.QUICK_ATTACK:
-        return _build_quick_attack(old_state, piece, move, piece_id, player, turn, id_map)
+        entry = _build_quick_attack(old_state, piece, move, piece_id, player, turn, id_map)
     elif at == ActionType.FORESIGHT:
-        return _build_foresight(old_state, new_state, piece, move, piece_id, player, turn)
+        entry = _build_foresight(old_state, new_state, piece, move, piece_id, player, turn)
     elif at == ActionType.EVOLVE:
-        return _build_evolve(old_state, new_state, piece, move, piece_id, player, turn)
+        entry = _build_evolve(old_state, new_state, piece, move, piece_id, player, turn)
     elif at == ActionType.TRADE:
-        return _build_trade(old_state, new_state, piece, move, piece_id, player, turn, id_map)
+        entry = _build_trade(old_state, new_state, piece, move, piece_id, player, turn, id_map)
     elif at == ActionType.RELEASE:
-        return _build_release(old_state, piece, move, piece_id, player, turn, id_map)
+        entry = _build_release(old_state, piece, move, piece_id, player, turn, id_map)
     else:
-        return {
+        entry = {
             "turn": turn,
             "player": player,
             "action_type": at.name.lower(),
             "piece_id": piece_id,
             "result": {},
         }
+
+    if piece is not None:
+        entry["piece_type"] = piece.piece_type.name
+    return entry
 
 
 def build_foresight_resolve_entry(

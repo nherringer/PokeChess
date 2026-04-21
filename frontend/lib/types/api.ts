@@ -107,6 +107,7 @@ export interface MoveHistoryEntry {
   player: "RED" | "BLUE";
   action_type: string;
   piece_id: string | null;
+  piece_type?: string;
   result: Record<string, unknown>;
   from_row?: number;
   from_col?: number;

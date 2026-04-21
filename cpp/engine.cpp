@@ -396,8 +396,10 @@ static void jumps(State& s, Piece& p, Move* mv, int& n, const int deltas[N][2]) 
             add_mv(mv, n, p.row, p.col, ACT_MOVE, r, c);
         } else {
             Piece& occ = s.pieces[oidx];
-            if (occ.team != p.team && !is_safetyball(occ.type))
-                add_mv(mv, n, p.row, p.col, ACT_ATTACK, r, c);
+            if (occ.team != p.team) {
+                uint8_t act = is_pawn(occ.type) ? ACT_MOVE : ACT_ATTACK;
+                add_mv(mv, n, p.row, p.col, act, r, c);
+            }
         }
     }
 }
@@ -431,8 +433,10 @@ static void raichu_cardinals(State& s, Piece& p, Move* mv, int& n) {
         if (oidx < 0) add_mv(mv, n, p.row, p.col, ACT_MOVE, dr, dc);
         else {
             Piece& occ = s.pieces[oidx];
-            if (occ.team != p.team && !is_safetyball(occ.type))
-                add_mv(mv, n, p.row, p.col, ACT_ATTACK, dr, dc);
+            if (occ.team != p.team) {
+                uint8_t act = is_pawn(occ.type) ? ACT_MOVE : ACT_ATTACK;
+                add_mv(mv, n, p.row, p.col, act, dr, dc);
+            }
         }
     }
 }
@@ -476,7 +480,7 @@ static void collect_sliding(State& s, Piece& p,
                 add_mv(emp, ne, p.row, p.col, ACT_MOVE,   r, c);
             } else {
                 Piece& occ = s.pieces[oidx];
-                if (occ.team != p.team && !is_safetyball(occ.type))
+                if (occ.team != p.team)
                     add_mv(atk, na, p.row, p.col, ACT_ATTACK, r, c);
                 break;
             }
@@ -552,7 +556,7 @@ static void gen_mew(State& s, Piece& p, Move* mv, int& n) {
     for (int i = 0; i < ne; i++) mv[n++] = emp[i];
     for (int i = 0; i < na; i++) {
         int8_t tidx = idx_at(s, atk[i].tr, atk[i].tc);
-        if (tidx >= 0 && s.pieces[tidx].type == PT_POKEBALL) {
+        if (tidx >= 0 && is_pawn(s.pieces[tidx].type)) {
             add_mv(mv,n, atk[i].pr,atk[i].pc, ACT_MOVE, atk[i].tr,atk[i].tc);
         } else {
             for (int slot = 0; slot < 3; slot++)
@@ -564,7 +568,7 @@ static void gen_mew(State& s, Piece& p, Move* mv, int& n) {
             add_mv(mv,n, emp[i].pr,emp[i].pc, ACT_FORESIGHT, emp[i].tr,emp[i].tc);
         for (int i = 0; i < na; i++) {
             int8_t tidx = idx_at(s, atk[i].tr, atk[i].tc);
-            if (tidx < 0 || s.pieces[tidx].type != PT_POKEBALL)
+            if (tidx < 0 || !is_pawn(s.pieces[tidx].type))
                 add_mv(mv,n, atk[i].pr,atk[i].pc, ACT_FORESIGHT, atk[i].tr,atk[i].tc);
         }
     }
@@ -722,9 +726,14 @@ static void gen_espeon(State& s, Piece& p, Move* mv, int& n) {
     for (auto& kd : K) {
         int r = p.row + kd[0], c = p.col + kd[1];
         if (!in_bounds(r,c)) continue;
-        if (idx_at(s,r,c) < 0)
+        int8_t oidx = idx_at(s,r,c);
+        if (oidx < 0) {
             add_mv(mv,n, p.row,p.col, ACT_MOVE, r,c);
-        // no ATTACK added for Espeon
+        } else {
+            Piece& occ = s.pieces[oidx];
+            if (occ.team != p.team && is_pawn(occ.type))
+                add_mv(mv,n, p.row,p.col, ACT_MOVE, r,c);  // adjacent enemy pawn → MOVE
+        }
     }
     static const int DIRS[8][2] = {
         {0,1},{0,-1},{1,0},{-1,0},{1,1},{1,-1},{-1,1},{-1,-1}
@@ -732,10 +741,10 @@ static void gen_espeon(State& s, Piece& p, Move* mv, int& n) {
     Move emp[64], atk[32]; int ne = 0, na = 0;
     collect_sliding(s, p, emp, ne, atk, na, DIRS, 8);
     for (int i = 0; i < ne; i++) if (!is_adj(p, emp[i].tr, emp[i].tc)) mv[n++] = emp[i];
-    // Pokeball attack targets → MOVE (no ATTACK for Espeon)
+    // Pawn enemies → MOVE (no ATTACK for Espeon); skip adjacent (already handled above)
     for (int i = 0; i < na; i++) {
         int8_t tidx = idx_at(s, atk[i].tr, atk[i].tc);
-        if (tidx >= 0 && s.pieces[tidx].type == PT_POKEBALL)
+        if (tidx >= 0 && is_pawn(s.pieces[tidx].type) && !is_adj(p, atk[i].tr, atk[i].tc))
             add_mv(mv,n, atk[i].pr,atk[i].pc, ACT_MOVE, atk[i].tr,atk[i].tc);
     }
     if (!s.fs_used[ti(p.team)]) {
@@ -743,7 +752,7 @@ static void gen_espeon(State& s, Piece& p, Move* mv, int& n) {
             add_mv(mv,n, emp[i].pr,emp[i].pc, ACT_FORESIGHT, emp[i].tr,emp[i].tc);
         for (int i = 0; i < na; i++) {
             int8_t tidx = idx_at(s, atk[i].tr, atk[i].tc);
-            if (tidx < 0 || s.pieces[tidx].type != PT_POKEBALL)
+            if (tidx < 0 || !is_pawn(s.pieces[tidx].type))
                 add_mv(mv,n, atk[i].pr,atk[i].pc, ACT_FORESIGHT, atk[i].tr,atk[i].tc);
         }
     }

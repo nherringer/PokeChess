@@ -172,6 +172,20 @@ def player_view_of_state(state: GameState, team: Team, id_map: IdMap) -> dict:
     }
 
 
+def mask_state_dict(state: dict, team_name: str) -> dict:
+    """
+    Mask a raw state dict for `team_name`'s perspective (applied to DB state dicts).
+    Hides opponent held items and clears hidden_items.
+    """
+    import copy
+    masked = copy.deepcopy(state)
+    for piece in masked.get("board", []):
+        if piece.get("team") != team_name and piece.get("held_item", "NONE") not in ("NONE", "UNKNOWN"):
+            piece["held_item"] = "UNKNOWN"
+    masked["hidden_items"] = []
+    return masked
+
+
 # ---------------------------------------------------------------------------
 # Deserialization: dict → GameState + IdMap
 # ---------------------------------------------------------------------------
