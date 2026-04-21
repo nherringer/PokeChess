@@ -33,9 +33,35 @@ env:
   ECS_CLUSTER: pokechess-prod
 
 jobs:
+  # ── Path change detection ─────────────────────────────────────────────────────
+  # Determines which jobs need to run based on which files changed.
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'app/**'
+              - 'bot/**'
+              - 'engine/**'
+              - 'Dockerfile.app'
+              - 'Dockerfile.engine'
+              - 'requirements*.txt'
+            frontend:
+              - 'frontend/**'
+
   # ── pokechess-app ────────────────────────────────────────────────────────────
   deploy-app:
     name: App — build / push / deploy
+    needs: [changes]
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-24.04-arm
 
     steps:
@@ -109,6 +135,8 @@ jobs:
   # Runs independently of the backend jobs — no shared dependencies.
   deploy-frontend:
     name: Frontend — build / sync / invalidate
+    needs: [changes]
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -176,7 +204,8 @@ jobs:
   # ECS can still be mixed-SHA until a fix is merged (same as any serial deploy).
   deploy-engine:
     name: Engine — build / push / deploy
-    needs: [deploy-app]
+    needs: [changes, deploy-app]
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-24.04-arm
 
     steps:
