@@ -31,8 +31,8 @@ _MAX_BOT_TIME_BUDGET = 10.0
 _MIN_BOT_TIME_BUDGET = 0.1
 
 
-async def request_bot_move(
-    request: Request,
+async def call_bot_move(
+    client: httpx.AsyncClient,
     state_dict: dict,
     persona_params: dict,
 ) -> dict:
@@ -56,7 +56,6 @@ async def request_bot_move(
     # never sees an out-of-range value regardless of what's in the DB.
     outgoing_params = {**persona_params, "time_budget": tb}
 
-    client: httpx.AsyncClient = request.app.state.engine_client
     try:
         resp = await client.post(
             "/move",
@@ -77,3 +76,13 @@ async def request_bot_move(
         raise AppError(503, "engine_error", "Engine returned an error")
     except (httpx.RequestError, httpx.TimeoutException):
         raise AppError(503, "engine_unavailable", "Engine is unreachable")
+
+
+async def request_bot_move(
+    request: Request,
+    state_dict: dict,
+    persona_params: dict,
+) -> dict:
+    """Thin wrapper around call_bot_move that extracts the httpx client from a FastAPI Request."""
+    client: httpx.AsyncClient = request.app.state.engine_client
+    return await call_bot_move(client, state_dict, persona_params)

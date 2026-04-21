@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { submitMove as apiSubmitMove, getLegalMoves as apiGetLegalMoves } from "@/lib/api/moves";
+import { submitMove as apiSubmitMove, getLegalMoves as apiGetLegalMoves, retryBotMove as apiRetryBotMove } from "@/lib/api/moves";
 import { resignGame as apiResignGame } from "@/lib/api/games";
 import { useGameStore } from "@/lib/store/gameStore";
 import type { MovePayload } from "@/lib/types/api";
@@ -68,8 +68,18 @@ export function useGameMutation(gameId: string | null) {
     }
   }, [gameId, router]);
 
+  const retryBotMove = useCallback(async () => {
+    if (!gameId) return;
+    try {
+      await apiRetryBotMove(gameId);
+    } catch {
+      // Polling will surface any persistent failure; swallow here to avoid
+      // noisy errors from the automatic retry trigger.
+    }
+  }, [gameId]);
+
   // Unused but exported per spec
   void apiGetLegalMoves;
 
-  return { submitMove, resign, loading, error };
+  return { submitMove, resign, retryBotMove, loading, error };
 }

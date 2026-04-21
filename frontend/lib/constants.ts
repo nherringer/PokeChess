@@ -1,4 +1,5 @@
 export const POLL_INTERVAL_MS = 2500;
+export const BOT_POLL_INTERVAL_MS = 1000;
 
 
 export const PIECE_TYPE_LABELS: Record<string, string> = {
