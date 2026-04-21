@@ -31,6 +31,12 @@ import { EeveeEvolvePicker } from "@/components/game/pickers/EeveeEvolvePicker";
 import { PokeballWiggle } from "@/components/game/animations/PokeballWiggle";
 import { Spinner } from "@/components/ui/Spinner";
 
+// No pages are pre-generated at build time; the CDN routes unmatched paths
+// to the app shell and useParams() resolves the ID client-side at runtime.
+export function generateStaticParams() {
+  return [];
+}
+
 export default function GamePage() {
   const params = useParams();
   const gameId = params.id as string;
@@ -41,7 +47,7 @@ export default function GamePage() {
   const userId = useAuthStore((s) => s.userId);
   const store = useGameStore();
   const { fetchMoves, loading: movesLoading } = useLegalMoves(gameId);
-  const { submitMove, resign, loading: mutLoading } = useGameMutation(gameId);
+  const { submitMove, resign, retryBotMove, loading: mutLoading } = useGameMutation(gameId);
 
   // Sync polled game into store
   useEffect(() => {
@@ -70,6 +76,15 @@ export default function GamePage() {
   const isMyTurn = game?.whose_turn === localSide;
   const isBotTurn =
     game?.is_bot_game === true && game.whose_turn === game.bot_side;
+
+  // Self-healing: if the bot hasn't moved after 15 s, re-queue the background
+  // task via the retry endpoint. _run_bot_move is idempotent so concurrent
+  // calls from polling + this trigger are safe.
+  useEffect(() => {
+    if (!isBotTurn || !gameId) return;
+    const t = setTimeout(() => { retryBotMove(); }, 15_000);
+    return () => clearTimeout(t);
+  }, [isBotTurn, gameId, retryBotMove]);
 
   // Board data
   const grid = game?.state
