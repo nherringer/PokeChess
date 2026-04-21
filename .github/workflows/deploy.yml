@@ -51,9 +51,10 @@ jobs:
               - 'app/**'
               - 'bot/**'
               - 'engine/**'
+              - 'cpp/**'
+              - 'setup.py'
               - 'Dockerfile.app'
               - 'Dockerfile.engine'
-              - 'requirements*.txt'
             frontend:
               - 'frontend/**'
 
@@ -131,73 +132,6 @@ jobs:
           wait-for-service-stability: true
           wait-for-minutes: 10
 
-  # ── pokechess-frontend ───────────────────────────────────────────────────────
-  # Runs independently of the backend jobs — no shared dependencies.
-  deploy-frontend:
-    name: Frontend — build / sync / invalidate
-    needs: [changes]
-    if: needs.changes.outputs.frontend == 'true'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Build static export (push)
-        if: github.event_name == 'push'
-        working-directory: frontend
-        env:
-          NEXT_PUBLIC_API_URL: https://api.pokechess-game.com
-        run: npm run build
-
-      - name: Build static export (PR — verify only)
-        if: github.event_name == 'pull_request'
-        working-directory: frontend
-        env:
-          NEXT_PUBLIC_API_URL: https://api.pokechess-game.com
-        run: npm run build
-
-      - name: Configure AWS credentials (OIDC)
-        if: github.event_name == 'push'
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_FRONTEND_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Sync static assets to S3 (long cache)
-        if: github.event_name == 'push'
-        run: |
-          aws s3 sync frontend/out/ s3://${{ secrets.FRONTEND_BUCKET_NAME }}/ \
-            --exclude "*.html" \
-            --cache-control "public, max-age=31536000, immutable" \
-            --delete
-
-      - name: Sync HTML files to S3 (no cache)
-        if: github.event_name == 'push'
-        run: |
-          aws s3 sync frontend/out/ s3://${{ secrets.FRONTEND_BUCKET_NAME }}/ \
-            --exclude "*" --include "*.html" \
-            --cache-control "no-cache, no-store, must-revalidate" \
-            --delete
-
-      - name: Invalidate CloudFront cache
-        if: github.event_name == 'push'
-        run: |
-          aws cloudfront create-invalidation \
-            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
-            --paths "/*"
-
   # ── pokechess-engine ─────────────────────────────────────────────────────────
   # Runs after deploy-app so a failed app build/push/deploy never leaves the
   # engine image/service ahead of the app. If engine fails after app succeeded,
@@ -271,3 +205,70 @@ jobs:
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
           wait-for-minutes: 10
+
+  # ── pokechess-frontend ───────────────────────────────────────────────────────
+  # Runs independently of the backend jobs — no shared dependencies.
+  deploy-frontend:
+    name: Frontend — build / sync / invalidate
+    needs: [changes]
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build static export (push)
+        if: github.event_name == 'push'
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_URL: https://api.pokechess-game.com
+        run: npm run build
+
+      - name: Build static export (PR — verify only)
+        if: github.event_name == 'pull_request'
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_URL: https://api.pokechess-game.com
+        run: npm run build
+
+      - name: Configure AWS credentials (OIDC)
+        if: github.event_name == 'push'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_FRONTEND_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Sync static assets to S3 (long cache)
+        if: github.event_name == 'push'
+        run: |
+          aws s3 sync frontend/out/ s3://${{ secrets.FRONTEND_BUCKET_NAME }}/ \
+            --exclude "*.html" \
+            --cache-control "public, max-age=31536000, immutable" \
+            --delete
+
+      - name: Sync HTML files to S3 (no cache)
+        if: github.event_name == 'push'
+        run: |
+          aws s3 sync frontend/out/ s3://${{ secrets.FRONTEND_BUCKET_NAME }}/ \
+            --exclude "*" --include "*.html" \
+            --cache-control "no-cache, no-store, must-revalidate" \
+            --delete
+
+      - name: Invalidate CloudFront cache
+        if: github.event_name == 'push'
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/*"
