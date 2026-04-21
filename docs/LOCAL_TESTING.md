@@ -105,12 +105,14 @@ No local `psql` required — schema is applied via `docker compose exec`.
 
 | Config | Local (dev) | AWS (prod) |
 |--------|-------------|------------|
-| `DATABASE_URL` | `postgresql+asyncpg://pokechess:pokechess@localhost:5432/pokechess` (default — matches compose service, no export needed) | RDS endpoint + Secrets Manager credentials |
+| `DATABASE_URL` | **Compose (`make full`):** set automatically by Compose from `POSTGRES_*` in `.env` — no manual export needed. **Native (`make app`):** must be set explicitly in `.env` (e.g. `postgresql+asyncpg://pokechess:pokechess@localhost:5432/pokechess`); app raises `RuntimeError` if missing | RDS endpoint + Secrets Manager credentials |
 | `ENGINE_URL` | `http://localhost:5001` | `http://localhost:5001` — **same**: ECS uses `network_mode=host` |
 | `JWT_SECRET_KEY` / `BOT_API_SECRET` | Set in `.env` (≥ 32 chars each — app raises `RuntimeError` if missing) | Secrets Manager injected via ECS task env |
 | `CORS_ORIGINS` | `*` (allowed when `ENVIRONMENT=development`) | Must be explicit domain — app raises `RuntimeError` if `*` and not development |
-| `ENVIRONMENT` | _(unset — defaults to `production`)_ | **Must be set to `development` locally** to disable `Secure` cookie flag (required for HTTP) and enable OpenAPI docs |
+| `ENVIRONMENT` | Set to `development` in `.env` — required locally to allow `CORS_ORIGINS=*`, disable `Secure` cookie flag (HTTP), and enable OpenAPI docs | `production` — set by Terraform via `var.environment`; do not override to `development` in ECS |
 | `POKECHESS_TT_BUCKET` / `AWS_DEFAULT_REGION` | Not needed — engine skips TT backup | Set in ECS task def for the engine container |
+| `TRUSTED_PROXY_IPS` | `"*"` — Compose hard-codes this; no ALB in local dev | Set by Terraform from the VPC CIDR — not operator-configured |
+| `REGISTRATION_ACCESS_CODE` | _(unset or set in `.env`)_ — **temporary pre-launch gate**; leave blank for open registration locally | Same — set via ECS env or Secrets Manager if gate is active; will be removed before public launch |
 
 **Specific gotchas:**
 

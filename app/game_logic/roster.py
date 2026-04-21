@@ -60,10 +60,13 @@ _BOTH_ROSTERS = [
 
 
 async def ensure_roster(db: asyncpg.Connection, user_id: UUID, side: str) -> list[dict]:
-    """Return the 8-piece set for the given side, creating all 16 pieces if needed.
+    """Return the 8-piece set for the given side, creating it if missing.
+
+    Only the requested side is inserted so that a user already holding the other
+    side's pieces does not end up with duplicates.
 
     Caller must be inside a transaction. The FOR UPDATE on the users row serialises
-    concurrent first-seed calls so only one inserts the full 16-piece set.
+    concurrent first-seed calls so only one inserts the 8-piece set.
     """
     await db.fetchrow("SELECT id FROM users WHERE id = $1 FOR UPDATE", user_id)
     existing = await db.fetch(
@@ -75,16 +78,17 @@ async def ensure_roster(db: asyncpg.Connection, user_id: UUID, side: str) -> lis
 
     side_pieces = []
     for set_color, role, species in _BOTH_ROSTERS:
+        if set_color != side:
+            continue
         row = await db.fetchrow(
             """
             INSERT INTO pokemon_pieces (owner_id, role, species, set_side)
             VALUES ($1, $2, $3, $4)
             RETURNING id, role, species
             """,
-            user_id, role, species, set_color,
+            user_id, role, species, side,
         )
-        if set_color == side:
-            side_pieces.append(dict(row))
+        side_pieces.append(dict(row))
     return side_pieces
 
 

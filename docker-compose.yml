@@ -57,6 +57,11 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       BOT_API_SECRET: ${BOT_API_SECRET}
       ACCESS_TOKEN_EXPIRE_MINUTES: "30"
+      # Compose is dev-only (no ALB); "*" is safe here. Set to ALB/VPC CIDR in production.
+      TRUSTED_PROXY_IPS: "*"
+      # TEMP: pre-launch registration gate — remove for public launch.
+      # Set in .env to require an access code on POST /auth/register.
+      REGISTRATION_ACCESS_CODE: ${REGISTRATION_ACCESS_CODE:-}
     depends_on:
       postgres:
         condition: service_healthy

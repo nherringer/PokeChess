@@ -8,12 +8,19 @@ ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUT
 REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.environ.get("REFRESH_TOKEN_EXPIRE_DAYS", "30"))
 ALGORITHM: str = "HS256"
 ENVIRONMENT: str = os.environ.get("ENVIRONMENT", "production")
-# A single "*" entry means “any origin”; main.py maps that to allow_origin_regex so
+# Restrict to the ALB/VPC CIDR in production (e.g. "10.0.0.0/16") so the rate
+# limiter cannot be bypassed by spoofing X-Forwarded-For headers through the ALB.
+# main.py raises RuntimeError if this is "*" outside development.
+TRUSTED_PROXY_IPS: str = os.environ.get("TRUSTED_PROXY_IPS", "*")
+# A single "*" entry means "any origin"; main.py maps that to allow_origin_regex so
 # credentialed requests work (browsers disallow Origin: * with credentials).
 # Minutes a PvB player is considered "active" against a bot after their last move.
 # The app divides the bot's base time_budget by the count of active players to
 # share MCTS compute fairly under load.  See docs/load_aware_budgeting.md.
 BOT_ACTIVE_WINDOW_MINUTES: int = int(os.environ.get("BOT_ACTIVE_WINDOW_MINUTES", "22"))
+# TEMP: registration gate — remove for public launch
+REGISTRATION_ACCESS_CODE: str = os.environ.get("REGISTRATION_ACCESS_CODE", "")
+# END TEMP
 
 CORS_ORIGINS: list[str] = [
     o.strip()

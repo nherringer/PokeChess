@@ -45,6 +45,7 @@ class RegisterRequest(BaseModel):
     username: str
     email: EmailStr
     password: str = Field(min_length=8)
+    access_code: str | None = None  # TEMP: registration gate — remove field for public launch
 
 
 class LoginRequest(BaseModel):
