@@ -19,7 +19,7 @@ export function useGame(gameId: string | null) {
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Ref so the timeout callback always calls the latest fetch without being
   // listed as an effect dependency (avoids resetting the timer on every render).
-  const fetchRef = useRef<() => Promise<void>>();
+  const fetchRef = useRef<(() => Promise<void>) | undefined>(undefined);
   const activeRef = useRef(true);
 
   const fetch = useCallback(async () => {
