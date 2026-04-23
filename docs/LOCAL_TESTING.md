@@ -140,7 +140,7 @@ make app            # starts uvicorn on :8000 (foreground)
 
 **Terminal 2 — frontend:**
 ```bash
-make frontend       # starts Next.js on :3000 (foreground)
+make frontend       # static build + SPA serve (mirrors prod)
 ```
 
 Verify the app is up: `curl http://localhost:8000/health` → `{"status":"ok"}`
@@ -163,7 +163,7 @@ make full           # docker compose up --build (all 3 services), applies schema
 **Terminal 2 — frontend:**
 ```bash
 make bot-id         # prints the seeded Metallic UUID — paste into frontend/lib/constants.ts BOT_IDS
-make frontend       # starts Next.js on :3000 (foreground)
+make frontend       # static build + SPA serve (mirrors prod)
 ```
 
 **Teardown:**
@@ -191,7 +191,8 @@ Covers engine logic, MCTS, and app game logic. No Postgres or engine server requ
 | `make partial` | Start postgres, wait for healthy, apply schema |
 | `make full` | `docker compose up --build` all services, apply schema |
 | `make app` | Run uvicorn app server on :8000 (foreground) |
-| `make frontend` | Run Next.js dev server on :3000 (foreground) |
+| `make frontend` | Build static export and serve locally with SPA fallback (approximates S3/CloudFront) |
+| `make server-frontend` | Run Next.js dev server on :3000 (foreground, hot-reload) |
 | `make schema` | Apply `app/db/schema.sql` (re-run safe — errors on existing objects are non-fatal) |
 | `make bot-id` | Print the seeded Metallic bot UUID from the DB |
 | `make test` | Run pytest |

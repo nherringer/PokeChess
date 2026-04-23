@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useGame } from "@/lib/hooks/useGame";
 import { useGameStore } from "@/lib/store/gameStore";
 import { useAuthStore } from "@/lib/store/authStore";
@@ -32,8 +32,8 @@ import { PokeballWiggle } from "@/components/game/animations/PokeballWiggle";
 import { Spinner } from "@/components/ui/Spinner";
 
 export default function GamePageClient() {
-  const params = useParams();
-  const gameId = params.id as string;
+  const searchParams = useSearchParams();
+  const gameId = searchParams.get("id") ?? "";
   const router = useRouter();
 
   // Hooks
@@ -57,12 +57,17 @@ export default function GamePageClient() {
     store.setGame(polledGame, localSide);
   }, [polledGame, userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Navigate to game over when complete
+  // Navigate to game over when complete — guard against stale store from a previous game
   useEffect(() => {
-    if (store.game?.status === "complete") {
+    if (store.game?.id === gameId && store.game?.status === "complete") {
       router.push(`/game/over?gameId=${gameId}`);
     }
-  }, [store.game?.status, gameId, router]);
+  }, [store.game?.id, store.game?.status, gameId, router]);
+
+  // Reset store on unmount so a stale game state can't bleed into the next game
+  useEffect(() => {
+    return () => { store.reset(); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const game = store.game;
   const localSide = store.localPlayerSide ?? "red";
@@ -237,6 +242,20 @@ export default function GamePageClient() {
   const pokeballDisplayCell = pendingPokeball
     ? displayToApi(pendingPokeball.row, pendingPokeball.col, localSide)
     : null;
+
+  if (!gameId) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-bg-deep flex-col gap-4">
+        <p className="text-red-400">No game ID provided.</p>
+        <button
+          onClick={() => router.push("/")}
+          className="text-white/50 underline text-sm"
+        >
+          Go home
+        </button>
+      </div>
+    );
+  }
 
   if (loading && !game) {
     return (
