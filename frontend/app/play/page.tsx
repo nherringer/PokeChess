@@ -168,7 +168,7 @@ export default function PlayPage() {
           : selectedSide;
 
       const game = await createGame({ bot_id: selectedBot.id, player_side: resolvedSide });
-      router.push(`/game/${game.id}`);
+      router.push(`/game?id=${game.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start game");
       setStarting(false);

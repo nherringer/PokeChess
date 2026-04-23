@@ -31,7 +31,10 @@ export function useGame(gameId: string | null) {
   }, [gameId]);
 
   useEffect(() => {
-    if (!gameId) return;
+    if (!gameId) {
+      setLoading(false);
+      return;
+    }
     fetch();
     intervalRef.current = setInterval(fetch, POLL_INTERVAL_MS);
     return () => {

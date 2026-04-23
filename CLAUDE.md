@@ -58,7 +58,7 @@ app/        FastAPI application layer — deployed as the app container
   game_logic/     Board serialization, UUID tracking (id_map), history, roster
   engine_client.py httpx wrapper for POST /move to the bot service
 
-frontend/   Next.js frontend — dev server via `make frontend`
+frontend/   Next.js frontend — static build via `make frontend`, dev server via `make server-frontend`
 
 cpp/        C++ rollout engine (pybind11 bridge)
   engine.cpp    Full rollout hot-loop in C++; exposes run_rollouts() and run_rollout_with_rolls()
@@ -89,7 +89,8 @@ docs/       Design docs, API spec, local testing runbook
 | `make partial` | Start postgres, wait healthy, apply schema (PvP only) |
 | `make full` | `docker compose up --build` all 3 services + schema (PvP + PvB) |
 | `make app` | Run uvicorn app on :8000 (foreground) |
-| `make frontend` | Run Next.js dev server on :3000 (foreground) |
+| `make frontend` | Build static export and serve locally with SPA fallback (mirrors prod) |
+| `make server-frontend` | Run Next.js dev server on :3000 (foreground, hot-reload) |
 | `make schema` | Apply `app/db/schema.sql` |
 | `make bot-id` | Print seeded Metallic bot UUID |
 | `make test` | Run pytest |
