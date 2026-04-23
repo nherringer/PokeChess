@@ -44,7 +44,7 @@ export function GameListCard({ game }: { game: GameSummary }) {
         )}
       </div>
       {game.status === "active" && (
-        <Link href={`/game/${game.id}`}>
+        <Link href={`/game?id=${game.id}`}>
           <Button size="sm" variant="secondary">
             Resume
           </Button>

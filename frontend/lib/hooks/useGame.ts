@@ -51,8 +51,10 @@ export function useGame(gameId: string | null) {
   fetchRef.current = fetch;
 
   useEffect(() => {
-    if (!gameId) return;
-    activeRef.current = true;
+    if (!gameId) {
+      setLoading(false);
+      return;
+    }
     fetch();
     return () => {
       activeRef.current = false;

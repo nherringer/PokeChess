@@ -283,7 +283,7 @@ export default function FriendsPage() {
       const res = await respondToInvite(inv.id, "accept");
       dismissInvite(inv.id);
       await refreshInvites();
-      router.push(`/game/${res.game_id}`);
+      router.push(`/game?id=${res.game_id}`);
     } catch (err) {
       await refreshInvites();
       setInviteActionError(

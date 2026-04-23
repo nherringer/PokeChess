@@ -32,8 +32,8 @@ async function refreshToken(): Promise<string | null> {
     });
     if (res.status === 401 || res.status === 403) {
       useAuthStore.getState().clearAuth();
+      return null;
     }
-    return null;
     const data = await res.json();
     if (data.access_token) {
       setToken(data.access_token);

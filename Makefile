@@ -10,7 +10,7 @@ export
 DB_USER := $(or $(POSTGRES_USER),pokechess)
 DB_NAME := $(or $(POSTGRES_DB),pokechess)
 
-.PHONY: partial full app frontend schema bot-id test test-v down reset
+.PHONY: partial full app frontend server-frontend schema bot-id test test-v down reset
 
 # ---------------------------------------------------------------------------
 # Partial integration testing (PvP only — no bot server required)
@@ -36,7 +36,13 @@ full:
 app:
 	$(UVICORN) app.main:app --reload --port 8000
 
+# Builds the static export and serves it locally with SPA fallback, approximating
+# S3/CloudFront behaviour (unknown paths → index.html). Use this to catch routing
+# issues that only appear in the static build and not in the dev server.
 frontend:
+	cd frontend && npm run build && npx serve out -s
+
+server-frontend:
 	cd frontend && npm run dev
 
 # ---------------------------------------------------------------------------

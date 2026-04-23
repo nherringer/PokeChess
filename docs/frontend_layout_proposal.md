@@ -26,10 +26,10 @@ This is a concise map of **routes and shell behavior** on current development br
 | `/roster` | Alternate roster view (role-ordered cards; same API data, different layout). |
 | `/my-games` | **`GET /games`** — Active + Recent completed lists using **`GameListCard`**; linked from **AuthNav**. |
 | `/games` | Same games list pattern as `/my-games` (secondary entry; may use `PageShell` with back). |
-| `/play` | **PvB difficulty chooser**: `GET /bots`, then **`POST /games`** with `{ bot_id, player_side: "red" }` → navigates to **`/game/[id]`**. |
+| `/play` | **PvB difficulty chooser**: `GET /bots`, then **`POST /games`** with `{ bot_id, player_side: “red” }` → navigates to **`/game?id=<id>`**. |
 | `/play/lobby` | **PvB** short “setting up…” splash, or **PvP** inviter wait — query params `gameId` / `inviteId`; polls **`GET /game-invites`** until the game is active or invite ends. |
 | `/friends` | Friends list, friend requests, **and** incoming game invites (challenge flow + invite accept — social hub). |
-| `/game/[id]` | **Gameplay**: `GameBoard`, `TeamBanner` ×2, `BottomDrawer` (selected piece, legend, last move), disambiguation pickers (Mew / Pikachu / Eevee), `BotThinkingOverlay`, Pokeball wiggle, resign. Polls **`GET /games/{id}`** on a ~2.5s interval. |
+| `/game` | **Gameplay** (`?id=<gameId>`): `GameBoard`, `TeamBanner` ×2, `BottomDrawer` (selected piece, legend, last move), disambiguation pickers (Mew / Pikachu / Eevee), `BotThinkingOverlay`, Pokeball wiggle, resign. Polls **`GET /games/{id}`** on a ~2.5s interval. Static route; game ID passed as query param for S3/CloudFront compatibility. |
 | `/game/over` | **Game over** screen (`?gameId=`): team result, XP-style rows derived from move history client-side for display. |
 
 ### Divergences from wireframes (intentional or pending)
