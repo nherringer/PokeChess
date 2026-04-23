@@ -238,6 +238,20 @@ export default function GamePageClient() {
     ? displayToApi(pendingPokeball.row, pendingPokeball.col, localSide)
     : null;
 
+  if (!gameId) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-bg-deep flex-col gap-4">
+        <p className="text-red-400">No game ID provided.</p>
+        <button
+          onClick={() => router.push("/")}
+          className="text-white/50 underline text-sm"
+        >
+          Go home
+        </button>
+      </div>
+    );
+  }
+
   if (loading && !game) {
     return (
       <div className="h-screen flex items-center justify-center bg-bg-deep">
