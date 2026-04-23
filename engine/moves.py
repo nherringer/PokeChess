@@ -295,7 +295,9 @@ def _sliding_squares(
             if occupant is None:
                 empties.append((r, c))
             elif occupant.team != piece.team:
-                enemies.append((r, c))
+                # Safetyballs block the ray but cannot be captured
+                if occupant.piece_type not in SAFETYBALL_TYPES:
+                    enemies.append((r, c))
                 break
             else:
                 break  # friendly blocks the ray
@@ -387,7 +389,7 @@ def _charmander_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
         occupant = state.board[r][c]
         if occupant is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
-        elif occupant.team != piece.team:
+        elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
             action = ActionType.MOVE if occupant.piece_type in PAWN_TYPES else ActionType.ATTACK
             moves.append(Move(piece.row, piece.col, action, r, c))
     moves += _forward_healball_entry(piece, state)
@@ -537,7 +539,7 @@ def _king_standard_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
         occupant = state.board[r][c]
         if occupant is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
-        elif occupant.team != piece.team:
+        elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
             action = ActionType.MOVE if occupant.piece_type in PAWN_TYPES else ActionType.ATTACK
             moves.append(Move(piece.row, piece.col, action, r, c))
     return moves
@@ -552,7 +554,7 @@ def _pikachu_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
         occupant = state.board[r][c]
         if occupant is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
-        elif occupant.team != piece.team:
+        elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
             action = ActionType.MOVE if occupant.piece_type in PAWN_TYPES else ActionType.ATTACK
             moves.append(Move(piece.row, piece.col, action, r, c))
     if piece.held_item == Item.THUNDERSTONE:
@@ -573,7 +575,7 @@ def _raichu_extra_cardinals(piece: 'Piece', state: 'GameState', moves: list) -> 
         dest = state.board[dest_r][dest_c]
         if dest is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, dest_r, dest_c))
-        elif dest.team != piece.team:
+        elif dest.team != piece.team and dest.piece_type not in SAFETYBALL_TYPES:
             action = ActionType.MOVE if dest.piece_type in PAWN_TYPES else ActionType.ATTACK
             moves.append(Move(piece.row, piece.col, action, dest_r, dest_c))
 
@@ -588,7 +590,7 @@ def _raichu_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
         occupant = state.board[r][c]
         if occupant is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
-        elif occupant.team != piece.team:
+        elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
             action = ActionType.MOVE if occupant.piece_type in PAWN_TYPES else ActionType.ATTACK
             moves.append(Move(piece.row, piece.col, action, r, c))
     _raichu_extra_cardinals(piece, state, moves)
@@ -751,7 +753,7 @@ def _flareon_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
         occupant = state.board[r][c]
         if occupant is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
-        elif occupant.team != piece.team:
+        elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
             action = ActionType.MOVE if occupant.piece_type in PAWN_TYPES else ActionType.ATTACK
             moves.append(Move(piece.row, piece.col, action, r, c))
     moves += _quick_attack_moves(piece, state)
@@ -785,7 +787,7 @@ def _jolteon_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
         occupant = state.board[r][c]
         if occupant is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
-        elif occupant.team != piece.team:
+        elif occupant.team != piece.team and occupant.piece_type not in SAFETYBALL_TYPES:
             action = ActionType.MOVE if occupant.piece_type in PAWN_TYPES else ActionType.ATTACK
             moves.append(Move(piece.row, piece.col, action, r, c))
     _raichu_extra_cardinals(piece, state, moves)
@@ -796,7 +798,7 @@ def _jolteon_moves(piece: 'Piece', state: 'GameState') -> list[Move]:
         dest = state.board[r][c]
         if dest is None:
             moves.append(Move(piece.row, piece.col, ActionType.MOVE, r, c))
-        elif dest.team != piece.team:
+        elif dest.team != piece.team and dest.piece_type not in SAFETYBALL_TYPES:
             action = ActionType.MOVE if dest.piece_type in PAWN_TYPES else ActionType.ATTACK
             moves.append(Move(piece.row, piece.col, action, r, c))
     moves += _quick_attack_moves(piece, state)

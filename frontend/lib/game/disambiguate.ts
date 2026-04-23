@@ -1,6 +1,6 @@
 import type { LegalMoveOut } from "@/lib/types/api";
 
-export type PickerType = "mew_attack" | "pikachu_evolve" | "eevee_evolve" | "item_overflow";
+export type PickerType = "mew_attack" | "pikachu_evolve" | "eevee_evolve" | "item_overflow" | "attack_or_qa";
 
 export function detectDisambiguation(
   legalMoves: LegalMoveOut[],
@@ -13,11 +13,23 @@ export function detectDisambiguation(
 
   if (movesToTarget.length <= 1) return null;
 
-  // Multiple moves to the same target — disambiguation needed
+  // When both ATTACK and QUICK_ATTACK go to the same square (e.g. Leafeon diagonal),
+  // collapse QA variants to one representative — the player just needs to choose the type.
+  const attackMoves = movesToTarget.filter((m) => m.action_type === "ATTACK");
+  const qaMoves = movesToTarget.filter((m) => m.action_type === "QUICK_ATTACK");
+  if (attackMoves.length > 0 && qaMoves.length > 0) {
+    return [...attackMoves, qaMoves[0]];
+  }
+
   return movesToTarget;
 }
 
 export function classifyPicker(moves: LegalMoveOut[]): PickerType {
+  // Attack vs Quick Attack disambiguation
+  const hasQA = moves.some((m) => m.action_type === "QUICK_ATTACK");
+  const hasAttack = moves.some((m) => m.action_type === "ATTACK");
+  if (hasQA && hasAttack) return "attack_or_qa";
+
   // Item overflow: moves differ only by overflow_keep
   const overflowMoves = moves.filter((m) => m.overflow_keep !== null && m.overflow_keep !== undefined);
   if (overflowMoves.length > 0) {
@@ -28,18 +40,16 @@ export function classifyPicker(moves: LegalMoveOut[]): PickerType {
   // If any move is EVOLVE, check what kind
   const evolveMoves = moves.filter((m) => m.action_type === "EVOLVE");
   if (evolveMoves.length > 0) {
-    // If multiple evolve moves with different slots → eevee_evolve
     if (evolveMoves.length > 1) return "eevee_evolve";
-    // Single evolve → pikachu evolve
     return "pikachu_evolve";
   }
 
   // If move_slot varies for ATTACK/FORESIGHT → mew_attack
-  const attackMoves = moves.filter(
+  const attackMoves2 = moves.filter(
     (m) => m.action_type === "ATTACK" || m.action_type === "FORESIGHT"
   );
-  if (attackMoves.length > 0) {
-    const slots = new Set(attackMoves.map((m) => m.move_slot));
+  if (attackMoves2.length > 0) {
+    const slots = new Set(attackMoves2.map((m) => m.move_slot));
     if (slots.size > 1) return "mew_attack";
   }
 

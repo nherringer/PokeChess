@@ -396,7 +396,7 @@ static void jumps(State& s, Piece& p, Move* mv, int& n, const int deltas[N][2]) 
             add_mv(mv, n, p.row, p.col, ACT_MOVE, r, c);
         } else {
             Piece& occ = s.pieces[oidx];
-            if (occ.team != p.team) {
+            if (occ.team != p.team && !is_safetyball(occ.type)) {
                 uint8_t act = is_pawn(occ.type) ? ACT_MOVE : ACT_ATTACK;
                 add_mv(mv, n, p.row, p.col, act, r, c);
             }
@@ -433,7 +433,7 @@ static void raichu_cardinals(State& s, Piece& p, Move* mv, int& n) {
         if (oidx < 0) add_mv(mv, n, p.row, p.col, ACT_MOVE, dr, dc);
         else {
             Piece& occ = s.pieces[oidx];
-            if (occ.team != p.team) {
+            if (occ.team != p.team && !is_safetyball(occ.type)) {
                 uint8_t act = is_pawn(occ.type) ? ACT_MOVE : ACT_ATTACK;
                 add_mv(mv, n, p.row, p.col, act, dr, dc);
             }
@@ -480,7 +480,7 @@ static void collect_sliding(State& s, Piece& p,
                 add_mv(emp, ne, p.row, p.col, ACT_MOVE,   r, c);
             } else {
                 Piece& occ = s.pieces[oidx];
-                if (occ.team != p.team)
+                if (occ.team != p.team && !is_safetyball(occ.type))
                     add_mv(atk, na, p.row, p.col, ACT_ATTACK, r, c);
                 break;
             }
@@ -731,8 +731,8 @@ static void gen_espeon(State& s, Piece& p, Move* mv, int& n) {
             add_mv(mv,n, p.row,p.col, ACT_MOVE, r,c);
         } else {
             Piece& occ = s.pieces[oidx];
-            if (occ.team != p.team && is_pawn(occ.type))
-                add_mv(mv,n, p.row,p.col, ACT_MOVE, r,c);  // adjacent enemy pawn → MOVE
+            if (occ.team != p.team && is_pawn(occ.type) && !is_safetyball(occ.type))
+                add_mv(mv,n, p.row,p.col, ACT_MOVE, r,c);  // adjacent enemy stealball → MOVE
         }
     }
     static const int DIRS[8][2] = {

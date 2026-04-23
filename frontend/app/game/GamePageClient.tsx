@@ -34,6 +34,7 @@ import { PikachuEvolvePicker } from "@/components/game/pickers/PikachuEvolvePick
 import { EeveeEvolvePicker } from "@/components/game/pickers/EeveeEvolvePicker";
 import { ItemOverflowPicker } from "@/components/game/pickers/ItemOverflowPicker";
 import { ExplorationToast, type ExplorationEvent } from "@/components/game/ExplorationToast";
+import { AttackOrQAPicker } from "@/components/game/pickers/AttackOrQAPicker";
 import { PokeballWiggle } from "@/components/game/animations/PokeballWiggle";
 import { Spinner } from "@/components/ui/Spinner";
 
@@ -170,6 +171,15 @@ export default function GamePageClient() {
     [submitMove, store]
   );
 
+  const handlePickerQA = useCallback(
+    (move: LegalMoveOut) => {
+      setPickerOpen(false);
+      store.setDisambigMoves(null);
+      store.startQuickAttack(move.target_row, move.target_col);
+    },
+    [store]
+  );
+
   // Board click handler
   const handleSquareClick = useCallback(
     async (displayRow: number, displayCol: number) => {
@@ -249,10 +259,15 @@ export default function GamePageClient() {
         const quickAttackMoves = movesToTarget.filter(
           (m) => m.action_type === "QUICK_ATTACK"
         );
-        if (quickAttackMoves.length > 0) {
+        const regularAttacks = movesToTarget.filter(
+          (m) => m.action_type === "ATTACK"
+        );
+        if (quickAttackMoves.length > 0 && regularAttacks.length === 0) {
+          // Only QA available — enter QA step flow directly
           store.startQuickAttack(apiRow, apiCol);
           return;
         }
+        // If both QA and regular attack exist, fall through to disambig
       } else if (store.quickAttackStep === 1) {
         // Step 2: submit the quick attack move
         const qaTarget = store.quickAttackTarget;
@@ -463,6 +478,20 @@ export default function GamePageClient() {
           }
           newItem="UNKNOWN"
           onPick={handlePickerPick}
+          onClose={handlePickerClose}
+        />
+      )}
+      {pickerType === "attack_or_qa" && (
+        <AttackOrQAPicker
+          open={pickerOpen}
+          moves={disambigMoves ?? []}
+          pieceType={
+            store.selectedSquare
+              ? (grid[store.selectedSquare.row]?.[store.selectedSquare.col]?.piece_type ?? "")
+              : ""
+          }
+          onPickAttack={handlePickerPick}
+          onPickQA={handlePickerQA}
           onClose={handlePickerClose}
         />
       )}
