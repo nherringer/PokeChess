@@ -35,7 +35,7 @@ class TestPieceStats:
             PieceType.PIKACHU:    200,
             PieceType.RAICHU:     250,
             PieceType.EEVEE:      150,
-            PieceType.VAPOREON:   300,
+            PieceType.VAPOREON:   440,
             PieceType.FLAREON:    220,
             PieceType.LEAFEON:    220,
             PieceType.JOLTEON:    200,

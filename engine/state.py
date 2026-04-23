@@ -95,7 +95,7 @@ PIECE_STATS: dict[PieceType, PieceStats] = {
     PieceType.PIKACHU:           PieceStats(PokemonType.ELECTRIC, 200, Item.THUNDERSTONE),
     PieceType.RAICHU:            PieceStats(PokemonType.ELECTRIC, 250, Item.NONE),
     PieceType.EEVEE:             PieceStats(PokemonType.NORMAL,   150, Item.NONE),
-    PieceType.VAPOREON:          PieceStats(PokemonType.WATER,    300, Item.NONE),
+    PieceType.VAPOREON:          PieceStats(PokemonType.WATER,    440, Item.NONE),
     PieceType.FLAREON:           PieceStats(PokemonType.FIRE,     220, Item.NONE),
     PieceType.LEAFEON:           PieceStats(PokemonType.GRASS,    220, Item.NONE),
     PieceType.JOLTEON:           PieceStats(PokemonType.ELECTRIC, 200, Item.NONE),

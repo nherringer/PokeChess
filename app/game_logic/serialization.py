@@ -175,7 +175,7 @@ def player_view_of_state(state: GameState, team: Team, id_map: IdMap) -> dict:
 def mask_state_dict(state: dict, team_name: str) -> dict:
     """
     Mask a raw state dict for `team_name`'s perspective (applied to DB state dicts).
-    Hides opponent held items and clears hidden_items.
+    Hides opponent held items, clears hidden_items, and strips foresight target from opponent.
     """
     import copy
     masked = copy.deepcopy(state)
@@ -183,7 +183,33 @@ def mask_state_dict(state: dict, team_name: str) -> dict:
         if piece.get("team") != team_name and piece.get("held_item", "NONE") not in ("NONE", "UNKNOWN"):
             piece["held_item"] = "UNKNOWN"
     masked["hidden_items"] = []
+    opponent = "BLUE" if team_name == "RED" else "RED"
+    opp_fx = masked.get("pending_foresight", {}).get(opponent)
+    if opp_fx is not None:
+        opp_fx.pop("target_row", None)
+        opp_fx.pop("target_col", None)
     return masked
+
+
+def mask_history_foresight(history: list[dict], team_name: str) -> list[dict]:
+    """
+    Strip foresight target coordinates from history entries cast by the opponent team.
+    Called at serve time so the requesting player can't learn where foresight is aimed.
+    """
+    import copy
+    result = []
+    for entry in history:
+        if entry.get("action_type") == "foresight" and entry.get("player") != team_name:
+            entry = copy.copy(entry)
+            entry.pop("to_row", None)
+            entry.pop("to_col", None)
+            if isinstance(entry.get("result"), dict):
+                r = copy.copy(entry["result"])
+                r.pop("target_row", None)
+                r.pop("target_col", None)
+                entry = {**entry, "result": r}
+        result.append(entry)
+    return result
 
 
 # ---------------------------------------------------------------------------

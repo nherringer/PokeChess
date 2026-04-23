@@ -11,7 +11,7 @@ from ..auth import Db, CurrentUser
 from ..main import AppError
 from ..personas import get_persona
 from ..schemas import CreateGameRequest, GameDetail, GameSummary, GamesListResponse
-from ..game_logic.serialization import state_to_dict, mask_state_dict
+from ..game_logic.serialization import state_to_dict, mask_state_dict, mask_history_foresight
 from ..game_logic.roster import ensure_roster, build_id_map, create_game_pokemon_map
 from ..db.queries import games as game_q
 
@@ -40,6 +40,8 @@ def _game_detail(game: dict, team_name: str | None = None) -> GameDetail:
         history = json.loads(history)
     if state is not None and team_name is not None:
         state = mask_state_dict(state, team_name)
+    if history is not None and team_name is not None:
+        history = mask_history_foresight(history, team_name)
     return GameDetail(
         id=game["id"],
         status=game["status"],
@@ -53,6 +55,7 @@ def _game_detail(game: dict, team_name: str | None = None) -> GameDetail:
         end_reason=game.get("end_reason"),
         state=state,
         move_history=history if history else [],
+        my_side=team_name.lower() if team_name else None,
     )
 
 

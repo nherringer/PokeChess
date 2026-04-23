@@ -244,6 +244,7 @@ class GameDetail(BaseModel):
     end_reason: str | None
     state: dict | None
     move_history: list[dict]
+    my_side: str | None = None  # "red" | "blue" — the requesting user's team
 
 
 class GamesListResponse(BaseModel):

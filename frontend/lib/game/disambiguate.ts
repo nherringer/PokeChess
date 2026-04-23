@@ -38,9 +38,11 @@ export function classifyPicker(moves: LegalMoveOut[]): PickerType {
   }
 
   // If any move is EVOLVE, check what kind
+  // Eevee EVOLVE moves always carry a move_slot (the stone used); Pikachu's don't.
   const evolveMoves = moves.filter((m) => m.action_type === "EVOLVE");
   if (evolveMoves.length > 0) {
-    if (evolveMoves.length > 1) return "eevee_evolve";
+    const hasSlot = evolveMoves.some((m) => m.move_slot !== null && m.move_slot !== undefined);
+    if (hasSlot) return "eevee_evolve";
     return "pikachu_evolve";
   }
 

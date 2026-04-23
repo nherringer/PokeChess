@@ -42,8 +42,8 @@ export function getLastMoveText(entry: MoveHistoryEntry | undefined): string {
     }
 
     case "FORESIGHT": {
-      const targetRow = entry.to_row ?? 0;
-      return `Mew used Foresight on row ${targetRow}`;
+      const caster = pieceName(entry.piece_type);
+      return `${caster} used Foresight!`;
     }
 
     case "EVOLVE": {

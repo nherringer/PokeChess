@@ -3,7 +3,7 @@ Tests for HP normalization, eeveelution changes, Leafeon reduction, and Espeon a
 (TallGrass Update, criteria §17-22).
 
 Covers:
-  - PIECE_STATS HP values: Eevee 150, Vaporeon 300, Jolteon 200
+  - PIECE_STATS HP values: Eevee 150, Vaporeon 440, Jolteon 200
   - Quick Attack available for Vaporeon, Flareon, Leafeon, Jolteon (not Espeon)
   - Espeon has no ATTACK moves; only MOVE, FORESIGHT, PSYWAVE
   - Flareon: 180 base FIRE damage
@@ -65,7 +65,7 @@ class TestHPValues:
         assert PIECE_STATS[PieceType.EEVEE].max_hp == 150
 
     def test_vaporeon_max_hp(self):
-        assert PIECE_STATS[PieceType.VAPOREON].max_hp == 300
+        assert PIECE_STATS[PieceType.VAPOREON].max_hp == 440
 
     def test_jolteon_max_hp(self):
         assert PIECE_STATS[PieceType.JOLTEON].max_hp == 200
