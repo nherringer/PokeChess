@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { getGame } from "@/lib/api/games";
@@ -75,7 +75,10 @@ export default function GameOverClient() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!gameId) return;
+    if (!gameId) {
+      setLoading(false);
+      return;
+    }
     getGame(gameId)
       .then(setGame)
       .catch(console.error)
