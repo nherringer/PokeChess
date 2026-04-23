@@ -57,12 +57,17 @@ export default function GamePageClient() {
     store.setGame(polledGame, localSide);
   }, [polledGame, userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Navigate to game over when complete
+  // Navigate to game over when complete — guard against stale store from a previous game
   useEffect(() => {
-    if (store.game?.status === "complete") {
+    if (store.game?.id === gameId && store.game?.status === "complete") {
       router.push(`/game/over?gameId=${gameId}`);
     }
-  }, [store.game?.status, gameId, router]);
+  }, [store.game?.id, store.game?.status, gameId, router]);
+
+  // Reset store on unmount so a stale game state can't bleed into the next game
+  useEffect(() => {
+    return () => { store.reset(); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const game = store.game;
   const localSide = store.localPlayerSide ?? "red";
