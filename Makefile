@@ -10,7 +10,7 @@ export
 DB_USER := $(or $(POSTGRES_USER),pokechess)
 DB_NAME := $(or $(POSTGRES_DB),pokechess)
 
-.PHONY: partial full app frontend static-frontend schema bot-id test test-v down reset
+.PHONY: partial full app frontend server-frontend schema bot-id test test-v down reset
 
 # ---------------------------------------------------------------------------
 # Partial integration testing (PvP only — no bot server required)
