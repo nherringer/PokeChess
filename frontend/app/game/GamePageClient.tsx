@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useGame } from "@/lib/hooks/useGame";
 import { useGameStore } from "@/lib/store/gameStore";
 import { useAuthStore } from "@/lib/store/authStore";
@@ -32,8 +32,8 @@ import { PokeballWiggle } from "@/components/game/animations/PokeballWiggle";
 import { Spinner } from "@/components/ui/Spinner";
 
 export default function GamePageClient() {
-  const params = useParams();
-  const gameId = params.id as string;
+  const searchParams = useSearchParams();
+  const gameId = searchParams.get("id") ?? "";
   const router = useRouter();
 
   // Hooks
