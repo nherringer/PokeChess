@@ -109,10 +109,12 @@ def state_to_dict(state: GameState, id_map: IdMap) -> dict:
 # ---------------------------------------------------------------------------
 
 def _foresight_masked(fx: Optional[ForesightEffect]) -> Optional[dict]:
-    """Foresight dict with target square stripped — sent to the non-casting player."""
+    """Foresight dict with target square hidden — sent to the non-casting player."""
     if fx is None:
         return None
     return {
+        "target_row": -1,
+        "target_col": -1,
         "damage": fx.damage,
         "resolves_on_turn": fx.resolves_on_turn,
         "caster_row": fx.caster_row,
