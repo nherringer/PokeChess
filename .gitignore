@@ -24,3 +24,7 @@ memory/
 
 # Jupyter checkpoints
 .ipynb_checkpoints/
+
+.venv/
+
+.DS_Store

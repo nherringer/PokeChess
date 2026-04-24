@@ -8,6 +8,7 @@ Starting layout mirrors standard chess (rows 1,2 for Red, rows 7,8 for Blue).
 
 from __future__ import annotations
 import dataclasses
+import random
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import NamedTuple, Optional
@@ -16,6 +17,11 @@ from typing import NamedTuple, Optional
 class Team(Enum):
     RED = auto()   # moves first
     BLUE = auto()
+    WILD = auto()  # groundwork for Wild Pokemon update
+
+
+# Middle 4 rows (0-indexed) that contain tall grass squares.
+TALL_GRASS_ROWS: range = range(2, 6)
 
 
 class PieceType(Enum):
@@ -88,11 +94,11 @@ PIECE_STATS: dict[PieceType, PieceStats] = {
     PieceType.MASTER_SAFETYBALL: PieceStats(PokemonType.NONE,     0,   Item.NONE),
     PieceType.PIKACHU:           PieceStats(PokemonType.ELECTRIC, 200, Item.THUNDERSTONE),
     PieceType.RAICHU:            PieceStats(PokemonType.ELECTRIC, 250, Item.NONE),
-    PieceType.EEVEE:             PieceStats(PokemonType.NORMAL,   120, Item.NONE),
-    PieceType.VAPOREON:          PieceStats(PokemonType.WATER,    220, Item.NONE),
+    PieceType.EEVEE:             PieceStats(PokemonType.NORMAL,   150, Item.NONE),
+    PieceType.VAPOREON:          PieceStats(PokemonType.WATER,    440, Item.NONE),
     PieceType.FLAREON:           PieceStats(PokemonType.FIRE,     220, Item.NONE),
     PieceType.LEAFEON:           PieceStats(PokemonType.GRASS,    220, Item.NONE),
-    PieceType.JOLTEON:           PieceStats(PokemonType.ELECTRIC, 220, Item.NONE),
+    PieceType.JOLTEON:           PieceStats(PokemonType.ELECTRIC, 200, Item.NONE),
     PieceType.ESPEON:            PieceStats(PokemonType.PSYCHIC,  220, Item.NONE),
 }
 
@@ -109,6 +115,9 @@ PAWN_TYPES: frozenset[PieceType] = frozenset({
 # Safetyballs cannot be attacked or captured by any piece.
 SAFETYBALL_TYPES: frozenset[PieceType] = frozenset({
     PieceType.SAFETYBALL, PieceType.MASTER_SAFETYBALL,
+})
+STEALBALL_TYPES: frozenset[PieceType] = frozenset({
+    PieceType.POKEBALL, PieceType.MASTERBALL,
 })
 
 
@@ -136,7 +145,7 @@ class Piece:
             row=row,
             col=col,
             current_hp=stats.max_hp,
-            held_item=stats.default_item,
+            held_item=Item.NONE,
         )
 
     @property
@@ -177,6 +186,38 @@ class ForesightEffect:
 
 
 @dataclass
+class HiddenItem:
+    """An item hidden in unexplored tall grass — not visible to either player."""
+    row: int
+    col: int
+    item: Item
+
+
+@dataclass
+class FloorItem:
+    """An item on an explored square, visible to both players."""
+    row: int
+    col: int
+    item: Item
+
+
+# All possible items that can appear in tall grass.
+_TALL_GRASS_ITEM_POOL: list[Item] = [
+    Item.THUNDERSTONE,
+    Item.WATERSTONE,
+    Item.FIRESTONE,
+    Item.LEAFSTONE,
+    Item.BENTSPOON,
+]
+
+
+def _select_tall_grass_items() -> list[Item]:
+    """Select 4 items for placement: Thunderstone always included, 3 random from the rest."""
+    others = [i for i in _TALL_GRASS_ITEM_POOL if i != Item.THUNDERSTONE]
+    return [Item.THUNDERSTONE] + random.sample(others, 3)
+
+
+@dataclass
 class GameState:
     """
     Full game state. Designed to be efficiently copyable for MCTS simulations.
@@ -189,6 +230,13 @@ class GameState:
     # Per-team: both sides can have a Foresight queued simultaneously
     # (Red's Mew and Blue's Espeon can each use it on back-to-back turns).
     pending_foresight: dict[Team, Optional[ForesightEffect]]
+    # Items hidden in unexplored tall grass squares (neither player can see these).
+    hidden_items: list[HiddenItem] = field(default_factory=list)
+    # Items on explored squares, visible to both players.
+    floor_items: list[FloorItem] = field(default_factory=list)
+    # Set of (row, col) squares in TALL_GRASS_ROWS that have been explored.
+    # All squares in TALL_GRASS_ROWS begin unexplored (not in this set).
+    tall_grass_explored: set[tuple[int, int]] = field(default_factory=set)
     # Foresight cannot be used on consecutive turns by the same team.
     # Stored explicitly because pending_foresight is cleared at resolution,
     # before the same team's next move decision.
@@ -220,6 +268,17 @@ class GameState:
                 Team.RED: _foresight_from_dict(d["pending_foresight"]["RED"]),
                 Team.BLUE: _foresight_from_dict(d["pending_foresight"]["BLUE"]),
             },
+            hidden_items=[
+                HiddenItem(row=h["row"], col=h["col"], item=Item[h["item"]])
+                for h in d.get("hidden_items", [])
+            ],
+            floor_items=[
+                FloorItem(row=f["row"], col=f["col"], item=Item[f["item"]])
+                for f in d.get("floor_items", [])
+            ],
+            tall_grass_explored={
+                (sq[0], sq[1]) for sq in d.get("tall_grass_explored", [])
+            },
             foresight_used_last_turn={
                 Team.RED: d["foresight_used_last_turn"]["RED"],
                 Team.BLUE: d["foresight_used_last_turn"]["BLUE"],
@@ -234,11 +293,13 @@ class GameState:
     def new_game(cls) -> GameState:
         board: list[list[Optional[Piece]]] = [[None] * 8 for _ in range(8)]
         _place_starting_pieces(board)
+        hidden_items = _place_tall_grass_items(board)
         return cls(
             board=board,
             active_player=Team.RED,
             turn_number=1,
             pending_foresight={Team.RED: None, Team.BLUE: None},
+            hidden_items=hidden_items,
         )
 
     def piece_at(self, row: int, col: int) -> Optional[Piece]:
@@ -262,6 +323,9 @@ class GameState:
                 team: dataclasses.replace(fx) if fx is not None else None
                 for team, fx in self.pending_foresight.items()
             },
+            hidden_items=[dataclasses.replace(h) for h in self.hidden_items],
+            floor_items=[dataclasses.replace(f) for f in self.floor_items],
+            tall_grass_explored=set(self.tall_grass_explored),
             foresight_used_last_turn=dict(self.foresight_used_last_turn),
             has_traded=dict(self.has_traded),
         )
@@ -327,3 +391,16 @@ def _place_starting_pieces(board: list[list[Optional[Piece]]]) -> None:
         pawn_type = PieceType.SAFETYBALL if 2 <= col <= 5 else PieceType.POKEBALL
         board[1][col] = Piece.create(pawn_type, Team.RED, 1, col)
         board[6][col] = Piece.create(pawn_type, Team.BLUE, 6, col)
+
+
+def _place_tall_grass_items(board: list[list[Optional[Piece]]]) -> list[HiddenItem]:
+    """Randomly place 4 selected items in distinct empty squares within TALL_GRASS_ROWS."""
+    items = _select_tall_grass_items()
+    candidates = [
+        (r, c)
+        for r in TALL_GRASS_ROWS
+        for c in range(8)
+        if board[r][c] is None
+    ]
+    chosen = random.sample(candidates, len(items))
+    return [HiddenItem(row=r, col=c, item=item) for (r, c), item in zip(chosen, items)]

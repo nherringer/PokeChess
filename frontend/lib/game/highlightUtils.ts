@@ -78,14 +78,10 @@ export function buildHighlightMap(
         move.piece_col,
         localSide
       );
-      const { row: displayTargetRow } = apiToDisplay(
-        move.target_row,
-        move.target_col,
-        localSide
-      );
+      // quickAttackTarget is stored in API coordinates (see gameStore.startQuickAttack).
       if (
         displayPieceRow !== selectedSquare.row ||
-        displayTargetRow !== apiTarget.row ||
+        move.target_row !== apiTarget.row ||
         move.target_col !== apiTarget.col
       ) {
         continue;

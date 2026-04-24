@@ -1,20 +1,24 @@
 "use client";
 
-import React, { useEffect, useCallback } from "react";
+import React, { useEffect, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useGame } from "@/lib/hooks/useGame";
 import { useGameStore } from "@/lib/store/gameStore";
 import { useAuthStore } from "@/lib/store/authStore";
 import { useLegalMoves } from "@/lib/hooks/useLegalMoves";
 import { useGameMutation } from "@/lib/hooks/useGameMutation";
-import { parseBoardGrid } from "@/lib/game/boardUtils";
+import {
+  parseBoardGrid,
+  parseFloorItemGrid,
+  parseTallGrassExplored,
+  displayToApi,
+} from "@/lib/game/boardUtils";
 import { buildHighlightMap } from "@/lib/game/highlightUtils";
 import {
   detectDisambiguation,
   classifyPicker,
   type PickerType,
 } from "@/lib/game/disambiguate";
-import { displayToApi } from "@/lib/game/boardUtils";
 import type { LegalMoveOut, MovePayload } from "@/lib/types/api";
 
 import { GameBoard } from "@/components/game/board/GameBoard";
@@ -28,6 +32,9 @@ import { QuickAttackHint } from "@/components/game/QuickAttackHint";
 import { MewAttackPicker } from "@/components/game/pickers/MewAttackPicker";
 import { PikachuEvolvePicker } from "@/components/game/pickers/PikachuEvolvePicker";
 import { EeveeEvolvePicker } from "@/components/game/pickers/EeveeEvolvePicker";
+import { ItemOverflowPicker } from "@/components/game/pickers/ItemOverflowPicker";
+import { ExplorationToast, type ExplorationEvent } from "@/components/game/ExplorationToast";
+import { AttackOrQAPicker } from "@/components/game/pickers/AttackOrQAPicker";
 import { PokeballWiggle } from "@/components/game/animations/PokeballWiggle";
 import { Spinner } from "@/components/ui/Spinner";
 
@@ -90,6 +97,14 @@ export default function GamePageClient() {
     ? parseBoardGrid(game.state, localSide)
     : Array.from({ length: 8 }, () => Array(8).fill(null));
 
+  const tallGrassExplored = game?.state?.tall_grass_explored
+    ? parseTallGrassExplored(game.state.tall_grass_explored, localSide)
+    : new Set<string>();
+
+  const floorItemGrid = game?.state?.floor_items
+    ? parseFloorItemGrid(game.state.floor_items, localSide)
+    : Array.from({ length: 8 }, () => Array(8).fill(null));
+
   const highlightMap = buildHighlightMap(
     store.legalMoves,
     store.selectedSquare,
@@ -99,6 +114,40 @@ export default function GamePageClient() {
   );
 
   const pendingForesight = game?.state?.pending_foresight ?? {};
+
+  // Exploration toast state
+  const [explorationEvents, setExplorationEvents] = React.useState<ExplorationEvent[]>([]);
+  const explorationIdRef = useRef(0);
+  const prevExploredRef = useRef<string>("");
+
+  useEffect(() => {
+    if (!game?.state?.tall_grass_explored) return;
+    const currentKey = JSON.stringify(game.state.tall_grass_explored);
+    if (currentKey === prevExploredRef.current) return;
+
+    if (prevExploredRef.current) {
+      const prevSet: Set<string> = new Set(
+        (JSON.parse(prevExploredRef.current) as [number, number][]).map(
+          ([r, c]) => `${r},${c}`
+        )
+      );
+      const newlyExplored = (game.state.tall_grass_explored as [number, number][]).filter(
+        ([r, c]) => !prevSet.has(`${r},${c}`)
+      );
+      if (newlyExplored.length > 0) {
+        const newEvents: ExplorationEvent[] = newlyExplored.map(() => ({
+          id: ++explorationIdRef.current,
+          item: null,
+        }));
+        setExplorationEvents((prev) => [...prev, ...newEvents]);
+      }
+    }
+    prevExploredRef.current = currentKey;
+  }, [game?.state?.tall_grass_explored]);
+
+  const dismissExplorationEvent = useCallback((id: number) => {
+    setExplorationEvents((prev) => prev.filter((e) => e.id !== id));
+  }, []);
 
   // Disambiguation state
   const disambigMoves = store.disambigMoves;
@@ -131,6 +180,15 @@ export default function GamePageClient() {
     [submitMove, store]
   );
 
+  const handlePickerQA = useCallback(
+    (move: LegalMoveOut) => {
+      setPickerOpen(false);
+      store.setDisambigMoves(null);
+      store.startQuickAttack(move.target_row, move.target_col);
+    },
+    [store]
+  );
+
   // Board click handler
   const handleSquareClick = useCallback(
     async (displayRow: number, displayCol: number) => {
@@ -157,8 +215,26 @@ export default function GamePageClient() {
         return;
       }
 
-      // Clicked same square — deselect
+      // Clicked same square — check for in-place actions (EVOLVE, PSYWAVE) before deselecting
       if (selectedSq.row === displayRow && selectedSq.col === displayCol) {
+        const { row: inPlaceApiRow, col: inPlaceApiCol } = displayToApi(
+          displayRow,
+          displayCol,
+          localSide
+        );
+        const inPlaceMoves = legalMoves.filter(
+          (m) => m.target_row === inPlaceApiRow && m.target_col === inPlaceApiCol
+        );
+        const evolveMoves = inPlaceMoves.filter((m) => m.action_type === "EVOLVE");
+        if (evolveMoves.length > 0) {
+          store.setDisambigMoves(evolveMoves);
+          return;
+        }
+        const pswaveMoves = inPlaceMoves.filter((m) => m.action_type === "PSYWAVE");
+        if (pswaveMoves.length === 1) {
+          await submitMove({ ...pswaveMoves[0] });
+          return;
+        }
         store.clearSelection();
         return;
       }
@@ -192,10 +268,15 @@ export default function GamePageClient() {
         const quickAttackMoves = movesToTarget.filter(
           (m) => m.action_type === "QUICK_ATTACK"
         );
-        if (quickAttackMoves.length > 0) {
+        const regularAttacks = movesToTarget.filter(
+          (m) => m.action_type === "ATTACK"
+        );
+        if (quickAttackMoves.length > 0 && regularAttacks.length === 0) {
+          // Only QA available — enter QA step flow directly
           store.startQuickAttack(apiRow, apiCol);
           return;
         }
+        // If both QA and regular attack exist, fall through to disambig
       } else if (store.quickAttackStep === 1) {
         // Step 2: submit the quick attack move
         const qaTarget = store.quickAttackTarget;
@@ -319,6 +400,14 @@ export default function GamePageClient() {
               onSquareClick={handleSquareClick}
               disabled={!isMyTurn || mutLoading || movesLoading}
               localSide={localSide}
+              tallGrassExplored={tallGrassExplored}
+              floorItemGrid={floorItemGrid}
+            />
+
+            {/* Exploration toasts */}
+            <ExplorationToast
+              events={explorationEvents}
+              onDismiss={dismissExplorationEvent}
             />
 
             {isBotTurn && (
@@ -384,6 +473,34 @@ export default function GamePageClient() {
           open={pickerOpen}
           moves={disambigMoves ?? []}
           onPick={handlePickerPick}
+          onClose={handlePickerClose}
+        />
+      )}
+      {pickerType === "item_overflow" && (
+        <ItemOverflowPicker
+          open={pickerOpen}
+          moves={disambigMoves ?? []}
+          existingItem={
+            store.selectedSquare
+              ? (grid[store.selectedSquare.row]?.[store.selectedSquare.col]?.held_item ?? "NONE")
+              : "NONE"
+          }
+          newItem="UNKNOWN"
+          onPick={handlePickerPick}
+          onClose={handlePickerClose}
+        />
+      )}
+      {pickerType === "attack_or_qa" && (
+        <AttackOrQAPicker
+          open={pickerOpen}
+          moves={disambigMoves ?? []}
+          pieceType={
+            store.selectedSquare
+              ? (grid[store.selectedSquare.row]?.[store.selectedSquare.col]?.piece_type ?? "")
+              : ""
+          }
+          onPickAttack={handlePickerPick}
+          onPickQA={handlePickerQA}
           onClose={handlePickerClose}
         />
       )}

@@ -79,14 +79,27 @@ export const MAX_HP: Record<string, number> = {
   MEW: 250,
   PIKACHU: 200,
   RAICHU: 250,
-  EEVEE: 120,
-  VAPOREON: 220,
+  EEVEE: 150,
+  VAPOREON: 440,
   FLAREON: 220,
   LEAFEON: 220,
-  JOLTEON: 220,
+  JOLTEON: 200,
   ESPEON: 220,
   POKEBALL: 1,
   MASTERBALL: 1,
   SAFETYBALL: 1,
   MASTER_SAFETYBALL: 1,
 };
+
+export const ITEM_EMOJIS: Record<string, string> = {
+  NONE: "",
+  WATERSTONE: "💎",
+  FIRESTONE: "🔴",
+  LEAFSTONE: "🍃",
+  THUNDERSTONE: "⚡",
+  BENTSPOON: "🥄",
+  UNKNOWN: "❓",
+};
+
+// API rows (0-indexed) that contain tall grass
+export const TALL_GRASS_API_ROWS = new Set([2, 3, 4, 5]);
