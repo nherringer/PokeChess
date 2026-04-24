@@ -72,7 +72,7 @@ Each player starts with **4 Stealballs** and **4 Safetyballs**.
 | Piece | Evolves From | Type | HP | Notes |
 | :---- | :---- | :---- | :---- | :---- |
 | Raichu | Pikachu | Electric | 250 | Requires Thunder Stone |
-| Vaporeon | Eevee | Water | 220 | Requires Water Stone |
+| Vaporeon | Eevee | Water | 440 | Requires Water Stone |
 | Flareon | Eevee | Fire | 220 | Requires Fire Stone |
 | Leafeon | Eevee | Grass | 220 | Requires Leaf Stone |
 | Jolteon | Eevee | Electric | 220 | Requires Thunder Stone |
