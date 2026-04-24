@@ -95,7 +95,7 @@ static const int16_t MAX_HP[17] = {
     0, 0, 0, 0,          // 5-8
     200, 250,            // 9-10 Pikachu, Raichu
     150,                 // 11 Eevee
-    300, 220, 220, 200, 220, // 12-16 Vaporeon/Flareon/Leafeon/Jolteon/Espeon
+    440, 220, 220, 200, 220, // 12-16 Vaporeon/Flareon/Leafeon/Jolteon/Espeon
 };
 
 static const int16_t BASE_DAMAGE[17] = {
@@ -924,7 +924,7 @@ static void apply_move(State& s, const Move& mv, float roll) {
     // ── Reverse pokeball capture: non-immune non-pawn attacks a pokeball ────
     if (mv.action == ACT_ATTACK && !is_pawn(p.type) && p.type != PT_PIKACHU) {
         int8_t t8 = idx_at(s, mv.tr, mv.tc);
-        if (t8 >= 0 && s.pieces[t8].type == PT_POKEBALL) {
+        if (t8 >= 0 && (s.pieces[t8].type == PT_POKEBALL || s.pieces[t8].type == PT_MASTERBALL)) {
             int16_t mhp = MAX_HP[p.type];
             float ratio = (mhp > 0) ? (float)p.hp / (float)mhp : 1.0f;
             float prob = (p.type == PT_MEW)
@@ -1084,7 +1084,7 @@ static void apply_move(State& s, const Move& mv, float roll) {
         // Moving onto an enemy Pokeball — stochastic reverse capture
         if (!is_pawn(p.type) && p.type != PT_PIKACHU && old_tidx >= 0) {
             Piece& pb = s.pieces[old_tidx];
-            if (pb.type == PT_POKEBALL && pb.team != p.team) {
+            if ((pb.type == PT_POKEBALL || pb.type == PT_MASTERBALL) && pb.team != p.team) {
                 int16_t mhp = MAX_HP[p.type];
                 float ratio = (mhp > 0) ? (float)p.hp / (float)mhp : 1.0f;
                 float prob = (p.type == PT_MEW)

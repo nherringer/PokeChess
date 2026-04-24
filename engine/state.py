@@ -116,6 +116,9 @@ PAWN_TYPES: frozenset[PieceType] = frozenset({
 SAFETYBALL_TYPES: frozenset[PieceType] = frozenset({
     PieceType.SAFETYBALL, PieceType.MASTER_SAFETYBALL,
 })
+STEALBALL_TYPES: frozenset[PieceType] = frozenset({
+    PieceType.POKEBALL, PieceType.MASTERBALL,
+})
 
 
 @dataclass

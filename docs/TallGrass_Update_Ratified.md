@@ -148,7 +148,7 @@ The following HP values replace all prior per-piece HP values. These apply to ba
 | 200 | Squirtle, Charmander, Bulbasaur, Pikachu, Jolteon |
 | 220 | Espeon, Flareon, Leafeon |
 | 250 | Mew (Queen), Raichu |
-| 300 | Vaporeon |
+| 440 | Vaporeon |
 
 **Note:** Leafeon's effective survivability is higher than its raw HP suggests due to its -40 damage reduction (see Section 11).
 
@@ -168,7 +168,7 @@ Vaporeon, Flareon, Leafeon, and Jolteon **retain Quick Attack (QA)** in addition
 
 ### 11.3 Vaporeon
 - **Movement:** King adjacency + full rook movement (orthogonal, unlimited range).
-- **HP:** 300 — the highest HP of any piece in the game.
+- **HP:** 440 — the highest HP of any piece in the game.
 - No additional special attack beyond QA retention.
 
 ### 11.4 Jolteon
