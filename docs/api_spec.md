@@ -225,7 +225,7 @@ Bearer required.
 
 **List behavior:** **Completed** games for the user are limited to the **10** most recently updated (`app/db/queries/games.py`). Active games are not capped.
 
-**`GameDetail`:** `id`, `status`, `whose_turn`, `turn_number`, `is_bot_game`, `bot_side`, `bot_name` (persona display name, `null` for PvP), `red_player_id`, `blue_player_id`, `winner`, `end_reason`, `state`, `move_history`, `my_side` (`"red"` / `"blue"` for the authenticated user, `null` when the game was fetched without a participant context).
+**`GameDetail`:** `id`, `status`, `whose_turn`, `turn_number`, `is_bot_game`, `bot_side`, `bot_name` (persona display name, `null` for PvP), `red_player_id`, `blue_player_id`, `winner`, `end_reason`, `state`, `move_history`, `my_side` (`"red"` / `"blue"` — always populated in `GameDetail` responses since all routes that return one require participation).
 
 - **`state`:** Board snapshot object (see data model doc). May be `null` in edge cases from DB, but normal games have an object.
 - **`move_history`:** Array of move history objects (see data model doc). May be empty `[]`.
