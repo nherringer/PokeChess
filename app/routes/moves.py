@@ -222,7 +222,7 @@ async def legal_moves(
     return filtered
 
 
-async def _run_bot_move(app, game_id: UUID, user_id: UUID) -> None:
+async def run_bot_move(app, game_id: UUID, user_id: UUID) -> None:
     """
     Apply the bot's move for game_id using a split-transaction pattern.
 
@@ -234,7 +234,7 @@ async def _run_bot_move(app, game_id: UUID, user_id: UUID) -> None:
     Splitting the transaction means the engine call (up to ~25s worst case)
     never holds a DB connection or a FOR UPDATE lock on the game row. The
     T2b re-validation handles the states that can change during the engine
-    call (resign, concurrent _run_bot_move application).
+    call (resign, concurrent run_bot_move application).
 
     Idempotent: any exit path logs and returns. Expected at low volume under
     the retry endpoint — not an error condition.
@@ -426,12 +426,12 @@ async def _run_bot_move(app, game_id: UUID, user_id: UUID) -> None:
     if continue_bot:
         # Schedule the follow-up as a detached task so this coroutine returns
         # promptly (letting BackgroundTasks release its slot) and the new call
-        # starts its own T2a snapshot. _run_bot_move is idempotent, so a spurious
+        # starts its own T2a snapshot. run_bot_move is idempotent, so a spurious
         # schedule (e.g. the human already moved in parallel) is a no-op.
         # Note: this task is not tracked by FastAPI — if the server shuts down
         # mid-execution the continuation is lost. The frontend's 15s retry
         # endpoint is the recovery path for that window.
-        asyncio.create_task(_run_bot_move(app, game_id, user_id))
+        asyncio.create_task(run_bot_move(app, game_id, user_id))
 
 
 @router.post("/{game_id}/move", response_model=GameDetail)
@@ -521,7 +521,7 @@ async def submit_move(
     # engine call begins.  The background task re-acquires its own connection
     # and transaction, and is idempotent.
     if bot_move_needed:
-        background_tasks.add_task(_run_bot_move, request.app, game_id, user["id"])
+        background_tasks.add_task(run_bot_move, request.app, game_id, user["id"])
 
     # Fetch updated game for response (read committed — reflects human move).
     updated = await game_q.get_game(db, game_id)
@@ -540,7 +540,7 @@ async def retry_bot_move(
     Re-queue the bot move for a game stuck with whose_turn == bot_side.
 
     Called automatically by the frontend after ~15 seconds if the bot move
-    hasn't arrived via polling.  Idempotent: _run_bot_move exits silently if
+    hasn't arrived via polling.  Idempotent: run_bot_move exits silently if
     it's no longer the bot's turn.
     """
     game = await game_q.get_game(db, game_id)
@@ -560,5 +560,5 @@ async def retry_bot_move(
     if game["whose_turn"] != game["bot_side"]:
         raise AppError(409, "not_bot_turn", "It is not the bot's turn")
 
-    background_tasks.add_task(_run_bot_move, request.app, game_id, user["id"])
+    background_tasks.add_task(run_bot_move, request.app, game_id, user["id"])
     return {"status": "queued"}

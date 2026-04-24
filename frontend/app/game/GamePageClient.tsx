@@ -84,7 +84,7 @@ export default function GamePageClient() {
     game?.is_bot_game === true && game.whose_turn === game.bot_side;
 
   // Self-healing: nudge the bot every 15 s while its turn is stuck.
-  // _run_bot_move is idempotent so concurrent calls from polling + this
+  // run_bot_move is idempotent so concurrent calls from polling + this
   // trigger are safe. setInterval keeps firing until isBotTurn clears.
   useEffect(() => {
     if (!isBotTurn || !gameId) return;

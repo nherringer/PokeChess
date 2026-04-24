@@ -1,5 +1,5 @@
 """
-Tests for _run_bot_move: split-transaction flow (T2a + engine + T2b).
+Tests for run_bot_move: split-transaction flow (T2a + engine + T2b).
 
 Covers the re-validation paths that guard against game state changing
 during the engine HTTP call (resign, concurrent bot move application,
@@ -33,7 +33,7 @@ from engine.moves import Move, ActionType
 # downstream `from ..auth import Db` fails. Starting at app.main lets
 # create_app run cleanly.
 import app.main  # noqa: F401
-from app.routes.moves import _run_bot_move
+from app.routes.moves import run_bot_move
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +110,7 @@ def _legal_move():
 
 @pytest.fixture
 def mocks():
-    """Patch every external dependency of _run_bot_move and yield handles."""
+    """Patch every external dependency of run_bot_move and yield handles."""
     patchers = {
         "get_game_for_move": patch(
             "app.routes.moves.game_q.get_game_for_move", new_callable=AsyncMock
@@ -172,7 +172,7 @@ def test_happy_path_applies_bot_move(mocks):
     row = _row()
     mocks["get_game_for_move"].side_effect = [row, row]
 
-    _run(_run_bot_move(_fake_app(), uuid4(), uuid4()))
+    _run(run_bot_move(_fake_app(), uuid4(), uuid4()))
 
     assert mocks["call_bot_move"].await_count == 1
     assert mocks["update_game_state"].await_count == 1
@@ -188,7 +188,7 @@ def test_resign_between_transactions_drops_move(mocks, caplog):
     ]
 
     with caplog.at_level("INFO", logger="app.routes.moves"):
-        _run(_run_bot_move(_fake_app(), uuid4(), uuid4()))
+        _run(run_bot_move(_fake_app(), uuid4(), uuid4()))
 
     # Engine was called (no way to know status change before), but no write.
     assert mocks["call_bot_move"].await_count == 1
@@ -204,7 +204,7 @@ def test_turn_number_drift_drops_move(mocks, caplog):
     ]
 
     with caplog.at_level("WARNING", logger="app.routes.moves"):
-        _run(_run_bot_move(_fake_app(), uuid4(), uuid4()))
+        _run(run_bot_move(_fake_app(), uuid4(), uuid4()))
 
     assert mocks["update_game_state"].await_count == 0
     assert any("turn_number=3" in r.message for r in caplog.records)
@@ -217,7 +217,7 @@ def test_illegal_engine_move_is_dropped(mocks, caplog):
     mocks["get_legal_moves"].return_value = []  # no moves match what engine sent
 
     with caplog.at_level("ERROR", logger="app.routes.moves"):
-        _run(_run_bot_move(_fake_app(), uuid4(), uuid4()))
+        _run(run_bot_move(_fake_app(), uuid4(), uuid4()))
 
     assert mocks["update_game_state"].await_count == 0
     assert any("illegal move" in r.message for r in caplog.records)
@@ -239,7 +239,7 @@ def test_terminal_move_updates_xp(mocks):
         "blue",
     )
 
-    _run(_run_bot_move(_fake_app(), uuid4(), uuid4()))
+    _run(run_bot_move(_fake_app(), uuid4(), uuid4()))
 
     assert mocks["update_game_state"].await_count == 1
     kwargs = mocks["update_game_state"].call_args.kwargs
@@ -262,7 +262,7 @@ def test_continue_bot_schedules_follow_up(mocks):
     )
 
     with patch("app.routes.moves.asyncio.create_task") as mock_create_task:
-        _run(_run_bot_move(_fake_app(), uuid4(), uuid4()))
+        _run(run_bot_move(_fake_app(), uuid4(), uuid4()))
 
     assert mocks["update_game_state"].await_count == 1
     mock_create_task.assert_called_once()

@@ -15,7 +15,7 @@ from ..game_logic.game_detail import game_dict_to_detail, user_team_name
 from ..game_logic.serialization import state_to_dict
 from ..game_logic.roster import ensure_roster, build_id_map, create_game_pokemon_map
 from ..db.queries import games as game_q
-from .moves import _run_bot_move
+from .moves import run_bot_move
 
 router = APIRouter(prefix="/games", tags=["games"])
 
@@ -87,7 +87,7 @@ async def create_game(
     # its opening move immediately — otherwise the client sits on the bot's
     # turn until the 15s frontend retry fires.
     if bot_side == "red":
-        background_tasks.add_task(_run_bot_move, request.app, game["id"], user["id"])
+        background_tasks.add_task(run_bot_move, request.app, game["id"], user["id"])
 
 
     team_name = "RED" if body.player_side == "red" else "BLUE"
