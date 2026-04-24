@@ -38,6 +38,7 @@ def _game_detail(game: dict) -> GameDetail:
         turn_number=game["turn_number"],
         is_bot_game=game["is_bot_game"],
         bot_side=game.get("bot_side"),
+        bot_name=game.get("bot_name"),
         red_player_id=game.get("red_player_id"),
         blue_player_id=game.get("blue_player_id"),
         winner=game.get("winner"),
@@ -102,6 +103,9 @@ async def create_game(
         )
 
         await create_game_pokemon_map(db, game["id"], id_map)
+
+    # insert_game doesn't join bots; inject bot_name so _game_detail populates it.
+    game["bot_name"] = bot["name"]
 
     # Games always start with whose_turn='red'. When the bot is Red, schedule
     # its opening move immediately — otherwise the client sits on the bot's

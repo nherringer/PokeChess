@@ -62,6 +62,7 @@ def _game_detail(game: dict) -> GameDetail:
         turn_number=game["turn_number"],
         is_bot_game=game["is_bot_game"],
         bot_side=game.get("bot_side"),
+        bot_name=game.get("bot_name"),
         red_player_id=game.get("red_player_id"),
         blue_player_id=game.get("blue_player_id"),
         winner=game.get("winner"),

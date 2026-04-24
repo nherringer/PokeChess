@@ -323,7 +323,7 @@ export default function GamePageClient() {
 
             {isBotTurn && (
               <div className="pointer-events-none absolute inset-0">
-                <BotThinkingOverlay />
+                <BotThinkingOverlay botName={game?.bot_name} />
               </div>
             )}
 

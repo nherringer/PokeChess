@@ -129,6 +129,8 @@ export interface GameDetail extends GameSummary {
   end_reason: string | null;
   state: GameStateData | null;
   move_history: MoveHistoryEntry[];
+  /** Bot persona name (e.g. "Bonnie"); null for PvP games. */
+  bot_name?: string | null;
 }
 
 export interface GamesListResponse {
