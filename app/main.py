@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 import httpx
@@ -10,6 +11,15 @@ from slowapi.util import get_remote_address
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from .db.connection import create_pool, close_pool
+
+# Route INFO-level messages from our own loggers (e.g. app.routes.moves) to
+# stderr. Without this, logger.info/warning calls are silently dropped because
+# no handler is attached to the root logger — uvicorn configures its own
+# loggers but not ours.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 limiter = Limiter(key_func=get_remote_address)
 

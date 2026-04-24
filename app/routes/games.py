@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks, Request
 
 from engine.state import GameState
 
@@ -14,6 +14,7 @@ from ..schemas import CreateGameRequest, GameDetail, GameSummary, GamesListRespo
 from ..game_logic.serialization import state_to_dict
 from ..game_logic.roster import ensure_roster, build_id_map, create_game_pokemon_map
 from ..db.queries import games as game_q
+from .moves import _run_bot_move
 
 router = APIRouter(prefix="/games", tags=["games"])
 
@@ -56,7 +57,13 @@ async def list_games(user: CurrentUser, db: Db):
 
 
 @router.post("", status_code=201, response_model=GameDetail)
-async def create_game(body: CreateGameRequest, user: CurrentUser, db: Db):
+async def create_game(
+    body: CreateGameRequest,
+    user: CurrentUser,
+    db: Db,
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
     if body.player_side not in ("red", "blue"):
         raise AppError(400, "bad_request", "player_side must be 'red' or 'blue'")
 
@@ -95,6 +102,12 @@ async def create_game(body: CreateGameRequest, user: CurrentUser, db: Db):
         )
 
         await create_game_pokemon_map(db, game["id"], id_map)
+
+    # Games always start with whose_turn='red'. When the bot is Red, schedule
+    # its opening move immediately — otherwise the client sits on the bot's
+    # turn until the 15s frontend retry fires.
+    if bot_side == "red":
+        background_tasks.add_task(_run_bot_move, request.app, game["id"], user["id"])
 
     return _game_detail(game)
 
