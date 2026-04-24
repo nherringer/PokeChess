@@ -79,7 +79,7 @@ export const MAX_HP: Record<string, number> = {
   PIKACHU: 200,
   RAICHU: 250,
   EEVEE: 150,
-  VAPOREON: 300,
+  VAPOREON: 440,
   FLAREON: 220,
   LEAFEON: 220,
   JOLTEON: 200,

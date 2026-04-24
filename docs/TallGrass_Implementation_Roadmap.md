@@ -43,7 +43,7 @@ The implementation is complete when all of the following hold:
 16. Master Stealball (Masterball) retains guaranteed capture (no change to existing 100% logic).
 
 ### HP Normalization and Eeveelution Changes
-17. Per-piece HP values match the spec table: Eevee 150, Vaporeon 300, Jolteon 200 (all other values are already correct).
+17. Per-piece HP values match the spec table: Eevee 150, Vaporeon 440, Jolteon 200 (all other values are already correct).
 18. Vaporeon, Flareon, Leafeon, and Jolteon gain Quick Attack using base-Eevee movement (king adjacency only, NORMAL type, 50 base damage). **Espeon does not get QA** — its attacks are Foresight and Psywave only. Standard queen-range ATTACK moves are removed from Espeon's move generator. Jolteon gains 2-square diagonal jump moves (all four diagonal directions, unobstructed) on top of Raichu's full pattern. Raichu and Jolteon's 2-square cardinal moves are unobstructed — they jump over any intermediate pieces.
 19. Espeon's **Psywave** (`ActionType.PSYWAVE`) fires from Espeon's position along all 8 queen-movement rays simultaneously, stopping at the first obstacle per ray. Non-Psychic Pokemon take `80 − 10×n` damage (n = empty squares between Espeon and target; min damage 20 on this board), friend and foe equally. Psychic-type Pokemon (Mew, Espeon), Stealballs, and Healballs all stop the ray with no damage and no destruction. Foresight likewise has no effect on Stealballs — if a Stealball occupies the target square when Foresight resolves, the effect fizzles.
 20. Flareon's **Flare Blitz** (`ActionType.ATTACK`) deals 180 base FIRE damage and causes Flareon to take 40 recoil damage after the attack resolves. Recoil can KO Flareon. QA (`ActionType.QUICK_ATTACK`) has no recoil.
@@ -87,7 +87,7 @@ Low-cost structural changes that prevent painful refactoring when the Wild Pokem
 - **`PIECE_STATS` / `PieceStats.default_item`**: Retain the field. It documents the intended evolution item for each piece type and will be referenced during WP item assignment. It is no longer used in `Piece.create()`.
 - **`PIECE_STATS` HP values**: Update the following entries (all others are already correct):
   - `EEVEE`: `max_hp` 120 → 150
-  - `VAPOREON`: `max_hp` 220 → 300
+  - `VAPOREON`: `max_hp` 220 → 440
   - `JOLTEON`: `max_hp` 220 → 200
 - **New `HiddenItem` dataclass**: `(item_type: Item, row: int, col: int)`. An item entity whose location is an undiscovered tall grass square. Full engine truth; not sent to players or bot.
 - **New `FloorItem` dataclass**: `(item_type: Item, row: int, col: int)`. A dropped item on an explored square. Visible to both players.
