@@ -19,10 +19,9 @@ from ..game_logic.serialization import (
     state_from_dict,
     state_to_dict,
     player_view_of_state,
-    mask_state_dict,
-    mask_history_foresight,
     IdMap,
 )
+from ..game_logic.game_detail import game_dict_to_detail, user_team_name
 from ..game_logic.id_map import remap_ids
 from ..game_logic.history import build_history_entry, build_foresight_resolve_entry
 from ..game_logic.xp import compute_xp
@@ -55,35 +54,6 @@ def _move_to_out(m: Move) -> LegalMoveOut:
         overflow_keep=m.overflow_keep,
         overflow_drop_row=m.overflow_drop_row,
         overflow_drop_col=m.overflow_drop_col,
-    )
-
-
-def _game_detail(game: dict, team_name: str | None = None) -> GameDetail:
-    state = game.get("state")
-    history = game.get("move_history")
-    if isinstance(state, str):
-        state = json.loads(state)
-    if isinstance(history, str):
-        history = json.loads(history)
-    if state is not None and team_name is not None:
-        state = mask_state_dict(state, team_name)
-    if history is not None and team_name is not None:
-        history = mask_history_foresight(history, team_name)
-    return GameDetail(
-        id=game["id"],
-        status=game["status"],
-        whose_turn=game.get("whose_turn"),
-        turn_number=game["turn_number"],
-        is_bot_game=game["is_bot_game"],
-        bot_side=game.get("bot_side"),
-        bot_name=game.get("bot_name"),
-        red_player_id=game.get("red_player_id"),
-        blue_player_id=game.get("blue_player_id"),
-        winner=game.get("winner"),
-        end_reason=game.get("end_reason"),
-        state=state,
-        move_history=history if history else [],
-        my_side=team_name.lower() if team_name else None,
     )
 
 
@@ -547,7 +517,7 @@ async def submit_move(
 
     # Fetch updated game for response (read committed — reflects human move).
     updated = await game_q.get_game(db, game_id)
-    return _game_detail(updated)
+    return game_dict_to_detail(updated, user_team_name(updated, user["id"]))
 
 
 @router.post("/{game_id}/retry-bot-move", status_code=202)
