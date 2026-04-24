@@ -83,13 +83,13 @@ export default function GamePageClient() {
   const isBotTurn =
     game?.is_bot_game === true && game.whose_turn === game.bot_side;
 
-  // Self-healing: if the bot hasn't moved after 15 s, re-queue the background
-  // task via the retry endpoint. _run_bot_move is idempotent so concurrent
-  // calls from polling + this trigger are safe.
+  // Self-healing: nudge the bot every 15 s while its turn is stuck.
+  // _run_bot_move is idempotent so concurrent calls from polling + this
+  // trigger are safe. setInterval keeps firing until isBotTurn clears.
   useEffect(() => {
     if (!isBotTurn || !gameId) return;
-    const t = setTimeout(() => { retryBotMove(); }, 15_000);
-    return () => clearTimeout(t);
+    const t = setInterval(() => { retryBotMove(); }, 15_000);
+    return () => clearInterval(t);
   }, [isBotTurn, gameId, retryBotMove]);
 
   // Board data

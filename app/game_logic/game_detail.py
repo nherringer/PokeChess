@@ -27,7 +27,7 @@ def game_dict_to_detail(game: dict, team_name: str | None = None) -> GameDetail:
     """
     state = game.get("state")
     history = game.get("move_history")
-    # asyncpg returns JSONB as dicts/lists directly; some paths may still JSON-stringify.
+    # asyncpg returns JSONB as strings without a codec registered; handle both shapes defensively.
     if isinstance(state, str):
         state = json.loads(state)
     if isinstance(history, str):

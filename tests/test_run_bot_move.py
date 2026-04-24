@@ -247,3 +247,22 @@ def test_terminal_move_updates_xp(mocks):
     assert kwargs["winner"] == "blue"
     assert kwargs["end_reason"] == "king_eliminated"
     assert mocks["update_xp_earned"].await_count == 1
+
+
+def test_continue_bot_schedules_follow_up(mocks):
+    """Bot keeps turn after a free action (e.g. TRADE) → asyncio.create_task called."""
+    row = _row()  # bot_side="blue", whose_turn="blue"
+    mocks["get_game_for_move"].side_effect = [row, row]
+
+    new_state = MagicMock()
+    new_state.active_player.name.lower.return_value = "blue"  # turn stays with bot
+    new_state.turn_number = 3
+    mocks["apply_and_record"].return_value = (
+        new_state, MagicMock(), [{}], False, None,
+    )
+
+    with patch("app.routes.moves.asyncio.create_task") as mock_create_task:
+        _run(_run_bot_move(_fake_app(), uuid4(), uuid4()))
+
+    assert mocks["update_game_state"].await_count == 1
+    mock_create_task.assert_called_once()
