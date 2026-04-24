@@ -225,7 +225,7 @@ Bearer required.
 
 **List behavior:** **Completed** games for the user are limited to the **10** most recently updated (`app/db/queries/games.py`). Active games are not capped.
 
-**`GameDetail`:** `id`, `status`, `whose_turn`, `turn_number`, `is_bot_game`, `bot_side`, `red_player_id`, `blue_player_id`, `winner`, `end_reason`, `state`, `move_history`.
+**`GameDetail`:** `id`, `status`, `whose_turn`, `turn_number`, `is_bot_game`, `bot_side`, `bot_name` (persona display name, `null` for PvP), `red_player_id`, `blue_player_id`, `winner`, `end_reason`, `state`, `move_history`, `my_side` (`"red"` / `"blue"` for the authenticated user, `null` when the game was fetched without a participant context).
 
 - **`state`:** Board snapshot object (see data model doc). May be `null` in edge cases from DB, but normal games have an object.
 - **`move_history`:** Array of move history objects (see data model doc). May be empty `[]`.
@@ -252,8 +252,9 @@ Bearer required.
 |--------|------|----------------|------------------|
 | `GET` | `/games/{game_id}/legal_moves` | **Required query:** `piece_row`, `piece_col` (integers **0–7**) | **200** JSON array of `LegalMoveOut` |
 | `POST` | `/games/{game_id}/move` | `MovePayload` | **200** `GameDetail` |
+| `POST` | `/games/{game_id}/retry-bot-move` | — | **202** `{"status": "queued"}` |
 
-**`LegalMoveOut` / `MovePayload` fields:** `piece_row`, `piece_col`, `action_type`, `target_row`, `target_col`, optional `secondary_row`, `secondary_col`, `move_slot`.
+**`LegalMoveOut` / `MovePayload` fields:** `piece_row`, `piece_col`, `action_type`, `target_row`, `target_col`, optional `secondary_row`, `secondary_col`, `move_slot`, `overflow_keep` (`"existing"` | `"new"` | `null`), `overflow_drop_row`, `overflow_drop_col`. Overflow fields are non-null only when a piece lands on an item square while already holding one and must resolve the item conflict.
 
 **`action_type`:** Must be **`engine.moves.ActionType` enum names** (`MOVE`, `ATTACK`, `FORESIGHT`, `TRADE`, `EVOLVE`, `QUICK_ATTACK`, `RELEASE`) — exactly as returned by `GET .../legal_moves` (see `app/routes/moves.py` / `LegalMoveOut`, which uses `action_type.name`).
 
@@ -263,7 +264,12 @@ Bearer required.
 
 1. Validates move against `get_legal_moves(state)`.
 2. Applies move; resolves Pokéball RNG on the **server** (not in the engine HTTP service).
-3. **PvB:** If the game continues and it becomes the bot’s turn, the app calls the **engine** `POST /move`, applies the bot move, and may append both plies to history before responding — **one** `GameDetail` reflects the post-bot state (and can take up to engine time budget + network).
+3. Commits the human ply and returns a **`GameDetail` reflecting only the human move**. Response latency is independent of the engine.
+4. **PvB:** If it is now the bot’s turn, a **background task** (`run_bot_move`) calls the engine `POST /move` and writes the bot ply asynchronously. The client must poll `GET /games/{id}` to observe the bot move; the `GameDetail` from step 3 will show `whose_turn == bot_side` while the bot ply is pending.
+
+**`POST /games/{game_id}/retry-bot-move` behavior:**
+
+Re-queues the bot’s background task when the bot’s turn appears stuck. Called automatically by the client after ~15 s if `whose_turn == bot_side` has not changed. `run_bot_move` is idempotent — exits silently if it is no longer the bot’s turn. Requires the caller to be a participant in an active bot game where `whose_turn == bot_side`.
 
 **Typical errors:**
 
@@ -276,6 +282,10 @@ Bearer required.
 | Invalid `action_type` | 400 | `bad_request` |
 | Move not legal | 400 | `illegal_move` |
 | Engine unreachable / HTTP error | 503 | `engine_unavailable` / `engine_error` |
+| `retry-bot-move`: not a participant | 403 | `forbidden` |
+| `retry-bot-move`: game not active | 409 | `game_not_active` |
+| `retry-bot-move`: not a bot game | 409 | `not_bot_game` |
+| `retry-bot-move`: not the bot's turn | 409 | `not_bot_turn` |
 
 ---
 
