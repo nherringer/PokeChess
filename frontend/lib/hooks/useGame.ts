@@ -55,6 +55,7 @@ export function useGame(gameId: string | null) {
       setLoading(false);
       return;
     }
+    activeRef.current = true;
     fetch();
     return () => {
       activeRef.current = false;

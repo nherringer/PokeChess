@@ -299,7 +299,7 @@ async def _run_bot_move(app, game_id: UUID, user_id: UUID) -> None:
                     state_data = json.loads(state_data)
                 state, id_map = state_from_dict(state_data)
 
-                bot_state_dict = state_to_dict(state, id_map)
+                bot_state_dict = player_view_of_state(state, state.active_player, id_map)
                 expected_turn_number = game["turn_number"]
                 expected_bot_side = game["bot_side"]
     except Exception:
@@ -365,6 +365,9 @@ async def _run_bot_move(app, game_id: UUID, user_id: UUID) -> None:
                         secondary_row=bot_move_raw.get("secondary_row"),
                         secondary_col=bot_move_raw.get("secondary_col"),
                         move_slot=bot_move_raw.get("move_slot"),
+                        overflow_keep=bot_move_raw.get("overflow_keep"),
+                        overflow_drop_row=bot_move_raw.get("overflow_drop_row"),
+                        overflow_drop_col=bot_move_raw.get("overflow_drop_col"),
                     )
                 except (KeyError, TypeError) as exc:
                     logger.error("Bot move parse error for game %s: %s", game_id, exc)
@@ -423,6 +426,9 @@ async def _run_bot_move(app, game_id: UUID, user_id: UUID) -> None:
         # promptly (letting BackgroundTasks release its slot) and the new call
         # starts its own T2a snapshot. _run_bot_move is idempotent, so a spurious
         # schedule (e.g. the human already moved in parallel) is a no-op.
+        # Note: this task is not tracked by FastAPI — if the server shuts down
+        # mid-execution the continuation is lost. The frontend's 15s retry
+        # endpoint is the recovery path for that window.
         asyncio.create_task(_run_bot_move(app, game_id, user_id))
 
 
