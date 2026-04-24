@@ -266,15 +266,21 @@ async def _run_bot_move(app, game_id: UUID, user_id: UUID) -> None:
 
                 bot_id = game["bot_id"]
                 bot_params = game.get("bot_params") or {}
+                logger.info("Bot params: %s", bot_params)
                 # asyncpg returns JSONB as a string unless a codec is registered;
                 # decode before reading params so the 3.0s fallback doesn't hide
                 # per-persona settings like Bonnie's time_budget=0.1.
                 if isinstance(bot_params, str):
+                    logger.info("Raw bot params are a string: %s", bot_params)
                     bot_params = json.loads(bot_params)
+                    logger.info("Decoded bot params: %s", bot_params)
+                    logger.info("Bot params type: %s", type(bot_params))
                 if not isinstance(bot_params, dict):
+                    logger.error("Bot params are not a dict: %s", bot_params)
                     bot_params = {}
+                
                 base_time_budget = float(bot_params.get("time_budget", 3.0))
-
+                logger.info("Base time budget: %s", base_time_budget)
                 # Record this player's move before counting so they're included in N.
                 await upsert_player_activity(db, user_id, bot_id)
 
