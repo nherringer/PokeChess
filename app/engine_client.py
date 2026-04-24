@@ -57,11 +57,14 @@ async def call_bot_move(
     outgoing_params = {**persona_params, "time_budget": tb}
 
     try:
+        # Timeout covers worst-case queue wait: the engine serializes searches
+        # under a single lock, so our request may sit behind one full-budget
+        # search (_MAX_BOT_TIME_BUDGET) before its own tb runs. Plus 5s slack.
         resp = await client.post(
             "/move",
             json={"state": state_dict, "persona_params": outgoing_params},
             headers={"X-Bot-Api-Secret": config.BOT_API_SECRET},
-            timeout=tb + 5.0,
+            timeout=tb + _MAX_BOT_TIME_BUDGET + 5.0,
         )
         resp.raise_for_status()
         return resp.json()
