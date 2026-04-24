@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import random
@@ -265,6 +266,11 @@ async def _run_bot_move(app, game_id: UUID, user_id: UUID) -> None:
 
                 bot_id = game["bot_id"]
                 bot_params = game.get("bot_params") or {}
+                # asyncpg returns JSONB as a string unless a codec is registered;
+                # decode before reading params so the 3.0s fallback doesn't hide
+                # per-persona settings like Bonnie's time_budget=0.1.
+                if isinstance(bot_params, str):
+                    bot_params = json.loads(bot_params)
                 if not isinstance(bot_params, dict):
                     bot_params = {}
                 base_time_budget = float(bot_params.get("time_budget", 3.0))
@@ -300,6 +306,9 @@ async def _run_bot_move(app, game_id: UUID, user_id: UUID) -> None:
         return
 
     # ----- T2b: re-validate against T2a snapshot, then apply -----
+    # TRADE and other "free" actions keep whose_turn with the bot. Track whether
+    # we need to re-queue ourselves after the transaction commits.
+    continue_bot = False
     try:
         async with pool.acquire() as db:
             async with db.transaction():
@@ -393,8 +402,18 @@ async def _run_bot_move(app, game_id: UUID, user_id: UUID) -> None:
                             winner_side if winner_side != "draw" else None,
                             end_reason,
                         )
+                elif final_whose_turn == expected_bot_side:
+                    continue_bot = True
     except Exception:
         logger.exception("Bot move T2b failed for game %s", game_id)
+        return
+
+    if continue_bot:
+        # Schedule the follow-up as a detached task so this coroutine returns
+        # promptly (letting BackgroundTasks release its slot) and the new call
+        # starts its own T2a snapshot. _run_bot_move is idempotent, so a spurious
+        # schedule (e.g. the human already moved in parallel) is a no-op.
+        asyncio.create_task(_run_bot_move(app, game_id, user_id))
 
 
 @router.post("/{game_id}/move", response_model=GameDetail)
