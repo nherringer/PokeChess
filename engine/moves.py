@@ -227,7 +227,9 @@ def _expand_overflow_moves(piece: 'Piece', state: 'GameState', moves: list[Move]
     with enumerated (keep, drop-location) variants.
 
     Overflow is triggered when:
-    - MOVE to an unexplored grass square, piece holds item (grass may contain item)
+    - MOVE to an unexplored tall-grass square while holding an item (grass may or
+      may not contain a hidden item — we always enumerate overflow so clients
+      cannot infer hidden loot from the legal-move list)
     - MOVE onto a floor item square, piece holds item
     - ATTACK that will KO an item-holding target, attacker also holds item
     """
@@ -238,8 +240,7 @@ def _expand_overflow_moves(piece: 'Piece', state: 'GameState', moves: list[Move]
     for m in moves:
         if m.action_type == ActionType.MOVE:
             needs_overflow = (
-                (_is_unexplored_grass(state, m.target_row, m.target_col)
-                 and _has_hidden_item(state, m.target_row, m.target_col))
+                _is_unexplored_grass(state, m.target_row, m.target_col)
                 or _floor_item_at(state, m.target_row, m.target_col) is not None
             )
             if needs_overflow:
