@@ -104,7 +104,7 @@ The **engine container is stateless for game rules**: it receives a state dict, 
 1. Human creates a game with a **bot_id** and side (`POST /games`) — roadmap and schemas define the exact body.
 2. Six **bot personas** are seeded in `bots` (see `app/db/schema.sql` and [bot_personas.md](bot_personas.md)): **Bonnie** (easiest), **Team Rocket**, **Serena**, **Clemont**, **Diantha**, **METALLIC** (hardest).
 3. Each bot row’s **`params` JSONB** carries its full MCTS configuration (`time_budget`, `exploration_c`, `use_transposition`, and optionally `move_bias` + `bias_bonus`). These are forwarded as `persona_params` to the engine on every move request — see Section 5.3.
-4. After each human move, if the game continues and it is the bot’s turn, the app calls the **engine** `POST /move`, applies the returned move, and returns a single **GameDetail** (human + bot plies in one response when applicable — [implementation_roadmap.md](implementation_roadmap.md) Q3).
+4. After each human move the app commits the human ply and returns a `GameDetail` immediately (reflecting only the human move). If it is then the bot’s turn, a **background task** calls the engine `POST /move` and writes the bot ply asynchronously. The client detects the bot’s turn via `whose_turn == bot_side` and polls at a faster interval (1 s) until the game state updates; if the bot move has not arrived after 15 s the client calls `POST /games/{id}/retry-bot-move` to re-queue it (idempotent).
 
 ### 3.3 Persistent roster (“My Pokémon”)
 
@@ -112,7 +112,7 @@ Each user owns **named** pieces (king, queen, rooks, knights, bishops) stored in
 
 ### 3.4 Client application
 
-A **Next.js** client lives under **`frontend/`** on this branch (local development; not necessarily production-deployed). It uses the same polling pattern the API was designed for (`GET /games/{id}` on a ~2.5s interval in code) and the REST contracts below. [frontend_layout_proposal.md](frontend_layout_proposal.md) remains the **v1 UX specification** (tablet/phone-first, dark Pokémon-inspired UI); the implementation may lag or diverge in details.
+A **Next.js** client lives under **`frontend/`** on this branch (local development; not necessarily production-deployed). It uses the same polling pattern the API was designed for (`GET /games/{id}` on a 2.5 s interval during the human's turn, switching to 1 s while `whose_turn == bot_side`) and the REST contracts below. [frontend_layout_proposal.md](frontend_layout_proposal.md) remains the **v1 UX specification** (tablet/phone-first, dark Pokémon-inspired UI); the implementation may lag or diverge in details.
 
 ### 3.5 Future: solo campaign
 
