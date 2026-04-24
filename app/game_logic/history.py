@@ -58,36 +58,51 @@ def build_history_entry(
     at = move.action_type
 
     if at == ActionType.MOVE:
-        return _build_move(old_state, piece, move, piece_id, player, turn, id_map)
+        # Case A: non-pawn moving onto an enemy pokeball — record capture result
+        target = old_state.board[move.target_row][move.target_col]
+        if (
+            target is not None
+            and target.piece_type in PAWN_TYPES
+            and piece is not None
+            and piece.team != target.team
+            and captured is not None
+        ):
+            entry = _build_reverse_capture(old_state, piece, move, piece_id, player, turn, id_map, rng_roll, captured)
+        else:
+            entry = _build_move(old_state, piece, move, piece_id, player, turn, id_map)
     elif at == ActionType.ATTACK:
         if piece.piece_type == PieceType.POKEBALL:
-            return _build_pokeball_attack(
+            entry = _build_pokeball_attack(
                 old_state, piece, move, piece_id, player, turn, id_map, rng_roll, captured
             )
         elif piece.piece_type == PieceType.MASTERBALL:
-            return _build_masterball_attack(
+            entry = _build_masterball_attack(
                 old_state, piece, move, piece_id, player, turn, id_map
             )
         else:
-            return _build_attack(old_state, piece, move, piece_id, player, turn, id_map)
+            entry = _build_attack(old_state, piece, move, piece_id, player, turn, id_map)
     elif at == ActionType.QUICK_ATTACK:
-        return _build_quick_attack(old_state, piece, move, piece_id, player, turn, id_map)
+        entry = _build_quick_attack(old_state, piece, move, piece_id, player, turn, id_map)
     elif at == ActionType.FORESIGHT:
-        return _build_foresight(old_state, new_state, piece, move, piece_id, player, turn)
+        entry = _build_foresight(old_state, new_state, piece, move, piece_id, player, turn)
     elif at == ActionType.EVOLVE:
-        return _build_evolve(old_state, new_state, piece, move, piece_id, player, turn)
+        entry = _build_evolve(old_state, new_state, piece, move, piece_id, player, turn)
     elif at == ActionType.TRADE:
-        return _build_trade(old_state, new_state, piece, move, piece_id, player, turn, id_map)
+        entry = _build_trade(old_state, new_state, piece, move, piece_id, player, turn, id_map)
     elif at == ActionType.RELEASE:
-        return _build_release(old_state, piece, move, piece_id, player, turn, id_map)
+        entry = _build_release(old_state, piece, move, piece_id, player, turn, id_map)
     else:
-        return {
+        entry = {
             "turn": turn,
             "player": player,
             "action_type": at.name.lower(),
             "piece_id": piece_id,
             "result": {},
         }
+
+    if piece is not None:
+        entry["piece_type"] = piece.piece_type.name
+    return entry
 
 
 def build_foresight_resolve_entry(
@@ -201,6 +216,32 @@ def _build_attack(
             "target_hp_before": hp_before,
             "target_hp_after": hp_after,
             "captured": hp_after <= 0,
+        },
+    }
+
+
+def _build_reverse_capture(
+    old_state: GameState, piece: Piece, move: Move,
+    piece_id: Optional[str], player: str, turn: int, id_map: IdMap,
+    rng_roll: Optional[float], captured: Optional[bool],
+) -> dict:
+    """Case A: a non-pawn moves onto an enemy pokeball (reverse capture attempt)."""
+    target = old_state.board[move.target_row][move.target_col]
+    target_id = id_map.get((move.target_row, move.target_col))
+    return {
+        "turn": turn,
+        "player": player,
+        "action_type": "reverse_capture",
+        "piece_id": piece_id,
+        "target_piece_id": target_id,
+        "from_row": move.piece_row,
+        "from_col": move.piece_col,
+        "to_row": move.target_row,
+        "to_col": move.target_col,
+        "result": {
+            "rng_roll": rng_roll,
+            "captured": captured if captured is not None else False,
+            "target_type": target.piece_type.name if target else None,
         },
     }
 

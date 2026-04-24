@@ -21,6 +21,8 @@ from engine.state import (
     Team,
     Item,
     ForesightEffect,
+    HiddenItem,
+    FloorItem,
     PIECE_STATS,
 )
 
@@ -88,7 +90,126 @@ def state_to_dict(state: GameState, id_map: IdMap) -> dict:
             "BLUE": _foresight_to_dict(state.pending_foresight[Team.BLUE]),
         },
         "board": board,
+        "hidden_items": [
+            {"row": h.row, "col": h.col, "item": h.item.name}
+            for h in state.hidden_items
+        ],
+        "floor_items": [
+            {"row": f.row, "col": f.col, "item": f.item.name}
+            for f in state.floor_items
+        ],
+        "tall_grass_explored": [
+            [r, c] for (r, c) in sorted(state.tall_grass_explored)
+        ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Player-masked view: state → dict with opponent secrets hidden
+# ---------------------------------------------------------------------------
+
+def _foresight_masked(fx: Optional[ForesightEffect]) -> Optional[dict]:
+    """Foresight dict with target square stripped — sent to the non-casting player."""
+    if fx is None:
+        return None
+    return {
+        "damage": fx.damage,
+        "resolves_on_turn": fx.resolves_on_turn,
+        "caster_row": fx.caster_row,
+        "caster_col": fx.caster_col,
+    }
+
+
+def player_view_of_state(state: GameState, team: Team, id_map: IdMap) -> dict:
+    """
+    Return a state dict masked for `team`'s perspective:
+      - hidden_items omitted (bot/player cannot see unexplored grass contents)
+      - Opponent pieces with held items have held_item replaced by "UNKNOWN"
+      - floor_items and tall_grass_explored included in full
+      - Opponent's pending_foresight has target_row/target_col stripped
+    """
+    board = []
+    for row in state.board:
+        for piece in row:
+            if piece is None:
+                continue
+            d = _piece_to_dict(piece, id_map)
+            if piece.team != team and piece.held_item.name != "NONE":
+                d["held_item"] = "UNKNOWN"
+            board.append(d)
+
+    opponent = Team.BLUE if team == Team.RED else Team.RED
+
+    pending_foresight = {}
+    for t in (Team.RED, Team.BLUE):
+        fx = state.pending_foresight[t]
+        if t == opponent:
+            pending_foresight[t.name] = _foresight_masked(fx)
+        else:
+            pending_foresight[t.name] = _foresight_to_dict(fx)
+
+    return {
+        "active_player": state.active_player.name,
+        "turn_number": state.turn_number,
+        "has_traded": {
+            "RED": state.has_traded[Team.RED],
+            "BLUE": state.has_traded[Team.BLUE],
+        },
+        "foresight_used_last_turn": {
+            "RED": state.foresight_used_last_turn[Team.RED],
+            "BLUE": state.foresight_used_last_turn[Team.BLUE],
+        },
+        "pending_foresight": pending_foresight,
+        "board": board,
+        "hidden_items": [],
+        "floor_items": [
+            {"row": f.row, "col": f.col, "item": f.item.name}
+            for f in state.floor_items
+        ],
+        "tall_grass_explored": [
+            [r, c] for (r, c) in sorted(state.tall_grass_explored)
+        ],
+    }
+
+
+def mask_state_dict(state: dict, team_name: str) -> dict:
+    """
+    Mask a raw state dict for `team_name`'s perspective (applied to DB state dicts).
+    Hides opponent held items, clears hidden_items, and strips foresight target from opponent.
+    """
+    import copy
+    masked = copy.deepcopy(state)
+    for piece in masked.get("board", []):
+        if piece.get("team") != team_name and piece.get("held_item", "NONE") not in ("NONE", "UNKNOWN"):
+            piece["held_item"] = "UNKNOWN"
+    masked["hidden_items"] = []
+    opponent = "BLUE" if team_name == "RED" else "RED"
+    opp_fx = masked.get("pending_foresight", {}).get(opponent)
+    if opp_fx is not None:
+        opp_fx.pop("target_row", None)
+        opp_fx.pop("target_col", None)
+    return masked
+
+
+def mask_history_foresight(history: list[dict], team_name: str) -> list[dict]:
+    """
+    Strip foresight target coordinates from history entries cast by the opponent team.
+    Called at serve time so the requesting player can't learn where foresight is aimed.
+    """
+    import copy
+    result = []
+    for entry in history:
+        if entry.get("action_type") == "foresight" and entry.get("player") != team_name:
+            entry = copy.copy(entry)
+            entry.pop("to_row", None)
+            entry.pop("to_col", None)
+            if isinstance(entry.get("result"), dict):
+                r = copy.copy(entry["result"])
+                r.pop("target_row", None)
+                r.pop("target_col", None)
+                entry = {**entry, "result": r}
+        result.append(entry)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +279,17 @@ def state_from_dict(data: dict) -> tuple[GameState, IdMap]:
         has_traded={
             Team.RED: data["has_traded"]["RED"],
             Team.BLUE: data["has_traded"]["BLUE"],
+        },
+        hidden_items=[
+            HiddenItem(row=h["row"], col=h["col"], item=Item[h["item"]])
+            for h in data.get("hidden_items", [])
+        ],
+        floor_items=[
+            FloorItem(row=f["row"], col=f["col"], item=Item[f["item"]])
+            for f in data.get("floor_items", [])
+        ],
+        tall_grass_explored={
+            (sq[0], sq[1]) for sq in data.get("tall_grass_explored", [])
         },
     )
     return state, id_map

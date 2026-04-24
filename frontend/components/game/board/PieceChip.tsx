@@ -1,7 +1,7 @@
 import React from "react";
 import Image from "next/image";
 import type { BoardPieceData } from "@/lib/types/api";
-import { PIECE_TYPE_EMOJIS } from "@/lib/constants";
+import { PIECE_TYPE_EMOJIS, ITEM_EMOJIS } from "@/lib/constants";
 import { pokemonSpriteSrc } from "@/lib/game/pokemonSprites";
 import {
   BallPieceIcon,
@@ -24,6 +24,9 @@ export function PieceChip({ piece, isSelected = false }: PieceChipProps) {
   const borderColor = TEAM_COLORS[piece.team];
   const sprite = pokemonSpriteSrc(piece.piece_type);
   const ballVariant = ballPieceVariantFromType(piece.piece_type);
+  const itemEmoji = piece.held_item && piece.held_item !== "NONE"
+    ? (ITEM_EMOJIS[piece.held_item] ?? "❓")
+    : null;
 
   return (
     <div className="relative flex aspect-square w-full max-w-[min(3.75rem,56px,14vmin)] items-center justify-center pointer-events-none">
@@ -62,6 +65,16 @@ export function PieceChip({ piece, isSelected = false }: PieceChipProps) {
           </span>
         )}
       </div>
+
+      {/* Held item badge */}
+      {itemEmoji && (
+        <div
+          className="absolute bottom-0 right-0 rounded-full bg-bg-deep flex items-center justify-center"
+          style={{ width: 16, height: 16, fontSize: 10 }}
+        >
+          {itemEmoji}
+        </div>
+      )}
     </div>
   );
 }

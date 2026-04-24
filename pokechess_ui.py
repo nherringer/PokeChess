@@ -114,10 +114,23 @@ ACTION_LABEL = {
     ActionType.EVOLVE:       'Evolve',
     ActionType.QUICK_ATTACK: 'Quick Attack',
     ActionType.RELEASE:      'Release',
+    ActionType.PSYWAVE:      'Psywave',
 }
 
 MEW_SLOTS  = {0: 'Fire Blast', 1: 'Hydro Pump', 2: 'Solar Beam'}
 EVO_SLOTS  = {0: 'Vaporeon', 1: 'Flareon', 2: 'Leafeon', 3: 'Jolteon', 4: 'Espeon'}
+
+# Tall grass rows (API coordinates)
+TALL_GRASS_ROWS = frozenset([2, 3, 4, 5])
+
+# Item display: abbreviated label + color for board and badge rendering
+ITEM_DISPLAY: dict = {
+    Item.WATERSTONE:   ('WS', (100, 200, 255)),
+    Item.FIRESTONE:    ('FS', (255, 120,  40)),
+    Item.LEAFSTONE:    ('LS', ( 80, 210,  80)),
+    Item.THUNDERSTONE: ('TS', (255, 230,  30)),
+    Item.BENTSPOON:    ('BS', (200, 100, 255)),
+}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1422,6 +1435,29 @@ class PokeChessApp:
             self._post_chat('idle')
             self._next_chat_move = self._move_count + random.randint(5, 10)
 
+    # ── Tall grass exploration logging ───────────────────────────────────────
+
+    def _log_exploration(self, old_state: GameState, new_state: GameState) -> None:
+        """Log any newly explored tall grass squares and items found/dropped."""
+        old_explored = old_state.tall_grass_explored
+        new_explored  = new_state.tall_grass_explored
+        newly = new_explored - old_explored
+        if not newly:
+            return
+        old_floor = {(fi.row, fi.col): fi for fi in old_state.floor_items}
+        new_floor = {(fi.row, fi.col): fi for fi in new_state.floor_items}
+        for (r, c) in sorted(newly):
+            # Check what was hidden at this square before exploration
+            hidden = next((h for h in old_state.hidden_items if h.row == r and h.col == c), None)
+            if hidden is None:
+                self.log_widget.add(f'  [Grass ({r},{c})] nothing here', C_DIM)
+            elif (r, c) in new_floor and (r, c) not in old_floor:
+                # Item was dropped at this square (overflow — bag was full)
+                self.log_widget.add(f'  [Grass ({r},{c})] {hidden.item.name} dropped (bag full)', C_GREEN)
+            else:
+                # Item was picked up directly
+                self.log_widget.add(f'  [Grass ({r},{c})] found {hidden.item.name}!', C_GREEN)
+
     # ── HP and capture helpers ────────────────────────────────────────────────
 
     _PAWN_HP = {
@@ -1672,6 +1708,7 @@ class PokeChessApp:
         self._last_bot_move_time = time.monotonic()
 
         self._record_captures(s, new_state)
+        self._log_exploration(s, new_state)
         self.history.append(new_state)
         self._update_status()
 
@@ -1762,6 +1799,7 @@ class PokeChessApp:
             self._on_move_chat(_chat_ev)
 
         self._record_captures(s, new_state)
+        self._log_exploration(s, new_state)
         self.history.append(new_state)
         self.selected = None
         self.legal_for_sel = []
@@ -1823,12 +1861,12 @@ class PokeChessApp:
 
             if (row, col) == (sr, sc):
                 # Clicking the selected piece's own square:
-                # check for EVOLVE moves (target == piece square) before deselecting
-                evo_moves = [m for m in self.legal_for_sel
-                             if m.action_type == ActionType.EVOLVE]
-                if evo_moves:
-                    self.pending_moves = evo_moves
-                    self._build_action_buttons(evo_moves)
+                # show in-place actions (EVOLVE, PSYWAVE) before deselecting
+                inplace_moves = [m for m in self.legal_for_sel
+                                 if m.action_type in (ActionType.EVOLVE, ActionType.PSYWAVE)]
+                if inplace_moves:
+                    self.pending_moves = inplace_moves
+                    self._build_action_buttons(inplace_moves)
                 else:
                     # Deselect
                     self.selected = None
@@ -1895,12 +1933,16 @@ class PokeChessApp:
         bh = 32
         pad = 4
 
-        # Deduplicate: Quick Attack is keyed by (dest, attack-target); others by (type, slot)
+        # Deduplicate: Quick Attack is keyed by (dest, attack-target);
+        # overflow moves include overflow_keep so both options are preserved;
+        # others by (type, slot)
         seen = set()
         unique: List[Move] = []
         for m in moves:
             if m.action_type == ActionType.QUICK_ATTACK:
                 key = (m.action_type, m.target_row, m.target_col, m.secondary_row, m.secondary_col)
+            elif m.overflow_keep is not None:
+                key = (m.action_type, m.move_slot, m.overflow_keep)
             else:
                 key = (m.action_type, m.move_slot)
             if key not in seen:
@@ -1918,9 +1960,15 @@ class PokeChessApp:
             if at == ActionType.EVOLVE:
                 lbl = f'Evolve → {EVO_SLOTS.get(m.move_slot, "?")}'
             if at == ActionType.QUICK_ATTACK:
-                target = s.board[m.secondary_row][m.secondary_col]
-                t_name = PIECE_LABEL.get(target.piece_type, '?') if target else '?'
-                lbl = f'QA via ({m.target_row},{m.target_col}) → {t_name}'
+                atk_target = s.board[m.target_row][m.target_col]
+                t_name = PIECE_LABEL.get(atk_target.piece_type, '?') if atk_target else '?'
+                lbl = f'QA: atk {t_name} → ({m.secondary_row},{m.secondary_col})'
+            if m.overflow_keep == 'existing':
+                piece_on_sq = s.board[m.piece_row][m.piece_col]
+                existing_name = piece_on_sq.held_item.name if piece_on_sq else '?'
+                lbl = f'Keep {existing_name} (drop new)'
+            elif m.overflow_keep == 'new':
+                lbl = 'Keep new item (drop old)'
             # Place buttons vertically in panel, below the nav row
             y = by + i * (bh + pad)
             btn = Button(bx, y, bw, bh, lbl,
@@ -2171,6 +2219,9 @@ class PokeChessApp:
                 elif at == ActionType.EVOLVE:
                     can_evolve = True   # target == own square; signal via sel highlight
 
+        # Build floor-item lookup: (row, col) → FloorItem
+        floor_item_map = {(fi.row, fi.col): fi for fi in state.floor_items}
+
         # Draw squares
         for r in range(8):
             for c in range(8):
@@ -2178,6 +2229,12 @@ class PokeChessApp:
                 is_light = (r + c) % 2 == 0
                 base_col = LIGHT_SQ if is_light else DARK_SQ
                 pygame.draw.rect(surf, base_col, (sx, sy, CELL, CELL))
+
+                # Unexplored tall grass: dark overlay
+                if r in TALL_GRASS_ROWS and (r, c) not in state.tall_grass_explored:
+                    grass_ol = pygame.Surface((CELL, CELL), pygame.SRCALPHA)
+                    grass_ol.fill((0, 0, 0, 230))
+                    surf.blit(grass_ol, (sx, sy))
 
                 # Highlights as overlays
                 overlay = None
@@ -2208,6 +2265,11 @@ class PokeChessApp:
                     ol = pygame.Surface((CELL, CELL), pygame.SRCALPHA)
                     ol.fill((*overlay, HL_ALPHA))
                     surf.blit(ol, (sx, sy))
+
+                # Floor item badge (drawn before piece so piece renders on top)
+                fi = floor_item_map.get((r, c))
+                if fi is not None and state.board[r][c] is None:
+                    self._draw_floor_item(surf, fi.item, sx, sy)
 
                 # Piece
                 piece = state.board[r][c]
@@ -2283,6 +2345,15 @@ class PokeChessApp:
                 fc = C_GREEN if hp_pct > 0.6 else (C_YELLOW if hp_pct > 0.3 else C_RED)
                 pygame.draw.rect(surf, fc, (bx, by, int(bar_w * hp_pct), bar_h), border_radius=2)
 
+        # Held item badge: small colored dot in bottom-right corner
+        if piece.held_item != Item.NONE and piece.held_item in ITEM_DISPLAY:
+            _, item_col = ITEM_DISPLAY[piece.held_item]
+            badge_r = 6
+            badge_cx = sx + CELL - badge_r - 3
+            badge_cy = sy + CELL - badge_r - 10  # just above HP bar
+            pygame.draw.circle(surf, (10, 10, 20), (badge_cx, badge_cy), badge_r + 1)
+            pygame.draw.circle(surf, item_col, (badge_cx, badge_cy), badge_r)
+
         # Tooltip on hover
         if pygame.Rect(sx, sy, CELL, CELL).collidepoint(mouse_pos):
             max_hp = PIECE_STATS[piece.piece_type].max_hp if piece.piece_type in PIECE_STATS else 0
@@ -2297,6 +2368,19 @@ class PokeChessApp:
                 f'{king_str}  {"RED" if piece.team == Team.RED else "BLUE"}'
                 f'{hp_str}{item_str}{stored_str}'
             )
+
+    def _draw_floor_item(self, surf, item: Item, sx: int, sy: int) -> None:
+        """Draw a small item badge centered in the square (sx, sy are top-left)."""
+        lbl_str, color = ITEM_DISPLAY.get(item, ('??', C_WHITE))
+        badge_w, badge_h = 30, 18
+        bx = sx + (CELL - badge_w) // 2
+        by = sy + (CELL - badge_h) // 2
+        pygame.draw.rect(surf, (20, 20, 30), (bx - 1, by - 1, badge_w + 2, badge_h + 2),
+                         border_radius=4)
+        pygame.draw.rect(surf, color, (bx, by, badge_w, badge_h), border_radius=4)
+        pygame.draw.rect(surf, (20, 20, 30), (bx, by, badge_w, badge_h), 1, border_radius=4)
+        txt = self.f_small.render(lbl_str, True, (10, 10, 20))
+        surf.blit(txt, txt.get_rect(center=(bx + badge_w // 2, by + badge_h // 2)))
 
     def _draw_chip_ball(self, surf, ptype: PieceType, cx: int, cy: int, r: int) -> None:
         """Draw a pokeball icon at (cx, cy) with radius r, styled by ptype."""

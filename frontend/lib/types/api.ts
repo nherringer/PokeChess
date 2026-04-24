@@ -85,6 +85,12 @@ export interface BoardPieceData {
   stored_piece: BoardPieceData | null;
 }
 
+export interface FloorItemData {
+  row: number;
+  col: number;
+  item: string;
+}
+
 export interface GameStateData {
   active_player: "RED" | "BLUE";
   turn_number: number;
@@ -92,6 +98,8 @@ export interface GameStateData {
   foresight_used_last_turn: Record<string, boolean>;
   pending_foresight: Record<string, ForesightEffect | null>;
   board: BoardPieceData[];
+  tall_grass_explored: [number, number][];
+  floor_items: FloorItemData[];
 }
 
 export interface MoveHistoryEntry {
@@ -99,6 +107,7 @@ export interface MoveHistoryEntry {
   player: "RED" | "BLUE";
   action_type: string;
   piece_id: string | null;
+  piece_type?: string;
   result: Record<string, unknown>;
   from_row?: number;
   from_col?: number;
@@ -151,6 +160,9 @@ export interface LegalMoveOut {
   secondary_row: number | null;
   secondary_col: number | null;
   move_slot: number | null;
+  overflow_keep: string | null;
+  overflow_drop_row: number | null;
+  overflow_drop_col: number | null;
 }
 
 export interface MovePayload extends LegalMoveOut {}

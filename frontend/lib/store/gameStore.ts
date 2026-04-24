@@ -43,7 +43,12 @@ export const useGameStore = create<GameStoreState>((set) => ({
   },
 
   selectSquare: (row: number, col: number) => {
-    set({ selectedSquare: { row, col } });
+    set({
+      selectedSquare: { row, col },
+      // Picking a new piece abandons any in-progress Quick Attack flow.
+      quickAttackStep: 0,
+      quickAttackTarget: null,
+    });
   },
 
   setLegalMoves: (moves: LegalMoveOut[]) => {

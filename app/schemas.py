@@ -244,6 +244,7 @@ class GameDetail(BaseModel):
     end_reason: str | None
     state: dict | None
     move_history: list[dict]
+    my_side: str | None = None  # "red" | "blue" — the requesting user's team
 
 
 class GamesListResponse(BaseModel):
@@ -264,6 +265,9 @@ class MovePayload(BaseModel):
     secondary_row: int | None = None
     secondary_col: int | None = None
     move_slot: int | None = None
+    overflow_keep: str | None = None
+    overflow_drop_row: int | None = None
+    overflow_drop_col: int | None = None
 
 
 class LegalMoveOut(BaseModel):
@@ -275,3 +279,6 @@ class LegalMoveOut(BaseModel):
     secondary_row: int | None
     secondary_col: int | None
     move_slot: int | None
+    overflow_keep: str | None
+    overflow_drop_row: int | None
+    overflow_drop_col: int | None

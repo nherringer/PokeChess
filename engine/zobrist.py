@@ -3,12 +3,15 @@ Zobrist hashing for GameState — used by the transposition table.
 
 A unique 64-bit integer is assigned at startup to each combination of
 (row, col, PieceType, Team, hp_bucket, Item). The hash for a full board
-is the XOR of all occupied-square hashes, plus hashes for turn and
-pending foresight state.
+is the XOR of all occupied-square hashes, plus hashes for turn, pending
+foresight state, explored tall grass squares, and visible floor items.
 
 hp_bucket = current_hp // 50  (groups HP into bands: 0, 50, 100, 150, 200, 250)
 This keeps the table size manageable while preserving meaningful HP distinctions
 given the discrete HP values used in PokeChess.
+
+hidden_items are NOT hashed — neither player knows their identity, and the bot
+operates on a masked state where they are invisible.
 """
 
 from __future__ import annotations
@@ -55,6 +58,17 @@ def build_zobrist_table(seed: int = 42) -> dict:
                 for turns_away in range(1, 5):
                     table[('f', team, row, col, turns_away)] = r64()
 
+    # Explored tall grass square: ('g', row, col) — XOR in when square is explored
+    for row in range(8):
+        for col in range(8):
+            table[('g', row, col)] = r64()
+
+    # Floor item visible on a square: ('i', row, col, item)
+    for row in range(8):
+        for col in range(8):
+            for item in Item:
+                table[('i', row, col, item)] = r64()
+
     return table
 
 
@@ -78,6 +92,12 @@ def hash_state(state: GameState, table: dict) -> int:
         turns_away = fx.resolves_on_turn - state.turn_number
         if 1 <= turns_away <= 4:
             h ^= table.get(('f', team, fx.target_row, fx.target_col, turns_away), 0)
+
+    for (gr, gc) in state.tall_grass_explored:
+        h ^= table.get(('g', gr, gc), 0)
+
+    for fi in state.floor_items:
+        h ^= table.get(('i', fi.row, fi.col, fi.item), 0)
 
     return h
 

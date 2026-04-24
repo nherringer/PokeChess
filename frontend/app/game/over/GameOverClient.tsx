@@ -16,14 +16,15 @@ interface XpResult {
   earned: number;
 }
 
-function computeXpResults(history: MoveHistoryEntry[]): XpResult[] {
+function computeXpResults(history: MoveHistoryEntry[], winnerTeam: string): XpResult[] {
   const byPiece: Record<string, { pieceType: string; damage: number }> = {};
   for (const entry of history) {
     if (!entry.piece_id) continue;
+    if (entry.player !== winnerTeam) continue;
     const damage = (entry.result?.damage as number | null) ?? 0;
     if (!byPiece[entry.piece_id]) {
       byPiece[entry.piece_id] = {
-        pieceType: (entry.result?.attacker_type as string | null) ?? "UNKNOWN",
+        pieceType: entry.piece_type ?? "UNKNOWN",
         damage: 0,
       };
     }
@@ -106,6 +107,8 @@ export default function GameOverClient() {
 
   const winner = game.winner;
   const isDraw = winner === "draw";
+  const mySide = game.my_side ?? null;
+  const isLoser = !isDraw && winner !== null && mySide !== null && mySide !== winner;
 
   const winnerColor = winner === "red" ? "#E03737" : winner === "blue" ? "#3C72E0" : "#FFD700";
   const winnerLabel = isDraw
@@ -116,7 +119,8 @@ export default function GameOverClient() {
 
   const kingEmoji = winner === "red" ? "⚡" : winner === "blue" ? "🌟" : "♟";
 
-  const xpResults = computeXpResults(game.move_history);
+  const winnerTeam = winner === "red" ? "RED" : winner === "blue" ? "BLUE" : null;
+  const xpResults = winnerTeam ? computeXpResults(game.move_history, winnerTeam) : [];
 
   return (
     <div className="min-h-screen bg-bg-deep flex flex-col items-center justify-center px-6 py-12">
@@ -137,10 +141,15 @@ export default function GameOverClient() {
         )}
       </div>
 
-      {xpResults.length > 0 && (
+      {isLoser ? (
+        <div className="w-full max-w-sm bg-bg-card rounded-xl p-5 mb-8 text-center">
+          <p className="text-white/70 text-base">Keep training your Pokémon!</p>
+          <p className="text-white/50 text-sm mt-1">Better luck next time.</p>
+        </div>
+      ) : xpResults.length > 0 && (
         <div className="w-full max-w-sm bg-bg-card rounded-xl p-5 mb-8">
           <h3 className="font-display font-bold text-white mb-4">
-            XP Earned This Game:
+            Winner&apos;s XP Earned:
           </h3>
           <div className="flex flex-col gap-3">
             {xpResults.map((r, i) => (

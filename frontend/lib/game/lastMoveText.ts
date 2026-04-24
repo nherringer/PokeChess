@@ -29,6 +29,13 @@ export function getLastMoveText(entry: MoveHistoryEntry | undefined): string {
       return text;
     }
 
+    case "reverse_capture": {
+      const caught = result.captured as boolean | null;
+      const caster = pieceName(entry.piece_type);
+      if (caught) return `${caster} was captured by the Poké Ball!`;
+      return `${caster} broke free from the Poké Ball!`;
+    }
+
     case "POKEBALL_ATTACK": {
       const caught = result.caught as boolean | null;
       if (caught) return `Caught ${target}!`;
@@ -42,8 +49,8 @@ export function getLastMoveText(entry: MoveHistoryEntry | undefined): string {
     }
 
     case "FORESIGHT": {
-      const targetRow = entry.to_row ?? 0;
-      return `Mew used Foresight on row ${targetRow}`;
+      const caster = pieceName(entry.piece_type);
+      return `${caster} used Foresight!`;
     }
 
     case "EVOLVE": {

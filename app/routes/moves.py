@@ -8,12 +8,19 @@ from fastapi import APIRouter, Query, Request
 
 from engine.moves import get_legal_moves, ActionType, Move
 from engine.rules import apply_move, is_terminal
-from engine.state import PieceType, Team
+from engine.state import PieceType, Team, PAWN_TYPES
 
 from ..auth import Db, CurrentUser
 from ..main import AppError
 from ..schemas import GameDetail, LegalMoveOut, MovePayload
-from ..game_logic.serialization import state_from_dict, state_to_dict, IdMap
+from ..game_logic.serialization import (
+    state_from_dict,
+    state_to_dict,
+    player_view_of_state,
+    mask_state_dict,
+    mask_history_foresight,
+    IdMap,
+)
 from ..game_logic.id_map import remap_ids
 from ..game_logic.history import build_history_entry, build_foresight_resolve_entry
 from ..game_logic.xp import compute_xp
@@ -41,16 +48,23 @@ def _move_to_out(m: Move) -> LegalMoveOut:
         secondary_row=m.secondary_row,
         secondary_col=m.secondary_col,
         move_slot=m.move_slot,
+        overflow_keep=m.overflow_keep,
+        overflow_drop_row=m.overflow_drop_row,
+        overflow_drop_col=m.overflow_drop_col,
     )
 
 
-def _game_detail(game: dict) -> GameDetail:
+def _game_detail(game: dict, team_name: str | None = None) -> GameDetail:
     state = game.get("state")
     history = game.get("move_history")
     if isinstance(state, str):
         state = json.loads(state)
     if isinstance(history, str):
         history = json.loads(history)
+    if state is not None and team_name is not None:
+        state = mask_state_dict(state, team_name)
+    if history is not None and team_name is not None:
+        history = mask_history_foresight(history, team_name)
     return GameDetail(
         id=game["id"],
         status=game["status"],
@@ -64,6 +78,7 @@ def _game_detail(game: dict) -> GameDetail:
         end_reason=game.get("end_reason"),
         state=state,
         move_history=history if history else [],
+        my_side=team_name.lower() if team_name else None,
     )
 
 
@@ -78,6 +93,9 @@ def _parse_move(payload: MovePayload) -> Move:
         secondary_row=payload.secondary_row,
         secondary_col=payload.secondary_col,
         move_slot=payload.move_slot,
+        overflow_keep=payload.overflow_keep,
+        overflow_drop_row=payload.overflow_drop_row,
+        overflow_drop_col=payload.overflow_drop_col,
     )
 
 
@@ -91,6 +109,9 @@ def _moves_equal(a: Move, b: Move) -> bool:
         and a.secondary_row == b.secondary_row
         and a.secondary_col == b.secondary_col
         and a.move_slot == b.move_slot
+        and a.overflow_keep == b.overflow_keep
+        and a.overflow_drop_row == b.overflow_drop_row
+        and a.overflow_drop_col == b.overflow_drop_col
     )
 
 
@@ -124,17 +145,29 @@ def _apply_and_record(
     outcomes = apply_move(old_state, move)
 
     piece_moving = old_state.board[move.piece_row][move.piece_col]
+    target_piece = old_state.board[move.target_row][move.target_col]
+
+    # Case B: pokeball piece attacks a target
     is_pokeball_attack = (
         move.action_type == ActionType.ATTACK
         and piece_moving is not None
         and piece_moving.piece_type == PieceType.POKEBALL
+    )
+    # Case A (rules.py): non-pawn moves/attacks onto an enemy pokeball — reverse capture
+    is_reverse_capture = (
+        move.action_type in (ActionType.MOVE, ActionType.ATTACK)
+        and piece_moving is not None
+        and piece_moving.piece_type not in PAWN_TYPES
+        and target_piece is not None
+        and target_piece.piece_type in {PieceType.POKEBALL, PieceType.MASTERBALL}
+        and piece_moving.team != target_piece.team
     )
 
     # Resolve RNG for pokeball (engine: stochastic capture is exactly two outcomes)
     rng_roll = None
     captured = None
     if len(outcomes) == 2:
-        if not is_pokeball_attack:
+        if not (is_pokeball_attack or is_reverse_capture):
             raise AppError(500, "internal_error", "Unexpected stochastic outcomes from engine")
         rng_roll = random.random()
         if rng_roll < outcomes[0][1]:
@@ -145,7 +178,7 @@ def _apply_and_record(
             captured = False
     elif len(outcomes) == 1:
         new_state = outcomes[0][0]
-        if is_pokeball_attack:
+        if is_pokeball_attack:  # Case A always returns 2 outcomes
             rng_roll = None
             captured = False
     else:
@@ -296,7 +329,7 @@ async def submit_move(
             # time_budget with the load-adjusted value.
             persona_params = {**bot_params, "time_budget": effective_time_budget}
 
-            bot_state_dict = state_to_dict(new_state, id_map)
+            bot_state_dict = player_view_of_state(new_state, new_state.active_player, id_map)
             bot_move_raw = await request_bot_move(request, bot_state_dict, persona_params)
 
             try:
@@ -309,6 +342,9 @@ async def submit_move(
                     secondary_row=bot_move_raw.get("secondary_row"),
                     secondary_col=bot_move_raw.get("secondary_col"),
                     move_slot=bot_move_raw.get("move_slot"),
+                    overflow_keep=bot_move_raw.get("overflow_keep"),
+                    overflow_drop_row=bot_move_raw.get("overflow_drop_row"),
+                    overflow_drop_col=bot_move_raw.get("overflow_drop_col"),
                 )
             except (KeyError, TypeError):
                 raise AppError(503, "engine_error", "Engine returned an invalid move")
@@ -362,4 +398,4 @@ async def submit_move(
 
     # Fetch updated game for response (outside transaction — read committed)
     updated = await game_q.get_game(db, game_id)
-    return _game_detail(updated)
+    return _game_detail(updated, team.name)

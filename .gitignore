@@ -24,3 +24,12 @@ memory/
 
 # Jupyter checkpoints
 .ipynb_checkpoints/
+
+.venv/
+
+# Local secrets — copy .env.example → .env and fill in values.
+# .env matches at any depth; .env.* covers .env.local, .env.production, etc.
+.env
+.env.*
+!.env.example
+.DS_Store
