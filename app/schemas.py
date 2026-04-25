@@ -238,6 +238,7 @@ class GameDetail(BaseModel):
     turn_number: int
     is_bot_game: bool
     bot_side: str | None
+    bot_name: str | None = None
     red_player_id: UUID | None
     blue_player_id: UUID | None
     winner: str | None

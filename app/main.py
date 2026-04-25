@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 import httpx
@@ -23,6 +24,15 @@ class AppError(Exception):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Route INFO-level messages from our own loggers (e.g. app.routes.moves) to
+    # stderr. Without this, logger.info calls are silently dropped because
+    # no handler is attached to the root logger — uvicorn configures its own
+    # loggers but not ours. Called here (not at module level) so it only fires
+    # on server start, not on import.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     app.state.db_pool = await create_pool()
     app.state.engine_client = httpx.AsyncClient(
         base_url=app.state.engine_url, timeout=15.0

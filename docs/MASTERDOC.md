@@ -2,7 +2,7 @@
 
 **Purpose:** This document is the **primary reference** for the PokeChess codebase and product: how the monorepo is organized, how requests and game state flow through the system, what the HTTP API exposes, how data is stored, how the bot and load-aware budgeting work, what the planned frontend must do, and how target deployment fits. Other files under `docs/` add depth (full SQL, exhaustive JSON examples, game rules prose, UX mockups). **If you read one file, read this one**; use the links when you need the full detail of a subsystem.
 
-**Last updated:** 17 April 2026
+**Last updated:** 24 April 2026
 
 ---
 
@@ -104,7 +104,7 @@ The **engine container is stateless for game rules**: it receives a state dict, 
 1. Human creates a game with a **bot_id** and side (`POST /games`) — roadmap and schemas define the exact body.
 2. Six **bot personas** are seeded in `bots` (see `app/db/schema.sql` and [bot_personas.md](bot_personas.md)): **Bonnie** (easiest), **Team Rocket**, **Serena**, **Clemont**, **Diantha**, **METALLIC** (hardest).
 3. Each bot row’s **`params` JSONB** carries its full MCTS configuration (`time_budget`, `exploration_c`, `use_transposition`, and optionally `move_bias` + `bias_bonus`). These are forwarded as `persona_params` to the engine on every move request — see Section 5.3.
-4. After each human move, if the game continues and it is the bot’s turn, the app calls the **engine** `POST /move`, applies the returned move, and returns a single **GameDetail** (human + bot plies in one response when applicable — [implementation_roadmap.md](implementation_roadmap.md) Q3).
+4. After each human move the app commits the human ply and returns a `GameDetail` immediately (reflecting only the human move). If it is then the bot’s turn, a **background task** calls the engine `POST /move` and writes the bot ply asynchronously. The client detects the bot’s turn via `whose_turn == bot_side` and polls at a faster interval (1 s) until the game state updates; if the bot move has not arrived after 15 s the client calls `POST /games/{id}/retry-bot-move` to re-queue it (idempotent).
 
 ### 3.3 Persistent roster (“My Pokémon”)
 
@@ -112,7 +112,7 @@ Each user owns **named** pieces (king, queen, rooks, knights, bishops) stored in
 
 ### 3.4 Client application
 
-A **Next.js** client lives under **`frontend/`** on this branch (local development; not necessarily production-deployed). It uses the same polling pattern the API was designed for (`GET /games/{id}` on a ~2.5s interval in code) and the REST contracts below. [frontend_layout_proposal.md](frontend_layout_proposal.md) remains the **v1 UX specification** (tablet/phone-first, dark Pokémon-inspired UI); the implementation may lag or diverge in details.
+A **Next.js** client lives under **`frontend/`** on this branch (local development; not necessarily production-deployed). It uses the same polling pattern the API was designed for (`GET /games/{id}` on a 2.5 s interval during the human's turn, switching to 1 s while `whose_turn == bot_side`) and the REST contracts below. [frontend_layout_proposal.md](frontend_layout_proposal.md) remains the **v1 UX specification** (tablet/phone-first, dark Pokémon-inspired UI); the implementation may lag or diverge in details.
 
 ### 3.5 Future: solo campaign
 
@@ -177,8 +177,8 @@ flowchart TB
 3. App verifies the move is in `get_legal_moves(state)`.
 4. App runs `apply_move` (handles Pokéball RNG on the **app** side — engine never rolls RNG for captures).
 5. App may inject **foresight_resolve** history entries when a pending Foresight fires.
-6. If PvB and bot’s turn next: app calls **engine** `POST /move` with serialized state and `persona_params` (including load-adjusted `time_budget`), parses flat move JSON, validates against legal moves, applies bot move.
-7. App writes updated `state`, appended `move_history`, `whose_turn`, `turn_number`, `status`, `winner`, `end_reason` as appropriate; on terminal, runs XP logic.
+6. App writes the human ply — updated `state`, appended `move_history`, `whose_turn`, `turn_number`, `status`, `winner`, `end_reason`; on terminal, runs XP logic. Commits **T1** and returns `GameDetail` to the client immediately.
+7. **PvB only, if bot’s turn after commit:** a **background task** (`run_bot_move`, `app/routes/moves.py`) acquires a new connection and runs the split-transaction bot path: **T2a** reads game state and bot params, records activity, snapshots `turn_number`; then calls engine `POST /move` (no DB connection held during engine call); **T2b** re-validates `turn_number` / `status` and applies the bot move atomically. Client polls `GET /games/{id}` at 1 s intervals while `whose_turn == bot_side`; calls `POST /games/{id}/retry-bot-move` after 15 s if still stuck.
 
 ### 4.4 Polling and payloads
 
@@ -219,7 +219,8 @@ All routes are mounted from `app/main.py`. Prefixes below are **full path prefix
 | `GET` | `/games/{game_id}` | **GameDetail** — full `state` + `move_history` |
 | `POST` | `/games/{game_id}/resign` | Resign |
 | `GET` | `/games/{game_id}/legal_moves` | Legal moves for one piece |
-| `POST` | `/games/{game_id}/move` | Submit move; **GameDetail** response (may include bot ply in PvB) |
+| `POST` | `/games/{game_id}/move` | Submit move; **GameDetail** reflects human ply only — bot ply (PvB) arrives asynchronously via polling |
+| `POST` | `/games/{game_id}/retry-bot-move` | Re-queue stuck bot move (**202**); idempotent; participant-gated |
 | `GET` | `/health` | Liveness |
 
 **Authoritative types:** `app/schemas.py` (`RegisterRequest`, `GameDetail`, `MovePayload`, `LegalMoveOut`, etc.). **Authoritative HTTP contract (status codes + errors):** [api_spec.md](api_spec.md).
@@ -259,6 +260,7 @@ The engine must return a **flat** JSON object the app can pass into `Move(...)`:
 - `target_row`, `target_col`
 - `secondary_row`, `secondary_col` (e.g. Quick Attack)
 - `move_slot` (Mew / Eevee evolution disambiguation)
+- `overflow_keep` (`"existing"` | `"new"` | `null`), `overflow_drop_row`, `overflow_drop_col` — present when the bot's move lands on an item square while already holding one
 
 **Note:** [implementation_roadmap.md](implementation_roadmap.md) §Engine API shows `time_budget` at the **top level** of the JSON; the **running app** nests it under `persona_params`. When implementing `bot/server.py`, accept the **app’s** shape.
 
@@ -450,7 +452,7 @@ Use **git history** on `docs/` (e.g. `git log -- docs/`) to see what changed rec
 | **Frontend UX copy** | Occasional “~3s” bot wait vs **10s** Master tier — treat **10s** as worst case for UX. |
 | **Engine doc typos** | “PvP vs engine” should read **PvB** — engine is never used for human-vs-human. |
 | **Engine image ready** | `bot/server.py` implemented; `Dockerfile.engine` builds and runs. |
-| **`FOR UPDATE` lock held across engine HTTP** | `POST /games/{id}/move` holds a Postgres row lock for the full engine round-trip (up to `time_budget + 5 s`, max 15 s after the cap was lowered to 10 s). Under concurrent PvB load this risks lock contention and connection pool exhaustion. Fix requires splitting into two transactions (read/validate → release lock → call engine → re-acquire → persist); deferred until pre-production load testing. |
+| **`FOR UPDATE` lock across engine HTTP — resolved** | `POST /games/{id}/move` previously held a Postgres row lock for the full engine round-trip. This is now split: T1 commits the human ply and returns immediately; `run_bot_move` (background task) runs T2a (read/snapshot) → engine HTTP (no lock held) → T2b (re-validate + apply). See `app/routes/moves.py` `run_bot_move`. |
 
 ---
 
@@ -462,7 +464,8 @@ Items that are known, scoped, and should be resolved before the service sees rea
 |----------|------|---------|
 | **High** | **SES email verification on registration** | Verify new users’ email via **Amazon SES** (or equivalent) before treating the account as fully active or before allowing login. Requires SES identity, templates, and handling bounces/complaints — see AWS SES docs when implementing. |
 | **High** | **Persist refresh tokens in the database** | Today refresh tokens are **JWTs** in HttpOnly cookies with no server-side session rows (`app/routes/auth.py` only decodes the JWT and checks the user exists). Store **hashed** refresh token records per device/session to support **revocation**, **rotation**, and **audit** (e.g. logout-all, compromised token). |
-| **High** | **Resolve `FOR UPDATE` lock across engine HTTP** | See §13. Splitting `POST /games/{id}/move` into two transactions removes the scalability risk. Requires careful re-validation between transactions to handle concurrent resigns. |
+| ~~**High**~~ | ~~**Resolve `FOR UPDATE` lock across engine HTTP**~~ | **Done** — split-transaction pattern implemented in `run_bot_move` (`app/routes/moves.py`). See §13. |
+| **Medium** | **Surface persistent bot move failures to the client** | `run_bot_move` is a background task and can only log on failure (engine unreachable, illegal/unparseable move response). After repeated retries the game appears permanently stuck at `whose_turn == bot_side` with no structured client signal. Fix: add a failure counter (in-memory or `bot_move_failures` column on `games`) and have `POST /games/{id}/retry-bot-move` return a structured error (or transition the game to a `bot_error` status) after N consecutive failures, so the UI can surface a recoverable state. |
 | **Medium** | **Document local testing setup** | One place (e.g. `app/README.md` or a short `docs/` note linked from MASTERDOC) should walk through **local** runs: required env vars (`DATABASE_URL`, `ENGINE_URL`, `JWT_SECRET_KEY`, `BOT_API_SECRET`, `CORS_ORIGINS`, …), bringing up app + engine (e.g. Compose), and **applying `app/db/schema.sql` to Postgres** — `docker compose up` alone does not load the schema, which blocks DB-backed flows until migrations or a manual `psql` apply. Optional: Compose init service or documented one-liner. |
 
 ---

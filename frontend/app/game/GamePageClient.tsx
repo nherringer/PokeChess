@@ -48,7 +48,7 @@ export default function GamePageClient() {
   const userId = useAuthStore((s) => s.userId);
   const store = useGameStore();
   const { fetchMoves, loading: movesLoading } = useLegalMoves(gameId);
-  const { submitMove, resign, loading: mutLoading } = useGameMutation(gameId);
+  const { submitMove, resign, retryBotMove, loading: mutLoading } = useGameMutation(gameId);
 
   // Sync polled game into store
   useEffect(() => {
@@ -82,6 +82,15 @@ export default function GamePageClient() {
   const isMyTurn = game?.whose_turn === localSide;
   const isBotTurn =
     game?.is_bot_game === true && game.whose_turn === game.bot_side;
+
+  // Self-healing: nudge the bot every 15 s while its turn is stuck.
+  // run_bot_move is idempotent so concurrent calls from polling + this
+  // trigger are safe. setInterval keeps firing until isBotTurn clears.
+  useEffect(() => {
+    if (!isBotTurn || !gameId) return;
+    const t = setInterval(() => { retryBotMove(); }, 15_000);
+    return () => clearInterval(t);
+  }, [isBotTurn, gameId, retryBotMove]);
 
   // Board data
   const grid = game?.state
@@ -403,7 +412,7 @@ export default function GamePageClient() {
 
             {isBotTurn && (
               <div className="pointer-events-none absolute inset-0">
-                <BotThinkingOverlay />
+                <BotThinkingOverlay botName={game?.bot_name} />
               </div>
             )}
 

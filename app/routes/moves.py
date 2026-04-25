@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import random
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Query, Request
 
 from engine.moves import get_legal_moves, ActionType, Move
 from engine.rules import apply_move, is_terminal
@@ -17,15 +19,16 @@ from ..game_logic.serialization import (
     state_from_dict,
     state_to_dict,
     player_view_of_state,
-    mask_state_dict,
-    mask_history_foresight,
     IdMap,
 )
+from ..game_logic.game_detail import game_dict_to_detail, user_team_name
 from ..game_logic.id_map import remap_ids
 from ..game_logic.history import build_history_entry, build_foresight_resolve_entry
 from ..game_logic.xp import compute_xp
 from ..db.queries import games as game_q
 from ..db.queries.game_map import update_xp_earned
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/games", tags=["moves"])
 
@@ -51,34 +54,6 @@ def _move_to_out(m: Move) -> LegalMoveOut:
         overflow_keep=m.overflow_keep,
         overflow_drop_row=m.overflow_drop_row,
         overflow_drop_col=m.overflow_drop_col,
-    )
-
-
-def _game_detail(game: dict, team_name: str | None = None) -> GameDetail:
-    state = game.get("state")
-    history = game.get("move_history")
-    if isinstance(state, str):
-        state = json.loads(state)
-    if isinstance(history, str):
-        history = json.loads(history)
-    if state is not None and team_name is not None:
-        state = mask_state_dict(state, team_name)
-    if history is not None and team_name is not None:
-        history = mask_history_foresight(history, team_name)
-    return GameDetail(
-        id=game["id"],
-        status=game["status"],
-        whose_turn=game.get("whose_turn"),
-        turn_number=game["turn_number"],
-        is_bot_game=game["is_bot_game"],
-        bot_side=game.get("bot_side"),
-        red_player_id=game.get("red_player_id"),
-        blue_player_id=game.get("blue_player_id"),
-        winner=game.get("winner"),
-        end_reason=game.get("end_reason"),
-        state=state,
-        move_history=history if history else [],
-        my_side=team_name.lower() if team_name else None,
     )
 
 
@@ -247,6 +222,218 @@ async def legal_moves(
     return filtered
 
 
+async def run_bot_move(app, game_id: UUID, user_id: UUID) -> None:
+    """
+    Apply the bot's move for game_id using a split-transaction pattern.
+
+    T2a: read game + bot params, record activity, snapshot turn_number; commit.
+    Engine HTTP call runs with no DB connection held.
+    T2b: re-lock game, re-validate against the T2a snapshot, apply bot move,
+         update row, compute XP; commit.
+
+    Splitting the transaction means the engine call (up to ~25s worst case)
+    never holds a DB connection or a FOR UPDATE lock on the game row. The
+    T2b re-validation handles the states that can change during the engine
+    call (resign, concurrent run_bot_move application).
+
+    Idempotent: any exit path logs and returns. Expected at low volume under
+    the retry endpoint — not an error condition.
+    """
+    from ..engine_client import call_bot_move
+    from ..db.queries.bot_activity import count_active_bot_players, upsert_player_activity
+    from .. import config
+
+    pool = app.state.db_pool
+
+    # ----- T2a: read state, record activity, snapshot for re-validation -----
+    try:
+        async with pool.acquire() as db:
+            async with db.transaction():
+                game = await game_q.get_game_for_move(db, game_id)
+                if game is None:
+                    logger.info("Bot move skipped (T2a): game %s not found", game_id)
+                    return
+                if game["status"] != "active":
+                    logger.info(
+                        "Bot move skipped (T2a): game %s status=%s",
+                        game_id, game["status"],
+                    )
+                    return
+                if not game["is_bot_game"] or game["whose_turn"] != game["bot_side"]:
+                    logger.info(
+                        "Bot move skipped (T2a): game %s not awaiting bot "
+                        "(is_bot_game=%s, whose_turn=%s, bot_side=%s)",
+                        game_id, game["is_bot_game"],
+                        game["whose_turn"], game.get("bot_side"),
+                    )
+                    return
+
+                bot_id = game["bot_id"]
+                raw = game.get("bot_params")
+                if isinstance(raw, str):
+                    bot_params = json.loads(raw)
+                elif isinstance(raw, dict):
+                    bot_params = raw
+                else:
+                    logger.error("Raw bot params for game %s are not a string or dict: %s", game_id, raw)
+                    logger.error("Raw bot params type: %s", type(raw))
+                    logger.error("Using empty bot params dict instead")
+                    bot_params = {}
+                if not isinstance(bot_params, dict):
+                    logger.error(
+                        "Bot params for game %s decoded to unexpected type %s; using defaults",
+                        game_id, type(bot_params).__name__,
+                    )
+                    bot_params = {}
+
+                base_time_budget = float(bot_params.get("time_budget", 3.0))
+                # Record this player's move before counting so they're included in N.
+                await upsert_player_activity(db, user_id, bot_id)
+
+                n_active = await count_active_bot_players(
+                    db, bot_id, config.BOT_ACTIVE_WINDOW_MINUTES
+                )
+                effective_time_budget = base_time_budget / n_active
+                persona_params = {**bot_params, "time_budget": effective_time_budget}
+
+                state_data = game["state"]
+                if isinstance(state_data, str):
+                    state_data = json.loads(state_data)
+                state, id_map = state_from_dict(state_data)
+
+                bot_state_dict = player_view_of_state(state, state.active_player, id_map)
+                expected_turn_number = game["turn_number"]
+                expected_bot_side = game["bot_side"]
+    except Exception:
+        logger.exception("Bot move T2a failed for game %s", game_id)
+        return
+
+    # ----- Engine call: no DB connection held -----
+    try:
+        bot_move_raw = await call_bot_move(
+            app.state.engine_client, bot_state_dict, persona_params
+        )
+    except Exception:
+        logger.exception("Engine call failed for game %s", game_id)
+        return
+
+    # ----- T2b: re-validate against T2a snapshot, then apply -----
+    # TRADE and other "free" actions keep whose_turn with the bot. Track whether
+    # we need to re-queue ourselves after the transaction commits.
+    continue_bot = False
+    try:
+        async with pool.acquire() as db:
+            async with db.transaction():
+                game2 = await game_q.get_game_for_move(db, game_id)
+                if game2 is None:
+                    logger.warning(
+                        "Bot move dropped (T2b): game %s disappeared after engine call",
+                        game_id,
+                    )
+                    return
+                if game2["status"] != "active":
+                    logger.info(
+                        "Bot move dropped (T2b): game %s status changed to %s "
+                        "during engine call",
+                        game_id, game2["status"],
+                    )
+                    return
+                if game2["whose_turn"] != expected_bot_side:
+                    logger.warning(
+                        "Bot move dropped (T2b): game %s whose_turn=%s (expected %s)",
+                        game_id, game2["whose_turn"], expected_bot_side,
+                    )
+                    return
+                if game2["turn_number"] != expected_turn_number:
+                    logger.warning(
+                        "Bot move dropped (T2b): game %s turn_number=%d "
+                        "(expected %d; concurrent application)",
+                        game_id, game2["turn_number"], expected_turn_number,
+                    )
+                    return
+
+                state_data2 = game2["state"]
+                if isinstance(state_data2, str):
+                    state_data2 = json.loads(state_data2)
+                state2, id_map2 = state_from_dict(state_data2)
+
+                try:
+                    bot_move = Move(
+                        piece_row=bot_move_raw["piece_row"],
+                        piece_col=bot_move_raw["piece_col"],
+                        action_type=ActionType[bot_move_raw["action_type"]],
+                        target_row=bot_move_raw["target_row"],
+                        target_col=bot_move_raw["target_col"],
+                        secondary_row=bot_move_raw.get("secondary_row"),
+                        secondary_col=bot_move_raw.get("secondary_col"),
+                        move_slot=bot_move_raw.get("move_slot"),
+                        overflow_keep=bot_move_raw.get("overflow_keep"),
+                        overflow_drop_row=bot_move_raw.get("overflow_drop_row"),
+                        overflow_drop_col=bot_move_raw.get("overflow_drop_col"),
+                    )
+                except (KeyError, TypeError) as exc:
+                    logger.error("Bot move parse error for game %s: %s", game_id, exc)
+                    return
+
+                bot_legal = get_legal_moves(state2)
+                if not any(_moves_equal(bot_move, lm) for lm in bot_legal):
+                    logger.error("Engine returned illegal move for game %s", game_id)
+                    return
+
+                new_state, id_map2, bot_entries, done, winner_side = _apply_and_record(
+                    state2, bot_move, id_map2,
+                )
+
+                final_status = "complete" if done else "active"
+                final_whose_turn = new_state.active_player.name.lower()
+                final_turn = new_state.turn_number
+                end_reason = None
+                if done:
+                    end_reason = "draw" if winner_side == "draw" else "king_eliminated"
+
+                final_state_dict = state_to_dict(new_state, id_map2)
+
+                await game_q.update_game_state(
+                    db,
+                    game_id,
+                    state_json=json.dumps(final_state_dict),
+                    new_history_json=json.dumps(bot_entries),
+                    whose_turn=final_whose_turn,
+                    turn_number=final_turn,
+                    status=final_status,
+                    winner=winner_side if done and winner_side != "draw" else None,
+                    end_reason=end_reason,
+                )
+
+                if done:
+                    full_history = game2.get("move_history") or []
+                    if isinstance(full_history, str):
+                        full_history = json.loads(full_history)
+                    full_history.extend(bot_entries)
+                    xp_map = compute_xp(full_history)
+                    if xp_map:
+                        await update_xp_earned(
+                            db, game_id, xp_map,
+                            winner_side if winner_side != "draw" else None,
+                            end_reason,
+                        )
+                elif final_whose_turn == expected_bot_side:
+                    continue_bot = True
+    except Exception:
+        logger.exception("Bot move T2b failed for game %s", game_id)
+        return
+
+    if continue_bot:
+        # Schedule the follow-up as a detached task so this coroutine returns
+        # promptly (letting BackgroundTasks release its slot) and the new call
+        # starts its own T2a snapshot. run_bot_move is idempotent, so a spurious
+        # schedule (e.g. the human already moved in parallel) is a no-op.
+        # Note: this task is not tracked by FastAPI — if the server shuts down
+        # mid-execution the continuation is lost. The frontend's 15s retry
+        # endpoint is the recovery path for that window.
+        asyncio.create_task(run_bot_move(app, game_id, user_id))
+
+
 @router.post("/{game_id}/move", response_model=GameDetail)
 async def submit_move(
     game_id: UUID,
@@ -254,17 +441,12 @@ async def submit_move(
     user: CurrentUser,
     db: Db,
     request: Request,
+    background_tasks: BackgroundTasks,
 ):
+    # Track whether a bot move needs to be scheduled after the transaction commits.
+    bot_move_needed = False
+
     async with db.transaction():
-        # FOR UPDATE lock on the game row is held for the full duration of this
-        # transaction, including the async bot HTTP call (up to engine_timeout +
-        # MCTS time_budget, potentially ~10s at max difficulty). This is
-        # intentional: it guarantees that state reads, move application, and the
-        # final write are atomic and that no two moves can be applied to the same
-        # game concurrently. At current scale (single EC2 box, one game per
-        # user) the tail-latency impact is acceptable. If concurrent PvP volume
-        # grows, consider splitting into two transactions with an optimistic
-        # re-check before the bot call.
         game = await game_q.get_game_for_move(db, game_id)
         if game is None:
             raise AppError(404, "not_found", "Game not found")
@@ -279,86 +461,25 @@ async def submit_move(
         if game["whose_turn"] != team.name.lower():
             raise AppError(409, "not_your_turn", "It is not your turn")
 
-        # Parse the submitted move
         try:
             move = _parse_move(body)
         except KeyError:
             raise AppError(400, "bad_request", f"Invalid action_type: {body.action_type}")
 
-        # Deserialize state
         state_data = game["state"]
         if isinstance(state_data, str):
             state_data = json.loads(state_data)
         state, id_map = state_from_dict(state_data)
 
-        # Validate move is legal
         legal = get_legal_moves(state)
         if not any(_moves_equal(move, lm) for lm in legal):
             raise AppError(400, "illegal_move", "Move is not legal in current state")
 
-        # Apply human move
+        # Apply human move only.
         all_history = []
         new_state, id_map, entries, done, winner_side = _apply_and_record(state, move, id_map)
         all_history.extend(entries)
 
-        # PvB: if game is not over and it's now the bot's turn, get and apply bot move
-        if not done and game["is_bot_game"] and game["bot_side"] == new_state.active_player.name.lower():
-            from ..engine_client import request_bot_move
-            from ..db.queries.bot_activity import count_active_bot_players, upsert_player_activity
-            from .. import config
-
-            bot_id = game["bot_id"]
-            bot_params = game.get("bot_params") or {}
-            if not isinstance(bot_params, dict):
-                bot_params = {}
-
-            base_time_budget = float(bot_params.get("time_budget", 3.0))
-
-            # Record this player's move before counting so they're included in N.
-            await upsert_player_activity(db, user["id"], bot_id)
-
-            # Load-aware scaling: divide the base budget across all players
-            # concurrently active against this bot personality so no single game
-            # gets an outsized share of MCTS compute.
-            n_active = await count_active_bot_players(
-                db, bot_id, config.BOT_ACTIVE_WINDOW_MINUTES
-            )
-            effective_time_budget = base_time_budget / n_active
-
-            # Build persona_params: start from stored bot config, override
-            # time_budget with the load-adjusted value.
-            persona_params = {**bot_params, "time_budget": effective_time_budget}
-
-            bot_state_dict = player_view_of_state(new_state, new_state.active_player, id_map)
-            bot_move_raw = await request_bot_move(request, bot_state_dict, persona_params)
-
-            try:
-                bot_move = Move(
-                    piece_row=bot_move_raw["piece_row"],
-                    piece_col=bot_move_raw["piece_col"],
-                    action_type=ActionType[bot_move_raw["action_type"]],
-                    target_row=bot_move_raw["target_row"],
-                    target_col=bot_move_raw["target_col"],
-                    secondary_row=bot_move_raw.get("secondary_row"),
-                    secondary_col=bot_move_raw.get("secondary_col"),
-                    move_slot=bot_move_raw.get("move_slot"),
-                    overflow_keep=bot_move_raw.get("overflow_keep"),
-                    overflow_drop_row=bot_move_raw.get("overflow_drop_row"),
-                    overflow_drop_col=bot_move_raw.get("overflow_drop_col"),
-                )
-            except (KeyError, TypeError):
-                raise AppError(503, "engine_error", "Engine returned an invalid move")
-
-            bot_legal = get_legal_moves(new_state)
-            if not any(_moves_equal(bot_move, lm) for lm in bot_legal):
-                raise AppError(503, "engine_error", "Engine returned an illegal move")
-
-            new_state, id_map, bot_entries, done, winner_side = _apply_and_record(
-                new_state, bot_move, id_map,
-            )
-            all_history.extend(bot_entries)
-
-        # Determine final game status
         final_status = "complete" if done else "active"
         final_whose_turn = new_state.active_player.name.lower()
         final_turn = new_state.turn_number
@@ -366,10 +487,8 @@ async def submit_move(
         if done:
             end_reason = "draw" if winner_side == "draw" else "king_eliminated"
 
-        # Serialize final state
         final_state_dict = state_to_dict(new_state, id_map)
 
-        # Persist state + XP atomically within the same transaction
         await game_q.update_game_state(
             db,
             game_id,
@@ -382,7 +501,6 @@ async def submit_move(
             end_reason=end_reason,
         )
 
-        # On game completion: process XP (inside same transaction)
         if done:
             full_history = game.get("move_history") or []
             if isinstance(full_history, str):
@@ -396,6 +514,51 @@ async def submit_move(
                     end_reason,
                 )
 
-    # Fetch updated game for response (outside transaction — read committed)
+        if not done and game["is_bot_game"] and game["bot_side"] == final_whose_turn:
+            bot_move_needed = True
+
+    # Schedule bot move outside the transaction so T1 is committed before the
+    # engine call begins.  The background task re-acquires its own connection
+    # and transaction, and is idempotent.
+    if bot_move_needed:
+        background_tasks.add_task(run_bot_move, request.app, game_id, user["id"])
+
+    # Fetch updated game for response (read committed — reflects human move).
     updated = await game_q.get_game(db, game_id)
-    return _game_detail(updated, team.name)
+    return game_dict_to_detail(updated, user_team_name(updated, user["id"]))
+
+
+@router.post("/{game_id}/retry-bot-move", status_code=202)
+async def retry_bot_move(
+    game_id: UUID,
+    user: CurrentUser,
+    db: Db,
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
+    """
+    Re-queue the bot move for a game stuck with whose_turn == bot_side.
+
+    Called automatically by the frontend after ~15 seconds if the bot move
+    hasn't arrived via polling.  Idempotent: run_bot_move exits silently if
+    it's no longer the bot's turn.
+    """
+    game = await game_q.get_game(db, game_id)
+    if game is None:
+        raise AppError(404, "not_found", "Game not found")
+
+    team = _player_team(game, user["id"])
+    if team is None:
+        raise AppError(403, "forbidden", "Not a participant in this game")
+
+    if game["status"] != "active":
+        raise AppError(409, "game_not_active", "Game is not active")
+
+    if not game["is_bot_game"]:
+        raise AppError(409, "not_bot_game", "Not a bot game")
+
+    if game["whose_turn"] != game["bot_side"]:
+        raise AppError(409, "not_bot_turn", "It is not the bot's turn")
+
+    background_tasks.add_task(run_bot_move, request.app, game_id, user["id"])
+    return {"status": "queued"}

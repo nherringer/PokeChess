@@ -50,6 +50,7 @@ class Item(Enum):
     LEAFSTONE    = auto()
     THUNDERSTONE = auto()
     BENTSPOON    = auto()
+    UNKNOWN      = auto()  # sentinel: opponent holds an item but its identity is hidden
 
 
 class PokemonType(Enum):

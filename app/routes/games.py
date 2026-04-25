@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks, Request
 
 from engine.state import GameState
 
@@ -11,52 +11,17 @@ from ..auth import Db, CurrentUser
 from ..main import AppError
 from ..personas import get_persona
 from ..schemas import CreateGameRequest, GameDetail, GameSummary, GamesListResponse
-from ..game_logic.serialization import state_to_dict, mask_state_dict, mask_history_foresight
+from ..game_logic.game_detail import game_dict_to_detail, user_team_name
+from ..game_logic.serialization import state_to_dict
 from ..game_logic.roster import ensure_roster, build_id_map, create_game_pokemon_map
 from ..db.queries import games as game_q
+from .moves import run_bot_move
 
 router = APIRouter(prefix="/games", tags=["games"])
 
 
 def _user_is_participant(game: dict, user_id: UUID) -> bool:
     return user_id in (game.get("red_player_id"), game.get("blue_player_id"))
-
-
-def _user_team_name(game: dict, user_id) -> str | None:
-    if game.get("red_player_id") == user_id:
-        return "RED"
-    if game.get("blue_player_id") == user_id:
-        return "BLUE"
-    return None
-
-
-def _game_detail(game: dict, team_name: str | None = None) -> GameDetail:
-    state = game.get("state")
-    history = game.get("move_history")
-    # asyncpg returns JSONB as dicts/lists directly
-    if isinstance(state, str):
-        state = json.loads(state)
-    if isinstance(history, str):
-        history = json.loads(history)
-    if state is not None and team_name is not None:
-        state = mask_state_dict(state, team_name)
-    if history is not None and team_name is not None:
-        history = mask_history_foresight(history, team_name)
-    return GameDetail(
-        id=game["id"],
-        status=game["status"],
-        whose_turn=game.get("whose_turn"),
-        turn_number=game["turn_number"],
-        is_bot_game=game["is_bot_game"],
-        bot_side=game.get("bot_side"),
-        red_player_id=game.get("red_player_id"),
-        blue_player_id=game.get("blue_player_id"),
-        winner=game.get("winner"),
-        end_reason=game.get("end_reason"),
-        state=state,
-        move_history=history if history else [],
-        my_side=team_name.lower() if team_name else None,
-    )
 
 
 @router.get("", response_model=GamesListResponse)
@@ -69,7 +34,13 @@ async def list_games(user: CurrentUser, db: Db):
 
 
 @router.post("", status_code=201, response_model=GameDetail)
-async def create_game(body: CreateGameRequest, user: CurrentUser, db: Db):
+async def create_game(
+    body: CreateGameRequest,
+    user: CurrentUser,
+    db: Db,
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
     if body.player_side not in ("red", "blue"):
         raise AppError(400, "bad_request", "player_side must be 'red' or 'blue'")
 
@@ -109,8 +80,18 @@ async def create_game(body: CreateGameRequest, user: CurrentUser, db: Db):
 
         await create_game_pokemon_map(db, game["id"], id_map)
 
+    # insert_game doesn't join bots; inject bot_name so game_dict_to_detail populates it.
+    game["bot_name"] = bot["name"]
+
+    # Games always start with whose_turn='red'. When the bot is Red, schedule
+    # its opening move immediately — otherwise the client sits on the bot's
+    # turn until the 15s frontend retry fires.
+    if bot_side == "red":
+        background_tasks.add_task(run_bot_move, request.app, game["id"], user["id"])
+
+
     team_name = "RED" if body.player_side == "red" else "BLUE"
-    return _game_detail(game, team_name)
+    return game_dict_to_detail(game, team_name)
 
 
 @router.get("/{game_id}", response_model=GameDetail)
@@ -120,7 +101,7 @@ async def get_game(game_id: UUID, user: CurrentUser, db: Db):
         raise AppError(404, "not_found", "Game not found")
     if not _user_is_participant(game, user["id"]):
         raise AppError(403, "forbidden", "Not a participant in this game")
-    return _game_detail(game, _user_team_name(game, user["id"]))
+    return game_dict_to_detail(game, user_team_name(game, user["id"]))
 
 
 @router.post("/{game_id}/resign", response_model=GameDetail)
@@ -152,4 +133,4 @@ async def resign_game(game_id: UUID, user: CurrentUser, db: Db):
             await update_xp_earned(db, game_id, xp_map, winner, "resign")
 
     updated = await game_q.get_game(db, game_id)
-    return _game_detail(updated, _user_team_name(updated, user["id"]))
+    return game_dict_to_detail(updated, user_team_name(updated, user["id"]))

@@ -20,3 +20,7 @@ export async function submitMove(
     body: JSON.stringify(payload),
   });
 }
+
+export async function retryBotMove(gameId: string): Promise<void> {
+  await apiFetch<unknown>(`/games/${gameId}/retry-bot-move`, { method: "POST" });
+}

@@ -45,10 +45,14 @@ async def insert_game(
 async def get_game(db: asyncpg.Connection, game_id: UUID) -> dict | None:
     row = await db.fetchrow(
         """
-        SELECT id, status, whose_turn, turn_number, is_bot_game, bot_side, bot_id,
-               red_player_id, blue_player_id, winner, end_reason,
-               state, move_history, created_at, updated_at
-        FROM games WHERE id = $1
+        SELECT g.id, g.status, g.whose_turn, g.turn_number,
+               g.is_bot_game, g.bot_side, g.bot_id,
+               g.red_player_id, g.blue_player_id, g.winner, g.end_reason,
+               g.state, g.move_history, g.created_at, g.updated_at,
+               b.name AS bot_name
+        FROM games g
+        LEFT JOIN bots b ON b.id = g.bot_id
+        WHERE g.id = $1
         """,
         game_id,
     )
@@ -67,6 +71,7 @@ async def get_game_for_move(db: asyncpg.Connection, game_id: UUID) -> dict | Non
                g.is_bot_game, g.bot_side, g.bot_id,
                g.red_player_id, g.blue_player_id,
                g.state, g.move_history,
+               b.name AS bot_name,
                b.params AS bot_params
         FROM games g
         LEFT JOIN bots b ON b.id = g.bot_id
