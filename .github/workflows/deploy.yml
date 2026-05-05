@@ -6,12 +6,14 @@
 #
 # Required GitHub configuration (Settings → Secrets and variables → Actions):
 #   Secrets:
-#     AWS_BACKEND_DEPLOY_ROLE_ARN                 — CI app deploy role ARN       (terraform output ci_app_deploy_role_arn)
-#     ECR_APP_REPO                 — ECR repo URL for pokechess-app    (terraform output ecr_app_repo_url)
-#     ECR_ENGINE_REPO              — ECR repo URL for pokechess-engine  (terraform output ecr_engine_repo_url)
+#     AWS_BACKEND_DEPLOY_ROLE_ARN  — CI app deploy role ARN       (terraform output ci_app_deploy_role_arn)
 #     AWS_FRONTEND_DEPLOY_ROLE_ARN — CI frontend deploy role ARN  (terraform output ci_app_frontend_deploy_role_arn)
 #     FRONTEND_BUCKET_NAME         — S3 bucket for frontend assets (terraform output frontend_bucket_name)
 #     CLOUDFRONT_DISTRIBUTION_ID   — CloudFront distribution ID   (terraform output cloudfront_distribution_id)
+#   Variables:
+#     ECR_APP_REPO    — ECR repo URL for pokechess-app    (terraform output ecr_app_repo_url)
+#     ECR_ENGINE_REPO — ECR repo URL for pokechess-engine (terraform output ecr_engine_repo_url)
+#     ECR_NGINX_REPO  — ECR repo URL for pokechess-nginx  (terraform output ecr_nginx_repo_url)
 #
 # All values come from the Terraform-PokeChess infrastructure repo (terraform output / console).
 # All roles use GitHub OIDC — no long-lived AWS keys are stored.
@@ -55,10 +57,11 @@ jobs:
               - 'setup.py'
               - 'Dockerfile.app'
               - 'Dockerfile.engine'
+              - 'nginx/**'
             frontend:
               - 'frontend/**'
 
-  # ── pokechess-app ────────────────────────────────────────────────────────────
+  # ── pokechess-app + pokechess-nginx ──────────────────────────────────────────
   deploy-app:
     name: App — build / push / deploy
     needs: [changes]
@@ -83,8 +86,8 @@ jobs:
       - name: Build app image (push)
         if: github.event_name == 'push'
         env:
-          IMAGE_SHA: ${{ secrets.ECR_APP_REPO }}:${{ github.sha }}
-          IMAGE_LATEST: ${{ secrets.ECR_APP_REPO }}:latest
+          IMAGE_SHA: ${{ vars.ECR_APP_REPO }}:${{ github.sha }}
+          IMAGE_LATEST: ${{ vars.ECR_APP_REPO }}:latest
         run: |
           docker build -f Dockerfile.app -t "$IMAGE_SHA" -t "$IMAGE_LATEST" .
 
@@ -93,11 +96,33 @@ jobs:
         run: |
           docker build -f Dockerfile.app -t pokechess-app:ci .
 
+      - name: Build nginx image (push)
+        if: github.event_name == 'push'
+        env:
+          IMAGE_SHA: ${{ vars.ECR_NGINX_REPO }}:${{ github.sha }}
+          IMAGE_LATEST: ${{ vars.ECR_NGINX_REPO }}:latest
+        run: |
+          docker build -t "$IMAGE_SHA" -t "$IMAGE_LATEST" nginx/
+
+      - name: Build nginx image (PR — no registry tags)
+        if: github.event_name == 'pull_request'
+        run: |
+          docker build -t pokechess-nginx:ci nginx/
+
       - name: Push app image to ECR
         if: github.event_name == 'push'
         env:
-          IMAGE_SHA: ${{ secrets.ECR_APP_REPO }}:${{ github.sha }}
-          IMAGE_LATEST: ${{ secrets.ECR_APP_REPO }}:latest
+          IMAGE_SHA: ${{ vars.ECR_APP_REPO }}:${{ github.sha }}
+          IMAGE_LATEST: ${{ vars.ECR_APP_REPO }}:latest
+        run: |
+          docker push "$IMAGE_SHA"
+          docker push "$IMAGE_LATEST"
+
+      - name: Push nginx image to ECR
+        if: github.event_name == 'push'
+        env:
+          IMAGE_SHA: ${{ vars.ECR_NGINX_REPO }}:${{ github.sha }}
+          IMAGE_LATEST: ${{ vars.ECR_NGINX_REPO }}:latest
         run: |
           docker push "$IMAGE_SHA"
           docker push "$IMAGE_LATEST"
@@ -110,20 +135,29 @@ jobs:
             --query taskDefinition \
             --output json > task-def-app.json
 
-      - name: Render updated app task definition
+      - name: Render app container in task definition
         if: github.event_name == 'push'
-        id: render-app
+        id: render-app-container
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
           task-definition: task-def-app.json
           container-name: pokechess-app
-          image: ${{ secrets.ECR_APP_REPO }}:${{ github.sha }}
+          image: ${{ vars.ECR_APP_REPO }}:${{ github.sha }}
+
+      - name: Render nginx container in task definition
+        if: github.event_name == 'push'
+        id: render-nginx-container
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ steps.render-app-container.outputs.task-definition }}
+          container-name: pokechess-nginx
+          image: ${{ vars.ECR_NGINX_REPO }}:${{ github.sha }}
 
       - name: Deploy app to ECS
         if: github.event_name == 'push'
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
-          task-definition: ${{ steps.render-app.outputs.task-definition }}
+          task-definition: ${{ steps.render-nginx-container.outputs.task-definition }}
           service: pokechess-app
           cluster: ${{ env.ECS_CLUSTER }}
           # Waits for the service to reach steady state before marking the step
@@ -160,8 +194,8 @@ jobs:
       - name: Build engine image (push)
         if: github.event_name == 'push'
         env:
-          IMAGE_SHA: ${{ secrets.ECR_ENGINE_REPO }}:${{ github.sha }}
-          IMAGE_LATEST: ${{ secrets.ECR_ENGINE_REPO }}:latest
+          IMAGE_SHA: ${{ vars.ECR_ENGINE_REPO }}:${{ github.sha }}
+          IMAGE_LATEST: ${{ vars.ECR_ENGINE_REPO }}:latest
         run: |
           docker build -f Dockerfile.engine -t "$IMAGE_SHA" -t "$IMAGE_LATEST" .
 
@@ -173,8 +207,8 @@ jobs:
       - name: Push engine image to ECR
         if: github.event_name == 'push'
         env:
-          IMAGE_SHA: ${{ secrets.ECR_ENGINE_REPO }}:${{ github.sha }}
-          IMAGE_LATEST: ${{ secrets.ECR_ENGINE_REPO }}:latest
+          IMAGE_SHA: ${{ vars.ECR_ENGINE_REPO }}:${{ github.sha }}
+          IMAGE_LATEST: ${{ vars.ECR_ENGINE_REPO }}:latest
         run: |
           docker push "$IMAGE_SHA"
           docker push "$IMAGE_LATEST"
@@ -194,7 +228,7 @@ jobs:
         with:
           task-definition: task-def-engine.json
           container-name: pokechess-engine
-          image: ${{ secrets.ECR_ENGINE_REPO }}:${{ github.sha }}
+          image: ${{ vars.ECR_ENGINE_REPO }}:${{ github.sha }}
 
       - name: Deploy engine to ECS
         if: github.event_name == 'push'
